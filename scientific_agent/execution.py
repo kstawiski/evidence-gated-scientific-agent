@@ -559,7 +559,13 @@ def sandbox_preflight(settings: SandboxSettings, workspace: Path | None = None) 
         "rscript": settings.rscript,
         "r_library": settings.r_library,
     }
-    missing = [name for name, path in paths.items() if not path.exists()]
+    # A remote worker owns its runtime paths; the execution probe below is the
+    # authoritative check. Local path existence matters only for in-process mode.
+    missing = (
+        []
+        if settings.worker_url
+        else [name for name, path in paths.items() if not path.exists()]
+    )
     result = {
         "paths": {name: str(path) for name, path in paths.items()},
         "missing_required": missing,

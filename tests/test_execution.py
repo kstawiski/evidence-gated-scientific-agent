@@ -51,10 +51,16 @@ def test_remote_preflight_uses_managed_worker_paths(tmp_path, monkeypatch):
     monkeypatch.setenv("SCIENTIFIC_AGENT_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(RemoteAnalysisExecutor, "execute", execute)
     settings = replace(
-        SandboxSettings(), worker_url="http://sandbox:8090", worker_token="x" * 32
+        SandboxSettings(),
+        worker_url="http://sandbox:8090",
+        worker_token="x" * 32,
+        bwrap=tmp_path / "missing-bwrap",
+        python=tmp_path / "missing-python",
+        rscript=tmp_path / "missing-rscript",
     )
     result = sandbox_preflight(settings)
 
+    assert result["missing_required"] == []
     assert result["probes"] == {"python": "succeeded", "r": "succeeded"}
     assert [item[0] for item in calls] == ["python", "r"]
     assert all(item[1].parts[-1] == "files" for item in calls)

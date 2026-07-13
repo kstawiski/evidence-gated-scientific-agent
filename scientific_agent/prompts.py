@@ -7,6 +7,14 @@ scientific risk, and security risk. Unknown requirements stay explicit. Your
 plan_label must be A. Do not invent data or sources. Use at most three concise
 steps and one short sentence per list item."""
 
+SIMPLE_PLANNER = """Create one lean, executable PlanProposal for a bounded
+scientific task. Use plan_label MASTER. Prefer one step and never exceed two.
+Request each tool at most once unless a deterministic validator requires a
+different computation. Declare only outputs the task actually needs. Include
+concrete validators and stop conditions, preserve unknowns, and avoid provenance,
+ledger, packaging, or report-generation steps because the controller supplies
+those automatically. Return PlanProposal only."""
+
 PLANNER_B = """You are Plan B, an independent methodological planner and critic.
 Work without knowledge of Plan A. Prefer finding leakage, post-hoc choices,
 missing controls, alternative explanations, and reproducibility failures. Return

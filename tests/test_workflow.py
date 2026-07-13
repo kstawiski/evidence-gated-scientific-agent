@@ -8,6 +8,7 @@ from scientific_agent.schemas import (
     VerificationReport,
 )
 from scientific_agent.workflow import (
+    build_simple_planning,
     build_planning_workflow,
     merge_and_lint,
     package_planning,
@@ -75,3 +76,19 @@ def test_evidence_pending_plan_can_reach_retrieval():
         }
     )
     assert result.status == "supported"
+
+
+def test_simple_planning_uses_one_qwen_request(monkeypatch):
+    calls = []
+
+    async def fake_request(*_args, **kwargs):
+        calls.append(kwargs["system_prompt"])
+        return _plan("MASTER")
+
+    monkeypatch.setattr("scientific_agent.workflow.request_structured", fake_request)
+    import asyncio
+
+    result = asyncio.run(build_simple_planning(Settings(), _task()))
+    assert result.status == "supported"
+    assert len(calls) == 1
+    assert result.audit.verdict == "pass"

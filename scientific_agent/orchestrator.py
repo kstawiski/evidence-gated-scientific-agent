@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
@@ -38,7 +39,7 @@ from .schemas import (
     ScientificReport,
     VerificationReport,
 )
-from .workflow import build_planning_workflow, normalize_task
+from .workflow import build_planning_workflow, build_simple_planning, normalize_task
 from .workspace_tools import build_workspace_tools
 from .structured_client import request_structured
 
@@ -170,6 +171,7 @@ async def _produce_report(
     evidence_dir: Path | None = None,
     enable_code: bool = False,
     computation_dir: Path | None = None,
+    simple_mode: bool = False,
 ) -> tuple[ScientificReport, RetrievalEvidence, ComputationEvidence]:
     toolsets = build_mcp_toolsets(settings, mcp_names) if mcp_names else []
     workspace_tools = build_workspace_tools(settings.workspace)
@@ -178,10 +180,15 @@ async def _produce_report(
     if enable_code:
         if computation_dir is None:
             raise ValueError("computation_dir is required when code execution is enabled")
+        sandbox = (
+            replace(settings.sandbox, max_calls_per_attempt=2, max_wall_seconds=120)
+            if simple_mode
+            else settings.sandbox
+        )
         executor = AnalysisExecutor(
             settings.workspace,
             computation_dir,
-            settings.sandbox,
+            sandbox,
         )
         analysis_tools = build_analysis_tools(executor)
     policy = ToolPolicy(
@@ -198,8 +205,8 @@ async def _produce_report(
         model=qwen_model(
             settings,
             temperature=0.3 if repairing else 0.6,
-            max_tokens=4000,
-            timeout=240,
+            max_tokens=2600 if simple_mode else 4000,
+            timeout=120 if simple_mode else 240,
         ),
         instruction=RESEARCHER,
         tools=[*workspace_tools, *analysis_tools, *toolsets],
@@ -270,8 +277,8 @@ async def _produce_report(
         payload=report_payload,
         output_type=ScientificReport,
         temperature=0.2 if repairing else 0.4,
-        max_tokens=5000,
-        timeout=180,
+        max_tokens=3000 if simple_mode else 5000,
+        timeout=90 if simple_mode else 180,
         enable_thinking=False,
     )
     return report, retrieval, computation
@@ -284,6 +291,7 @@ async def _audit_report(
     validation,
     retrieval: RetrievalEvidence,
     computation: ComputationEvidence,
+    simple_mode: bool = False,
 ) -> VerificationReport:
     payload = {
         "task": planning.master_plan.task.model_dump(mode="json"),
@@ -303,8 +311,8 @@ async def _audit_report(
         payload=payload,
         output_type=VerificationReport,
         temperature=0.3,
-        max_tokens=1600,
-        timeout=150,
+        max_tokens=1000 if simple_mode else 1600,
+        timeout=90 if simple_mode else 150,
         enable_thinking=False,
     )
 
@@ -316,6 +324,7 @@ async def run_scientific_task(
     mcp_names: tuple[str, ...] | None = None,
     include_chrome: bool = False,
     enable_code: bool = False,
+    simple_mode: bool = False,
     progress: Callable[[str, str], None] | None = None,
 ) -> RunResult:
     def report_progress(phase: str, message: str) -> None:
@@ -342,7 +351,12 @@ async def run_scientific_task(
         },
     )
     selected_mcp = mcp_names if mcp_names is not None else settings.mcp_servers
-    report_progress("planning", "Qwen and Gemma are preparing independent plans")
+    report_progress(
+        "planning",
+        "Qwen is preparing one lean plan"
+        if simple_mode
+        else "Qwen and Gemma are preparing independent plans",
+    )
     write_json(
         run_dir / "run_configuration.json",
         {
@@ -372,10 +386,10 @@ async def run_scientific_task(
                 else {"enabled": False}
             ),
             "max_repair_rounds": settings.max_repair_rounds,
+            "execution_mode": "simple" if simple_mode else "full",
         },
     )
 
-    workflow = build_planning_workflow(settings)
     planning_input = objective
     if enable_code:
         task = normalize_task(objective)
@@ -406,8 +420,12 @@ async def run_scientific_task(
             }
         )
         planning_input = task.model_dump_json()
-    planning = await run_typed(workflow, planning_input, PlanningResult)
-    if planning.status == "requires_revision":
+    if simple_mode:
+        planning = await build_simple_planning(settings, normalize_task(planning_input))
+    else:
+        workflow = build_planning_workflow(settings)
+        planning = await run_typed(workflow, planning_input, PlanningResult)
+    if planning.status == "requires_revision" and not simple_mode:
         report_progress("plan-review", "The plan audit found a concrete issue; repairing it")
         ledger.append("plan_repair_started", {"reason": planning.audit.verdict})
         planning = await _repair_plan(settings, planning)
@@ -435,16 +453,20 @@ async def run_scientific_task(
         evidence_dir=run_dir / "evidence" / "attempt-0",
         enable_code=enable_code,
         computation_dir=run_dir / "computations" / "attempt-0",
+        simple_mode=simple_mode,
     )
     report_progress("validation", "Running deterministic claim and artifact checks")
     validation = validate_report(report, retrieval, computation)
     report_progress("scientific-review", "Gemma is independently auditing the result")
     review = await _audit_report(
-        settings, planning, report, validation, retrieval, computation
+        settings, planning, report, validation, retrieval, computation, simple_mode
     )
     repair_rounds = 0
     while (
-        (not validation.passed or review.verdict in {"fail", "inconclusive"})
+        (
+            not validation.passed
+            or (not simple_mode and review.verdict in {"fail", "inconclusive"})
+        )
         and repair_rounds < settings.max_repair_rounds
     ):
         repair_rounds += 1
@@ -474,6 +496,7 @@ async def run_scientific_task(
             computation_dir=(
                 run_dir / "computations" / f"attempt-{repair_rounds}"
             ),
+            simple_mode=simple_mode,
         )
         retrieval = RetrievalEvidence(
             successful_calls=retrieval.successful_calls
@@ -496,7 +519,7 @@ async def run_scientific_task(
         validation = validate_report(report, retrieval, computation)
         report_progress("scientific-review", "Gemma is auditing the repaired result")
         review = await _audit_report(
-            settings, planning, report, validation, retrieval, computation
+            settings, planning, report, validation, retrieval, computation, simple_mode
         )
 
     if validation.passed and review.verdict == "pass":

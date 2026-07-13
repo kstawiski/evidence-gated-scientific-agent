@@ -125,9 +125,14 @@ uv run scientific-agent run \
   - < /private/task.txt
 
 uv run scientific-agent run \
-  --enable-code --mcp '' \
+  --mode simple --enable-code --mcp '' \
   "Analyze data/cohort.csv in Python, independently check group summaries in R, and save result tables"
 ```
+
+`--mode simple` is the default for bounded retrieval, calculation, and evidence
+extraction: one Qwen plan/execution path, deterministic validation, and one final
+Gemma audit. It does not run dual plans or retry merely because the critic
+disagrees. Use `--mode full` only for a genuinely multi-stage scientific design.
 
 The sandboxed Python runtime currently exposes NumPy, pandas, SciPy, statsmodels,
 scikit-learn, and matplotlib. The R runtime exposes the installed base packages

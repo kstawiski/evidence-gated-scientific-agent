@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from scientific_agent.config import SandboxSettings
-from scientific_agent.execution import AnalysisExecutor
+from scientific_agent.execution import AnalysisExecutor, sandbox_preflight
 
 
 def _executor(tmp_path: Path, **overrides) -> AnalysisExecutor:
@@ -12,6 +12,34 @@ def _executor(tmp_path: Path, **overrides) -> AnalysisExecutor:
     workspace.mkdir(parents=True)
     settings = replace(SandboxSettings(), **overrides)
     return AnalysisExecutor(workspace, tmp_path / "computations", settings)
+
+
+def test_preflight_probes_advertised_python_and_r_packages(tmp_path, monkeypatch):
+    seen: list[tuple[str, str]] = []
+
+    class FakeExecutor:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def execute(self, language, code, **_kwargs):
+            seen.append((language, code))
+            return {"status": "succeeded"}
+
+    monkeypatch.setattr("scientific_agent.execution.AnalysisExecutor", FakeExecutor)
+    paths = {}
+    for name in ("bwrap", "prlimit", "python", "rscript"):
+        path = tmp_path / name
+        path.touch()
+        paths[name] = path
+    for name in ("python_prefix", "python_packages", "r_library"):
+        path = tmp_path / name
+        path.mkdir()
+        paths[name] = path
+    settings = replace(SandboxSettings(), **paths)
+    result = sandbox_preflight(settings, tmp_path)
+    assert result["probes"] == {"python": "succeeded", "r": "succeeded"}
+    assert "import matplotlib,numpy,pandas,scipy,sklearn,statsmodels" in seen[0][1]
+    assert "ggplot2" in seen[1][1] and "data.table" in seen[1][1]
 
 
 @pytest.mark.live

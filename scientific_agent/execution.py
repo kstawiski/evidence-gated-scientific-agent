@@ -460,12 +460,19 @@ def sandbox_preflight(settings: SandboxSettings, workspace: Path | None = None) 
         )
         python_probe = executor.execute(
             "python",
-            "open('/output/python-ok.txt', 'w').write('ok')",
+            (
+                "import matplotlib,numpy,pandas,scipy,sklearn,statsmodels;"
+                "open('/output/python-ok.txt', 'w').write('ok')"
+            ),
             timeout_seconds=15,
         )
         r_probe = executor.execute(
             "r",
-            "writeLines('ok', '/output/r-ok.txt')",
+            (
+                "stopifnot(all(vapply(c('ggplot2','dplyr','survival','data.table'), "
+                "requireNamespace, logical(1), quietly=TRUE)));"
+                "writeLines('ok', '/output/r-ok.txt')"
+            ),
             timeout_seconds=15,
         )
     result["probes"] = {

@@ -137,7 +137,9 @@ disagrees. Use `--mode full` only for a genuinely multi-stage scientific design.
 The sandboxed Python runtime currently exposes NumPy, pandas, SciPy, statsmodels,
 scikit-learn, and matplotlib. The R runtime exposes the installed base packages
 plus ggplot2, dplyr, survival, and data.table. Scripts read the repository at
-`/workspace` and must write outputs below `/output`. Each call is isolated, offline,
+`/workspace` and must write outputs below `/output`. Code-enabled preflight
+imports the full Python/R analysis set inside the sandbox and fails before model
+execution if the host installation is incomplete. Each call is isolated, offline,
 resource-bounded, and capped by a per-attempt call budget.
 
 Each run creates a mode-0700 directory under `runs/` containing the typed plan,

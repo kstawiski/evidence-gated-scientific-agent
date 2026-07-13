@@ -25,6 +25,7 @@ from .prompts import (
     REPORT_AUDITOR,
     REPORTER,
     RESEARCHER,
+    SIMPLE_REPORTER,
     SYNTHESIZER,
 )
 from .provenance import EventLedger, build_manifest, utc_now, write_json
@@ -273,11 +274,13 @@ async def _produce_report(
     }
     report = await request_structured(
         settings.qwen,
-        system_prompt=REPAIRER if repairing else REPORTER,
+        system_prompt=(
+            REPAIRER if repairing else SIMPLE_REPORTER if simple_mode else REPORTER
+        ),
         payload=report_payload,
         output_type=ScientificReport,
         temperature=0.2 if repairing else 0.4,
-        max_tokens=3000 if simple_mode else 5000,
+        max_tokens=4000 if simple_mode else 5000,
         timeout=90 if simple_mode else 180,
         enable_thinking=False,
     )

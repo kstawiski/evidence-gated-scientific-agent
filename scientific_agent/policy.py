@@ -41,6 +41,7 @@ RETRIEVAL_TOOLS = {
     "brave_llm_context",
 }
 EXECUTION_TOOLS = {"run_python_analysis", "run_r_analysis"}
+INSTALLATION_TOOLS = {"install_python_packages", "install_r_packages"}
 _URL = re.compile(r"https?://[^\s<>\"']+")
 
 
@@ -135,6 +136,8 @@ class ToolPolicy:
         return True, (
             "sandboxed execution allow-list"
             if tool_name in EXECUTION_TOOLS
+            else "isolated canonical package registry allow-list"
+            if tool_name in INSTALLATION_TOOLS
             else "read-only allow-list"
         )
 
@@ -244,7 +247,11 @@ class ToolPolicy:
         return None
 
 
-def default_allowed_tools(include_chrome: bool, enable_code: bool = False) -> set[str]:
+def default_allowed_tools(
+    include_chrome: bool,
+    enable_code: bool = False,
+    enable_packages: bool = False,
+) -> set[str]:
     allowed = set(READ_ONLY_TOOLS)
     if not include_chrome:
         allowed -= {
@@ -256,4 +263,6 @@ def default_allowed_tools(include_chrome: bool, enable_code: bool = False) -> se
         }
     if enable_code:
         allowed |= EXECUTION_TOOLS
+    if enable_packages:
+        allowed |= INSTALLATION_TOOLS
     return allowed

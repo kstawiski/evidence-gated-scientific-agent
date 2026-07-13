@@ -12,8 +12,10 @@ from typing import Callable
 
 from google.adk import Agent
 
+from . import __version__
 from .config import Settings
-from .execution import AnalysisExecutor, build_analysis_tools
+from .execution import build_analysis_tools, create_analysis_executor
+from .environment import EnvironmentManager, build_environment_tools
 from .linting import lint_plan, validate_report
 from .mcp import build_mcp_toolsets, close_mcp_toolsets
 from .models import qwen_model
@@ -26,9 +28,18 @@ from .prompts import (
     RESEARCHER,
     SYNTHESIZER,
 )
-from .provenance import EventLedger, build_manifest, utc_now, write_json
+from .provenance import (
+    EventLedger,
+    build_environment_snapshot,
+    build_input_manifest,
+    build_manifest,
+    sha256_file,
+    utc_now,
+    write_json,
+)
 from .runtime import run_text, run_typed
 from .schemas import (
+    ArtifactRef,
     MasterPlan,
     ComputationEvidence,
     PlanBundle,
@@ -36,6 +47,7 @@ from .schemas import (
     RunResult,
     RetrievalEvidence,
     ScientificReport,
+    TaskSpec,
     VerificationReport,
 )
 from .workflow import build_planning_workflow, normalize_task
@@ -91,6 +103,88 @@ def _fallback_computation_packet(
     )
 
 
+def _merge_retrieval_evidence(
+    previous: RetrievalEvidence | None,
+    current: RetrievalEvidence,
+) -> RetrievalEvidence:
+    if previous is None:
+        return current
+    return RetrievalEvidence(
+        successful_calls=previous.successful_calls + current.successful_calls,
+        tools=sorted(set(previous.tools) | set(current.tools)),
+        urls=sorted(set(previous.urls) | set(current.urls)),
+        retrieval_dates=sorted(
+            set(previous.retrieval_dates) | set(current.retrieval_dates)
+        ),
+        artifacts=[*previous.artifacts, *current.artifacts],
+    )
+
+
+def _merge_computation_evidence(
+    previous: ComputationEvidence | None,
+    current: ComputationEvidence,
+) -> ComputationEvidence:
+    if previous is None:
+        return current
+    return ComputationEvidence(
+        successful_calls=previous.successful_calls + current.successful_calls,
+        records=[*previous.records, *current.records],
+        artifacts=[*previous.artifacts, *current.artifacts],
+    )
+
+
+def _compact_computation_summary(computation: ComputationEvidence) -> dict:
+    """Keep audit evidence complete without replaying non-evidence file records."""
+
+    records = []
+    for record in computation.records:
+        records.append(
+            {
+                "execution_id": record.execution_id,
+                "language": record.language,
+                "code_sha256": record.code_sha256,
+                "started_at": record.started_at,
+                "duration_seconds": record.duration_seconds,
+                "exit_code": record.exit_code,
+                "status": record.status,
+                "environment_locks": record.environment_locks,
+                "analysis_artifacts": [
+                    artifact.model_dump(mode="json")
+                    for artifact in record.artifacts
+                    if artifact.description == "sandbox-generated analysis artifact"
+                ],
+            }
+        )
+    return {
+        "successful_calls": computation.successful_calls,
+        "failed_or_denied_calls": sum(
+            record.status != "succeeded" for record in computation.records
+        ),
+        "records": records,
+        "artifacts": [
+            artifact.model_dump(mode="json") for artifact in computation.artifacts
+        ],
+    }
+
+
+def _write_attempt_bundle(
+    run_dir: Path,
+    attempt: int,
+    report: ScientificReport,
+    validation,
+    review: VerificationReport,
+    retrieval: RetrievalEvidence,
+    computation: ComputationEvidence,
+) -> None:
+    root = run_dir / "attempts" / f"attempt-{attempt}"
+    root.mkdir(parents=True, mode=0o700, exist_ok=True)
+    write_json(root / "scientific_report.json", report)
+    write_json(root / "deterministic_validation.json", validation)
+    write_json(root / "gemma_review.json", review)
+    write_json(root / "retrieval_evidence.json", retrieval)
+    write_json(root / "computation_evidence.json", computation)
+
+
 def _report_markdown(report: ScientificReport) -> str:
     lines = [f"# {report.title}", "", report.executive_summary, "", "## Methods", ""]
     lines.extend(f"- {method}" for method in report.methods)
@@ -143,9 +237,9 @@ async def _repair_plan(settings: Settings, planning: PlanningResult) -> Planning
         payload=bundle,
         output_type=MasterPlan,
         temperature=0.3,
-        max_tokens=3000,
+        max_tokens=4000,
         timeout=150,
-        enable_thinking=True,
+        enable_thinking=False,
     )
     audit = await _audit_plan(settings, master)
     lint = lint_plan(master.task, master.plan)
@@ -170,25 +264,43 @@ async def _produce_report(
     evidence_dir: Path | None = None,
     enable_code: bool = False,
     computation_dir: Path | None = None,
+    existing_retrieval: RetrievalEvidence | None = None,
+    existing_computation: ComputationEvidence | None = None,
+    controller_artifacts: tuple[ArtifactRef, ...] = (),
+    controller_dates: tuple[str, ...] = (),
 ) -> tuple[ScientificReport, RetrievalEvidence, ComputationEvidence]:
     toolsets = build_mcp_toolsets(settings, mcp_names) if mcp_names else []
     workspace_tools = build_workspace_tools(settings.workspace)
     executor = None
     analysis_tools = []
+    environment_tools = []
+    packages_enabled = bool(
+        enable_code
+        and settings.environment.worker_url
+        and settings.environment.worker_token
+    )
     if enable_code:
         if computation_dir is None:
             raise ValueError("computation_dir is required when code execution is enabled")
-        executor = AnalysisExecutor(
+        executor = create_analysis_executor(
             settings.workspace,
             computation_dir,
             settings.sandbox,
         )
         analysis_tools = build_analysis_tools(executor)
+        if packages_enabled:
+            environment_manager = EnvironmentManager(
+                settings.workspace,
+                settings.environment,
+                computation_dir.parents[1] / "package_installations.jsonl",
+            )
+            environment_tools = build_environment_tools(environment_manager)
     policy = ToolPolicy(
         ledger=ledger,
         allowed_tools=default_allowed_tools(
             include_chrome=include_chrome,
             enable_code=enable_code,
+            enable_packages=packages_enabled,
         ),
         evidence_dir=evidence_dir,
     )
@@ -202,7 +314,7 @@ async def _produce_report(
             timeout=240,
         ),
         instruction=RESEARCHER,
-        tools=[*workspace_tools, *analysis_tools, *toolsets],
+        tools=[*workspace_tools, *environment_tools, *analysis_tools, *toolsets],
         before_tool_callback=policy.before_tool,
         after_tool_callback=policy.after_tool,
         mode="chat",
@@ -224,7 +336,15 @@ async def _produce_report(
         ),
         "code_execution": (
             "AUTHORIZED: Python and R may run only through the offline sandbox "
-            "tools. /workspace is read-only and /output is the only writable path."
+            "tools. /workspace and /prior are read-only and /output is the only "
+            "writable path. "
+            + (
+                "Missing packages may be installed only through the isolated "
+                "PyPI/CRAN/Bioconductor package tools; successful installs become "
+                "read-only analysis libraries."
+                if packages_enabled
+                else "No package-installation worker is configured."
+            )
             if enable_code
             else "DISABLED: no Python or R execution tool is available."
         ),
@@ -235,6 +355,22 @@ async def _produce_report(
                 "report": prior_report.model_dump(mode="json"),
                 "deterministic_validation": validation.model_dump(mode="json"),
                 "scientific_review": review.model_dump(mode="json") if review else None,
+                "existing_retrieval_evidence": (
+                    existing_retrieval.model_dump(mode="json")
+                    if existing_retrieval is not None
+                    else None
+                ),
+                "existing_computation_evidence": (
+                    _compact_computation_summary(existing_computation)
+                    if existing_computation is not None
+                    else None
+                ),
+                "repair_evidence_instruction": (
+                    "Reuse successful existing evidence when it resolves the findings. "
+                    "Do not rerun a valid computation solely to rewrite prose or repair "
+                    "claim-to-artifact links; execute only a falsification test or missing "
+                    "analysis required by a concrete finding."
+                ),
             }
         )
     research_error: Exception | None = None
@@ -248,21 +384,32 @@ async def _produce_report(
     retrieval = policy.retrieval_evidence()
     computation = executor.evidence() if executor is not None else ComputationEvidence()
     if research_error is not None:
-        if computation.successful_calls == 0:
+        if computation.successful_calls == 0 and not repairing:
             raise research_error
         ledger.append(
             "research_error_recovered",
             {
                 "error_type": type(research_error).__name__,
                 "successful_computations": computation.successful_calls,
+                "repairing_existing_report": repairing,
             },
         )
         research_packet = _fallback_computation_packet(research_error, computation)
+    effective_retrieval = _merge_retrieval_evidence(existing_retrieval, retrieval)
+    effective_computation = _merge_computation_evidence(
+        existing_computation, computation
+    )
     report_payload = {
         **payload,
         "research_packet": research_packet,
-        "retrieval_evidence": retrieval.model_dump(mode="json"),
-        "computation_evidence": computation.model_dump(mode="json"),
+        "retrieval_evidence": effective_retrieval.model_dump(mode="json"),
+        "computation_evidence": _compact_computation_summary(effective_computation),
+        "controller_evidence": {
+            "artifacts": [
+                artifact.model_dump(mode="json") for artifact in controller_artifacts
+            ],
+            "recorded_dates": list(controller_dates),
+        },
     }
     report = await request_structured(
         settings.qwen,
@@ -284,6 +431,8 @@ async def _audit_report(
     validation,
     retrieval: RetrievalEvidence,
     computation: ComputationEvidence,
+    controller_artifacts: tuple[ArtifactRef, ...] = (),
+    controller_dates: tuple[str, ...] = (),
 ) -> VerificationReport:
     payload = {
         "task": planning.master_plan.task.model_dump(mode="json"),
@@ -291,7 +440,13 @@ async def _audit_report(
         "report": report.model_dump(mode="json"),
         "deterministic_validation": validation.model_dump(mode="json"),
         "retrieval_evidence": retrieval.model_dump(mode="json"),
-        "computation_evidence": computation.model_dump(mode="json"),
+        "computation_evidence": _compact_computation_summary(computation),
+        "controller_evidence": {
+            "artifacts": [
+                artifact.model_dump(mode="json") for artifact in controller_artifacts
+            ],
+            "recorded_dates": list(controller_dates),
+        },
         "runtime_provenance_contract": (
             "After this audit, the deterministic controller writes run artifacts "
             "and generates manifest.json with SHA-256 hashes."
@@ -304,8 +459,85 @@ async def _audit_report(
         output_type=VerificationReport,
         temperature=0.3,
         max_tokens=1600,
-        timeout=150,
+        timeout=240,
         enable_thinking=False,
+    )
+
+
+async def _audit_report_resilient(
+    settings: Settings,
+    planning: PlanningResult,
+    report: ScientificReport,
+    validation,
+    retrieval: RetrievalEvidence,
+    computation: ComputationEvidence,
+    ledger: EventLedger,
+    controller_artifacts: tuple[ArtifactRef, ...] = (),
+    controller_dates: tuple[str, ...] = (),
+) -> VerificationReport:
+    try:
+        return await _audit_report(
+            settings,
+            planning,
+            report,
+            validation,
+            retrieval,
+            computation,
+            controller_artifacts,
+            controller_dates,
+        )
+    except Exception as exc:
+        error_type = type(exc).__name__
+        ledger.append("independent_critic_unavailable", {"error_type": error_type})
+        return VerificationReport(
+            verdict="inconclusive",
+            unsupported_claims=[
+                f"Independent Gemma review unavailable ({error_type}); no approval inferred."
+            ],
+        )
+
+
+def _prepare_task_spec(objective: str, *, enable_code: bool) -> TaskSpec:
+    """Bind inferred computation requirements to the run's authorization."""
+
+    task = normalize_task(objective)
+    constraints = [
+        constraint
+        for constraint in task.constraints
+        if not constraint.startswith("Read-only MVP")
+    ]
+    if enable_code:
+        constraints.append(
+            "Python and R are authorized only through the offline bubblewrap sandbox; "
+            "inputs are read-only and outputs are confined and resource-bounded"
+        )
+        acceptance_tests = [
+            (
+                "Every supported substantive claim links to an exact retrieved URL "
+                "or successful generated computation artifact"
+                if test
+                == "Every supported substantive claim links to a retrieved source record"
+                else test
+            )
+            for test in task.acceptance_tests
+        ]
+        return task.model_copy(
+            update={
+                "constraints": constraints,
+                "acceptance_tests": acceptance_tests,
+                "security_risk": "medium",
+            }
+        )
+
+    constraints.append(
+        "This run has no code-execution authorization; references to Python or R "
+        "APIs are documentation topics and do not require runtime artifacts"
+    )
+    return task.model_copy(
+        update={
+            "constraints": constraints,
+            "required_computation_languages": [],
+        }
     )
 
 
@@ -341,16 +573,26 @@ async def run_scientific_task(
             "objective_bytes": len(objective_bytes),
         },
     )
+    write_json(run_dir / "input_manifest.json", build_input_manifest(settings.workspace))
+    write_json(
+        run_dir / "environment.json",
+        build_environment_snapshot(application_version=__version__),
+    )
     selected_mcp = mcp_names if mcp_names is not None else settings.mcp_servers
     report_progress("planning", "Qwen and Gemma are preparing independent plans")
     write_json(
         run_dir / "run_configuration.json",
         {
-            "qwen": {"model": settings.qwen.model, "base_url": settings.qwen.base_url},
-            "gemma": {"model": settings.gemma.model, "base_url": settings.gemma.base_url},
+            "qwen": {"model": settings.qwen.model},
+            "gemma": {"model": settings.gemma.model},
             "mcp_servers": list(selected_mcp),
             "chrome_enabled": include_chrome,
             "code_execution_enabled": enable_code,
+            "package_installation_enabled": bool(
+                enable_code
+                and settings.environment.worker_url
+                and settings.environment.worker_token
+            ),
             "sandbox": (
                 {
                     "enabled": True,
@@ -376,42 +618,33 @@ async def run_scientific_task(
     )
 
     workflow = build_planning_workflow(settings)
-    planning_input = objective
-    if enable_code:
-        task = normalize_task(objective)
-        constraints = [
-            constraint
-            for constraint in task.constraints
-            if not constraint.startswith("Read-only MVP")
-        ]
-        constraints.append(
-            "Python and R are authorized only through the offline bubblewrap sandbox; "
-            "inputs are read-only and outputs are confined and resource-bounded"
-        )
-        acceptance_tests = [
-            (
-                "Every supported substantive claim links to an exact retrieved URL "
-                "or successful generated computation artifact"
-                if test
-                == "Every supported substantive claim links to a retrieved source record"
-                else test
-            )
-            for test in task.acceptance_tests
-        ]
-        task = task.model_copy(
-            update={
-                "constraints": constraints,
-                "acceptance_tests": acceptance_tests,
-                "security_risk": "medium",
-            }
-        )
-        planning_input = task.model_dump_json()
+    task = _prepare_task_spec(objective, enable_code=enable_code)
+    planning_input = task.model_dump_json()
     planning = await run_typed(workflow, planning_input, PlanningResult)
     if planning.status == "requires_revision":
         report_progress("plan-review", "The plan audit found a concrete issue; repairing it")
         ledger.append("plan_repair_started", {"reason": planning.audit.verdict})
         planning = await _repair_plan(settings, planning)
     write_json(run_dir / "planning_result.json", planning)
+    protocol_path = run_dir / "protocol.json"
+    protocol_locked_at = utc_now()
+    write_json(
+        protocol_path,
+        {
+            "locked_at": protocol_locked_at,
+            "task": planning.master_plan.task,
+            "plan": planning.master_plan.plan,
+            "audit": planning.audit,
+            "status": planning.status,
+        },
+    )
+    protocol_artifact = ArtifactRef(
+        path=str(protocol_path.resolve()),
+        sha256=sha256_file(protocol_path),
+        description="controller protocol lock written before research execution",
+    )
+    controller_artifacts = (protocol_artifact,)
+    controller_dates = (protocol_locked_at[:10],)
 
     if planning.status != "supported":
         report_progress("stopped", "Planning did not produce an evidence-ready protocol")
@@ -435,16 +668,52 @@ async def run_scientific_task(
         evidence_dir=run_dir / "evidence" / "attempt-0",
         enable_code=enable_code,
         computation_dir=run_dir / "computations" / "attempt-0",
+        controller_artifacts=controller_artifacts,
+        controller_dates=controller_dates,
     )
     report_progress("validation", "Running deterministic claim and artifact checks")
-    validation = validate_report(report, retrieval, computation)
+    required_languages = tuple(
+        planning.master_plan.task.required_computation_languages
+    )
+    objective_lower = objective.lower()
+    require_reconciliation = (
+        {"python", "r"}.issubset(required_languages)
+        and any(
+            marker in objective_lower
+            for marker in ("reconcil", "cross-check", "crosscheck", "cross-language")
+        )
+    )
+    validation = validate_report(
+        report,
+        retrieval,
+        computation,
+        required_languages=required_languages,
+        require_reconciliation=require_reconciliation,
+        controller_artifacts=controller_artifacts,
+        controller_dates=controller_dates,
+    )
     report_progress("scientific-review", "Gemma is independently auditing the result")
-    review = await _audit_report(
-        settings, planning, report, validation, retrieval, computation
+    review = await _audit_report_resilient(
+        settings,
+        planning,
+        report,
+        validation,
+        retrieval,
+        computation,
+        ledger,
+        controller_artifacts,
+        controller_dates,
+    )
+    _write_attempt_bundle(
+        run_dir, 0, report, validation, review, retrieval, computation
     )
     repair_rounds = 0
     while (
-        (not validation.passed or review.verdict in {"fail", "inconclusive"})
+        (
+            not validation.passed
+            or review.verdict == "fail"
+            or (review.verdict == "inconclusive" and review.blocking_findings)
+        )
         and repair_rounds < settings.max_repair_rounds
     ):
         repair_rounds += 1
@@ -474,29 +743,42 @@ async def run_scientific_task(
             computation_dir=(
                 run_dir / "computations" / f"attempt-{repair_rounds}"
             ),
+            existing_retrieval=retrieval,
+            existing_computation=computation,
+            controller_artifacts=controller_artifacts,
+            controller_dates=controller_dates,
         )
-        retrieval = RetrievalEvidence(
-            successful_calls=retrieval.successful_calls
-            + repair_retrieval.successful_calls,
-            tools=sorted(set(retrieval.tools) | set(repair_retrieval.tools)),
-            urls=sorted(set(retrieval.urls) | set(repair_retrieval.urls)),
-            retrieval_dates=sorted(
-                set(retrieval.retrieval_dates)
-                | set(repair_retrieval.retrieval_dates)
-            ),
-            artifacts=[*retrieval.artifacts, *repair_retrieval.artifacts],
+        retrieval = _merge_retrieval_evidence(retrieval, repair_retrieval)
+        computation = _merge_computation_evidence(computation, repair_computation)
+        validation = validate_report(
+            report,
+            retrieval,
+            computation,
+            required_languages=required_languages,
+            require_reconciliation=require_reconciliation,
+            controller_artifacts=controller_artifacts,
+            controller_dates=controller_dates,
         )
-        computation = ComputationEvidence(
-            successful_calls=(
-                computation.successful_calls + repair_computation.successful_calls
-            ),
-            records=[*computation.records, *repair_computation.records],
-            artifacts=[*computation.artifacts, *repair_computation.artifacts],
-        )
-        validation = validate_report(report, retrieval, computation)
         report_progress("scientific-review", "Gemma is auditing the repaired result")
-        review = await _audit_report(
-            settings, planning, report, validation, retrieval, computation
+        review = await _audit_report_resilient(
+            settings,
+            planning,
+            report,
+            validation,
+            retrieval,
+            computation,
+            ledger,
+            controller_artifacts,
+            controller_dates,
+        )
+        _write_attempt_bundle(
+            run_dir,
+            repair_rounds,
+            report,
+            validation,
+            review,
+            retrieval,
+            computation,
         )
 
     if validation.passed and review.verdict == "pass":

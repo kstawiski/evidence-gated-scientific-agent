@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
+from pathlib import Path
 
 from .schemas import (
+    ArtifactRef,
     DeterministicValidation,
     ComputationEvidence,
     LintFinding,
@@ -18,6 +21,15 @@ from .schemas import (
 
 
 _WORD = re.compile(r"[a-z0-9]{4,}")
+_PROTOCOL_TIMING = re.compile(
+    r"\b(?:lock(?:ed|ing)?|prespecif(?:ied|ication))\b.{0,100}"
+    r"\b(?:before|prior to)\b.{0,100}\b(?:inspect(?:ion|ing)?|outcome|result)",
+    re.IGNORECASE,
+)
+_METHODOLOGICAL_GENERALIZATION = re.compile(
+    r"\b(?:robust to|valid despite|known to|generally reliable|assumption violation)",
+    re.IGNORECASE,
+)
 
 
 def _terms(text: str) -> set[str]:
@@ -102,12 +114,134 @@ def _normalize_url(value: str) -> str:
     return value.rstrip("/")
 
 
+def _reject_nonfinite_json(value: str):
+    raise ValueError(f"non-finite JSON constant: {value}")
+
+
 def validate_report(
     report: ScientificReport,
     retrieval: RetrievalEvidence | None = None,
     computation: ComputationEvidence | None = None,
+    required_languages: tuple[str, ...] = (),
+    require_reconciliation: bool = False,
+    controller_artifacts: tuple[ArtifactRef, ...] = (),
+    controller_dates: tuple[str, ...] = (),
 ) -> DeterministicValidation:
     findings: list[LintFinding] = []
+    records = computation.records if computation else []
+    for record in records:
+        if record.status != "succeeded":
+            continue
+        for artifact in record.artifacts:
+            path = Path(artifact.path)
+            if (
+                artifact.description != "sandbox-generated analysis artifact"
+                or path.suffix.lower() != ".json"
+            ):
+                continue
+            try:
+                json.loads(
+                    path.read_text(encoding="utf-8"),
+                    parse_constant=_reject_nonfinite_json,
+                )
+            except (OSError, UnicodeError, ValueError) as exc:
+                findings.append(
+                    LintFinding(
+                        code="invalid_generated_json",
+                        location=str(path),
+                        message=(
+                            "Generated JSON must be strict UTF-8 JSON and may not "
+                            f"contain NaN or Infinity: {type(exc).__name__}."
+                        ),
+                    )
+                )
+    for language in required_languages:
+        successful_outputs = [
+            artifact
+            for record in records
+            if record.language == language and record.status == "succeeded"
+            for artifact in record.artifacts
+            if artifact.description == "sandbox-generated analysis artifact"
+        ]
+        if not successful_outputs:
+            findings.append(
+                LintFinding(
+                    code="required_computation_language_missing",
+                    location="computation_evidence",
+                    message=(
+                        f"The locked task requires {language}, but no successful "
+                        "execution from that language produced an analysis artifact."
+                    ),
+                )
+            )
+    if require_reconciliation:
+        candidates = [
+            artifact
+            for record in records
+            if record.status == "succeeded"
+            for artifact in record.artifacts
+            if artifact.description == "sandbox-generated analysis artifact"
+            and any(
+                marker in Path(artifact.path).name.lower()
+                for marker in ("reconciliation", "crosscheck", "cross-check")
+            )
+        ]
+        if not candidates:
+            findings.append(
+                LintFinding(
+                    code="required_reconciliation_artifact_missing",
+                    location="computation_evidence",
+                    message=(
+                        "The locked cross-language task requires a generated "
+                        "machine-readable reconciliation artifact."
+                    ),
+                )
+            )
+        else:
+            verdicts: list[bool] = []
+            for artifact in candidates:
+                path = Path(artifact.path)
+                if path.suffix.lower() != ".json" or not path.is_file():
+                    continue
+                try:
+                    value = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError):
+                    continue
+                if not isinstance(value, dict):
+                    continue
+                for key in (
+                    "all_pass",
+                    "passed",
+                    "within_tolerance",
+                    "reconciliation_passed",
+                ):
+                    verdict = value.get(key)
+                    if isinstance(verdict, bool):
+                        verdicts.append(verdict)
+                        break
+            if not verdicts:
+                findings.append(
+                    LintFinding(
+                        code="reconciliation_artifact_invalid",
+                        location="computation_evidence",
+                        message=(
+                            "The reconciliation artifact must be JSON with a top-level "
+                            "boolean all_pass, passed, within_tolerance, or "
+                            "reconciliation_passed verdict."
+                        ),
+                    )
+                )
+            elif not all(verdicts):
+                findings.append(
+                    LintFinding(
+                        code="cross_language_reconciliation_failed",
+                        location="computation_evidence",
+                        message=(
+                            "At least one generated reconciliation artifact reports "
+                            "that the prespecified tolerance was not met."
+                        ),
+                    )
+                )
     source_ids = [source.source_id for source in report.sources]
     if len(source_ids) != len(set(source_ids)):
         findings.append(
@@ -189,6 +323,34 @@ def validate_report(
                 for source_id in claim.evidence_refs
                 if source_id in sources_by_id
             ]
+            if claim.claim_type == "computed" and _PROTOCOL_TIMING.search(claim.text):
+                findings.append(
+                    LintFinding(
+                        code="protocol_timing_not_computed",
+                        location=location,
+                        message=(
+                            "A sandbox-generated analysis artifact cannot establish "
+                            "that the protocol was locked before outcome inspection; "
+                            "describe controller protocol provenance in Methods instead."
+                        ),
+                    )
+                )
+            if (
+                claim.claim_type == "inference"
+                and _METHODOLOGICAL_GENERALIZATION.search(claim.text)
+                and not any(source.url for source in referenced_sources)
+            ):
+                findings.append(
+                    LintFinding(
+                        code="methodological_generalization_without_source",
+                        location=location,
+                        message=(
+                            "A general claim about method robustness or validity needs "
+                            "retrieved literature evidence, not only a computation artifact; "
+                            "otherwise preserve it as an unresolved limitation."
+                        ),
+                    )
+                )
             if claim.claim_type == "computed" and referenced_sources and not any(
                 source.artifact_path for source in referenced_sources
             ):
@@ -253,7 +415,16 @@ def validate_report(
                             )
                         )
                 elif source.artifact_path is not None:
-                    if computation is None or computation.successful_calls == 0:
+                    artifact_path = os.path.normpath(source.artifact_path)
+                    controller_paths = {
+                        os.path.normpath(artifact.path)
+                        for artifact in controller_artifacts
+                    }
+                    is_controller_artifact = artifact_path in controller_paths
+                    if (
+                        not is_controller_artifact
+                        and (computation is None or computation.successful_calls == 0)
+                    ):
                         findings.append(
                             LintFinding(
                                 code="supported_without_computation",
@@ -267,8 +438,7 @@ def validate_report(
                     known_artifacts = {
                         os.path.normpath(artifact.path)
                         for artifact in (computation.artifacts if computation else [])
-                    }
-                    artifact_path = os.path.normpath(source.artifact_path)
+                    } | controller_paths
                     if artifact_path not in known_artifacts:
                         findings.append(
                             LintFinding(
@@ -280,22 +450,29 @@ def validate_report(
                                 ),
                             )
                         )
-                    computation_dates = {
-                        record.started_at[:10]
-                        for record in (computation.records if computation else [])
-                        if record.status == "succeeded"
-                    }
-                    if computation_dates and not any(
-                        source.retrieved_at.startswith(date)
-                        for date in computation_dates
+                    evidence_dates = (
+                        set(controller_dates)
+                        if is_controller_artifact
+                        else {
+                            record.started_at[:10]
+                            for record in (computation.records if computation else [])
+                            if record.status == "succeeded"
+                        }
+                    )
+                    if evidence_dates and not any(
+                        source.retrieved_at.startswith(date) for date in evidence_dates
                     ):
                         findings.append(
                             LintFinding(
-                                code="source_computation_date_mismatch",
+                                code=(
+                                    "source_controller_date_mismatch"
+                                    if is_controller_artifact
+                                    else "source_computation_date_mismatch"
+                                ),
                                 location=f"sources[{source_id}].retrieved_at",
                                 message=(
-                                    "Artifact evidence date does not match a successful "
-                                    f"computation date: {source.retrieved_at}"
+                                    "Artifact evidence date does not match its recorded "
+                                    f"controller or computation date: {source.retrieved_at}"
                                 ),
                             )
                         )

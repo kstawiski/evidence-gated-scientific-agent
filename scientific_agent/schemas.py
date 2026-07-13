@@ -43,6 +43,9 @@ class TaskSpec(BaseModel):
     scientific_risk: Literal[
         "exploratory", "confirmatory", "decision_critical"
     ] = "exploratory"
+    required_computation_languages: list[Literal["python", "r"]] = Field(
+        default_factory=list
+    )
     acceptance_tests: list[str]
 
 
@@ -136,9 +139,9 @@ class ResolutionRecord(BaseModel):
 class MasterPlan(BaseModel):
     task: TaskSpec
     plan: PlanProposal
-    resolutions: list[ResolutionRecord]
+    resolutions: list[ResolutionRecord] = Field(max_length=6)
     method_lock_required: bool
-    protocol_fields: list[str] = Field(default_factory=list)
+    protocol_fields: list[str] = Field(default_factory=list, max_length=12)
 
 
 class Finding(BaseModel):
@@ -246,6 +249,7 @@ class ComputationRecord(BaseModel):
     status: Literal["succeeded", "failed", "timed_out", "policy_denied"]
     stdout_path: str
     stderr_path: str
+    environment_locks: dict[str, str] = Field(default_factory=dict)
     artifacts: list[ArtifactRef] = Field(default_factory=list)
 
 

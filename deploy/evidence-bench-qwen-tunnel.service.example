@@ -1,0 +1,13 @@
+[Unit]
+Description=Evidence Bench private model SSH tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ssh -NT -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -L DOCKER_BRIDGE_IP:LOCAL_PORT:MODEL_HOST:MODEL_PORT BASTION_HOST
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

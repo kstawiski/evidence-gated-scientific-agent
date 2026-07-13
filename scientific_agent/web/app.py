@@ -6,9 +6,10 @@ import base64
 import binascii
 import mimetypes
 import secrets
+import tempfile
+import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Awaitable, Callable
 
 import uvicorn
 from a2a.server.request_handlers import DefaultRequestHandler
@@ -19,6 +20,7 @@ from a2a.server.routes import (
 )
 from a2a.server.tasks import InMemoryTaskStore
 from fastapi import FastAPI, File, Query, UploadFile
+from fastapi.background import BackgroundTasks
 from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -26,7 +28,6 @@ from pydantic import BaseModel, Field
 from .. import __version__
 from ..config import Settings, load_mcp_secrets
 from ..orchestrator import run_scientific_task
-from ..schemas import RunResult
 from .a2a import ALLOWED_MCP_SERVERS, EvidenceBenchExecutor, build_agent_card
 from .service import Runner, TaskService
 from .settings import WebSettings
@@ -257,6 +258,31 @@ def create_app(
         artifact = store.run_artifact(run_id, path)
         media_type = mimetypes.guess_type(artifact.name)[0]
         return FileResponse(artifact, filename=artifact.name, media_type=media_type)
+
+    @app.get("/api/runs/{run_id}/bundle")
+    async def download_bundle(run_id: str, background: BackgroundTasks) -> FileResponse:
+        root = store.run_root(run_id)
+        with tempfile.NamedTemporaryFile(
+            prefix=f"evidence-bench-{run_id[:8]}-", suffix=".zip", delete=False
+        ) as handle:
+            archive_path = Path(handle.name)
+        try:
+            with zipfile.ZipFile(
+                archive_path, mode="w", compression=zipfile.ZIP_DEFLATED
+            ) as archive:
+                for path in sorted(root.rglob("*")):
+                    if path.is_file() and not path.is_symlink():
+                        archive.write(path, path.relative_to(root))
+        except Exception:
+            archive_path.unlink(missing_ok=True)
+            raise
+        background.add_task(archive_path.unlink, missing_ok=True)
+        return FileResponse(
+            archive_path,
+            filename=f"evidence-bench-{run_id}.zip",
+            media_type="application/zip",
+            background=background,
+        )
 
     if web.a2a_enabled:
         card = build_agent_card(web.public_url)

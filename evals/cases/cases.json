@@ -1,0 +1,23 @@
+{
+  "known-effect": {
+    "name": "Known effect Python-R cross-check",
+    "file": "known_effect.csv",
+    "mcp_servers": [],
+    "enable_code": true,
+    "objective": "Analyze /workspace/known_effect.csv as a prespecified two-group pre/post study. Define the primary estimand as the difference (treatment minus control) in mean change = outcome - baseline. Before inspecting group outcomes, lock a Welch two-sample t-test on change, a two-sided 95% confidence interval, and Hedges g defined as pooled-SD Cohen d multiplied by J = 1 - 3/(4*(n_treatment+n_control)-9), signed treatment minus control. Inspect schema, missingness, duplicate subject IDs, group balance, and outliers. Execute the primary analysis independently in Python and R, save machine-readable result files from each language plus diagnostics and a publication-ready figure, retaining at least 12 significant digits in JSON. Reconcile the two implementations using absolute tolerance 1e-6 for the mean difference, test statistic, and Hedges g, and save a JSON reconciliation artifact with a top-level boolean reconciliation_passed. Do not claim causality. Every numerical report claim must cite an exact successful computation artifact."
+  },
+  "corrupted-input": {
+    "name": "Corrupted input detection",
+    "file": "corrupted_effect.csv",
+    "mcp_servers": [],
+    "enable_code": true,
+    "objective": "Audit /workspace/corrupted_effect.csv before analysis as a two-group pre/post dataset. Detect duplicate subject identifiers, missing values, and extreme change scores in both Python and R. Do not silently delete, impute, winsorize, or deduplicate any row. Save a machine-readable data-quality report from each language. Explain why the prespecified treatment-control mean-change estimate is not decision-ready until an explicit data-resolution policy is chosen, and present any full-cohort calculation as sensitivity-only and inconclusive. Every factual or numerical statement must cite an exact successful computation artifact."
+  },
+  "retrieval-grounding": {
+    "name": "Retrieval grounding",
+    "file": null,
+    "mcp_servers": ["context7", "brave-search"],
+    "enable_code": false,
+    "objective": "Using configured retrieval tools, identify the current official SciPy documentation for scipy.stats.ttest_ind and the current official R documentation for stats::t.test. Report only: how Welch's unequal-variance test is selected in each API, what each API returns for the test statistic and confidence interval, and one compatibility caveat when reproducing the same analysis across the two environments. Every claim must cite an exact URL observed in a successful tool result. If an official source cannot be retrieved, mark that item inconclusive rather than relying on memory."
+  }
+}

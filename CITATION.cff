@@ -1,0 +1,11 @@
+cff-version: 1.2.0
+title: Evidence Bench
+message: "If you use Evidence Bench in scientific work, cite the software release."
+type: software
+authors:
+  - family-names: Stawiski
+    given-names: Konrad
+version: 0.3.0
+license: Apache-2.0
+repository-code: "https://github.com/kstawiski/evidence-gated-scientific-agent"
+url: "https://github.com/kstawiski/evidence-gated-scientific-agent"

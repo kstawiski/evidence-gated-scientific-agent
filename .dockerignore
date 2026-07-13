@@ -1,0 +1,16 @@
+.git
+.github
+.venv
+.pytest_cache
+__pycache__
+*.py[cod]
+*.egg-info
+.env
+web-data
+runs
+dist
+build
+docs
+tests
+node_modules
+delegated_tasks

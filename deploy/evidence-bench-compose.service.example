@@ -1,0 +1,18 @@
+[Unit]
+Description=Evidence Bench shared laboratory service
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=INSTALL_DIRECTORY
+ExecStart=/usr/bin/docker compose up -d --remove-orphans
+ExecStartPost=/usr/bin/docker compose ps
+ExecStop=/usr/bin/docker compose stop
+TimeoutStartSec=900
+TimeoutStopSec=180
+
+[Install]
+WantedBy=default.target

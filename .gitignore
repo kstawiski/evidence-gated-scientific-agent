@@ -9,4 +9,5 @@ build/
 runs/
 delegated_tasks/
 .env
+web-data/
 *.log

@@ -353,14 +353,21 @@ class WorkspaceStore:
         return values
 
     def run_artifact(self, run_id: str, relative_path: str) -> Path:
-        run = self.get_run(run_id)
-        provenance = run.get("provenance_dir")
-        if not provenance:
-            raise KeyError("artifact not found")
-        root = Path(provenance).resolve()
+        root = self.run_root(run_id)
         candidate = (root / relative_path).resolve()
         if candidate != root and root not in candidate.parents:
             raise KeyError("artifact not found")
         if not candidate.is_file() or candidate.is_symlink():
             raise KeyError("artifact not found")
         return candidate
+
+    def run_root(self, run_id: str) -> Path:
+        run = self.get_run(run_id)
+        provenance = run.get("provenance_dir")
+        if not provenance:
+            raise KeyError("run provenance not found")
+        root = Path(provenance).resolve()
+        _, runs_dir = self.paths(run["workspace_id"])
+        if root.parent != runs_dir.resolve() or not root.is_dir():
+            raise KeyError("run provenance not found")
+        return root

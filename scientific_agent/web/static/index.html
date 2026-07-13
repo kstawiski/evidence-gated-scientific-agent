@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <meta name="theme-color" content="#102c2e">
+    <title>Evidence Bench</title>
+    <link rel="stylesheet" href="/static/app.css">
+    <script src="/static/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to workspace</a>
+    <header class="topbar">
+      <button class="icon-button mobile-only" id="sidebar-toggle" aria-label="Open workspaces" aria-expanded="false">
+        <span></span><span></span><span></span>
+      </button>
+      <a class="brand" href="/" aria-label="Evidence Bench home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span><strong>Evidence Bench</strong><small>computational science, under audit</small></span>
+      </a>
+      <div class="model-strip" aria-label="Model roles">
+        <span><b>Q</b><span id="executor-model">executor</span></span>
+        <i aria-hidden="true"></i>
+        <span><b>G</b><span id="critic-model">critic</span></span>
+      </div>
+      <div class="system-status"><span class="status-dot"></span><span>service ready</span><code id="app-version">v—</code></div>
+    </header>
+
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar" aria-label="Workspaces">
+        <div class="sidebar-heading">
+          <div><span class="eyebrow">Specimen trays</span><h2>Workspaces</h2></div>
+          <button class="icon-button" id="new-workspace-button" aria-label="Create workspace">+</button>
+        </div>
+        <form class="new-workspace hidden" id="new-workspace-form">
+          <label for="workspace-name">Workspace name</label>
+          <div><input id="workspace-name" maxlength="80" placeholder="e.g. Cohort validation" required><button type="submit">Create</button></div>
+        </form>
+        <nav class="workspace-list" id="workspace-list" aria-live="polite"></nav>
+        <div class="sidebar-foot">
+          <span>A2A 1.0 endpoint</span>
+          <a href="/.well-known/agent-card.json" target="_blank" rel="noreferrer">Agent Card ↗</a>
+        </div>
+      </aside>
+
+      <main id="main" class="workspace-main" tabindex="-1">
+        <section class="empty-state" id="empty-state">
+          <div class="empty-orbit" aria-hidden="true"><i></i><i></i><i></i></div>
+          <span class="eyebrow">No active tray</span>
+          <h1>Give the work somewhere to live.</h1>
+          <p>Create an isolated workspace for inputs, Python/R output, evidence, and the final audited report.</p>
+          <button class="primary-button" id="empty-create-button">Create first workspace</button>
+        </section>
+
+        <div id="workspace-view" class="hidden">
+          <section class="workspace-titlebar">
+            <div>
+              <span class="eyebrow">Active workspace</span>
+              <h1 id="workspace-title">—</h1>
+              <p id="workspace-meta">—</p>
+            </div>
+            <button class="danger-link" id="delete-workspace-button">Delete workspace</button>
+          </section>
+
+          <div class="bench-grid">
+            <div class="bench-main">
+              <section class="panel task-panel">
+                <header class="panel-heading">
+                  <div><span class="panel-index">01</span><div><h2>Task protocol</h2><p>State the objective. The method is locked before results.</p></div></div>
+                  <span class="panel-state">INPUT</span>
+                </header>
+                <form id="task-form">
+                  <label for="objective">Scientific objective</label>
+                  <div class="workflow-starters" aria-label="Workflow templates">
+                    <button type="button" data-template="analyze">Analyze uploaded data</button>
+                    <button type="button" data-template="crosscheck">Cross-check Python + R</button>
+                    <button type="button" data-template="audit">Audit a sourced claim</button>
+                  </div>
+                  <textarea id="objective" rows="6" minlength="3" maxlength="20000" placeholder="Analyze the uploaded dataset, test the prespecified hypothesis, report effect sizes with uncertainty, and link every claim to computation or a retrieved source." required></textarea>
+                  <div class="control-grid">
+                    <fieldset>
+                      <legend>Execution</legend>
+                      <label class="switch-row"><input type="checkbox" id="enable-code" checked><span class="switch"></span><span><strong>Python + R</strong><small>Offline, read-only inputs, bounded output</small></span></label>
+                    </fieldset>
+                    <fieldset>
+                      <legend>Research connections</legend>
+                      <div class="mcp-options" id="mcp-options">
+                        <label><input type="checkbox" value="context7"><span>Context7</span></label>
+                        <label><input type="checkbox" value="brave-search"><span>Brave Search</span></label>
+                        <label><input type="checkbox" value="chrome-devtools"><span>Chrome DevTools</span></label>
+                      </div>
+                    </fieldset>
+                  </div>
+                  <div class="task-actions">
+                    <p><span class="shield" aria-hidden="true">◇</span> Deterministic policy evaluates every tool call.</p>
+                    <button class="primary-button" type="submit" id="run-button">Start audited run <span>→</span></button>
+                  </div>
+                </form>
+              </section>
+
+              <section class="panel result-panel" id="result-panel">
+                <header class="panel-heading">
+                  <div><span class="panel-index">03</span><div><h2>Scientific record</h2><p>Claims, sources, and artifacts from the selected run.</p></div></div>
+                  <span class="panel-state" id="result-status">WAITING</span>
+                </header>
+                <div class="result-empty" id="result-empty">Run a task to populate the evidence record.</div>
+                <div class="hidden" id="result-content">
+                  <div class="report-lead">
+                    <div><span class="eyebrow">Validated report</span><h3 id="report-title">—</h3></div>
+                    <div class="report-actions">
+                      <button class="download-button" id="reuse-run" type="button">Reuse protocol</button>
+                      <a class="download-button" id="bundle-download" href="#">Bundle.zip ↓</a>
+                      <a class="download-button" id="report-download" href="#">Report.md ↓</a>
+                    </div>
+                  </div>
+                  <p class="executive-summary" id="report-summary"></p>
+                  <div class="report-tabs" role="tablist" aria-label="Report sections">
+                    <button class="active" data-tab="claims" role="tab">Claims</button>
+                    <button data-tab="methods" role="tab">Methods</button>
+                    <button data-tab="sources" role="tab">Sources</button>
+                    <button data-tab="artifacts" role="tab">Artifacts</button>
+                    <button data-tab="limits" role="tab">Limits</button>
+                  </div>
+                  <div class="tab-content" id="tab-content"></div>
+                </div>
+              </section>
+            </div>
+
+            <aside class="bench-side">
+              <section class="panel files-panel">
+                <header class="panel-heading compact">
+                  <div><span class="panel-index">IN</span><div><h2>Inputs</h2><p>Immutable during an active run.</p></div></div>
+                </header>
+                <label class="drop-zone" id="drop-zone" for="file-input">
+                  <input id="file-input" type="file" multiple>
+                  <span class="drop-icon">＋</span><strong>Add source files</strong><small>Click or drop files here</small>
+                </label>
+                <div class="file-list" id="file-list"></div>
+              </section>
+
+              <section class="panel provenance-panel">
+                <header class="panel-heading compact">
+                  <div><span class="panel-index">02</span><div><h2>Provenance rail</h2><p id="run-message">No run selected.</p></div></div>
+                </header>
+                <ol class="provenance-rail" id="provenance-rail">
+                  <li data-phase="planning"><i></i><div><strong>Independent planning</strong><small>Qwen + blinded Gemma plan</small></div><span>—</span></li>
+                  <li data-phase="research"><i></i><div><strong>Evidence & computation</strong><small>MCP retrieval + sandbox tools</small></div><span>—</span></li>
+                  <li data-phase="validation"><i></i><div><strong>Deterministic validation</strong><small>Tests outrank model agreement</small></div><span>—</span></li>
+                  <li data-phase="scientific-review"><i></i><div><strong>Independent critique</strong><small>Gemma audits claims and method</small></div><span>—</span></li>
+                  <li data-phase="repair"><i></i><div><strong>Falsification & repair</strong><small>Bounded evidence-driven loop</small></div><span>—</span></li>
+                  <li data-phase="finalizing"><i></i><div><strong>Provenance bundle</strong><small>Hashes, artifacts, final status</small></div><span>—</span></li>
+                </ol>
+              </section>
+
+              <section class="panel history-panel">
+                <header class="panel-heading compact">
+                  <div><span class="panel-index">LOG</span><div><h2>Run history</h2><p>Reopen any scientific record.</p></div></div>
+                </header>
+                <div id="run-history" class="run-history"></div>
+              </section>
+            </aside>
+          </div>
+        </div>
+      </main>
+    </div>
+    <div class="toast-region" id="toast-region" aria-live="polite"></div>
+  </body>
+</html>

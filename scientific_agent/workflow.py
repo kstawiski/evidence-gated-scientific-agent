@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from typing import Any
 
 from google.adk import Workflow
@@ -32,6 +33,11 @@ def normalize_task(node_input: str) -> TaskSpec:
         except Exception:
             pass
     task_id = hashlib.sha256(objective.encode("utf-8")).hexdigest()[:16]
+    required_languages = []
+    if re.search(r"\bpython\b", objective, flags=re.IGNORECASE):
+        required_languages.append("python")
+    if re.search(r"(?<![A-Za-z0-9])R(?![A-Za-z0-9])", objective):
+        required_languages.append("r")
     return TaskSpec(
         task_id=task_id,
         objective=objective,
@@ -46,6 +52,7 @@ def normalize_task(node_input: str) -> TaskSpec:
         task_type="mixed",
         security_risk="low",
         scientific_risk="exploratory",
+        required_computation_languages=required_languages,
         acceptance_tests=[
             "Every plan step declares outputs, validators, and stop conditions",
             "Every supported substantive claim links to a retrieved source record",
@@ -61,6 +68,12 @@ def keep_task(node_input: TaskSpec) -> TaskSpec:
 
 def keep_master(node_input: MasterPlan) -> MasterPlan:
     return node_input
+
+
+def bind_controller_task(master: MasterPlan, task: TaskSpec) -> MasterPlan:
+    """Prevent model synthesis from rewriting controller-normalized requirements."""
+
+    return master.model_copy(update={"task": task})
 
 
 def _collect(value: Any, model_type: type[BaseModel]) -> list[BaseModel]:
@@ -164,16 +177,17 @@ def build_planning_workflow(settings: Settings) -> Workflow:
     plan_join = JoinNode(name="join_independent_plans")
 
     async def plan_synthesizer(node_input: PlanBundle) -> MasterPlan:
-        return await request_structured(
+        master = await request_structured(
             settings.qwen,
             system_prompt=SYNTHESIZER,
             payload=node_input,
             output_type=MasterPlan,
             temperature=0.5,
-            max_tokens=4000,
+            max_tokens=5000,
             timeout=150,
-            enable_thinking=True,
+            enable_thinking=False,
         )
+        return bind_controller_task(master, node_input.task)
 
     async def plan_auditor(node_input: MasterPlan) -> VerificationReport:
         return await request_structured(

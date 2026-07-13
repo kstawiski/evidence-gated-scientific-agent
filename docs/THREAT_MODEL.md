@@ -19,15 +19,17 @@
 
 ## Current controls
 
-- The models receive no arbitrary host shell, package manager, Git, deletion, or
-  workspace-write tool.
+- The models receive no arbitrary host shell, operating-system package manager,
+  Git, deletion, or workspace-write tool. Scientific package installation is
+  limited to typed, validated PyPI/CRAN/Bioconductor requests.
 - Workspace tools resolve symlinks and reject any path outside the assigned root.
 - Text reads are capped at 2 MiB and searches at 200 hits.
 - Every tool name is checked against an allow-list before execution. Python/R are
   absent unless the human caller explicitly sets `--enable-code`.
 - Python and R execute in fresh bubblewrap namespaces with `/workspace` read-only,
-  one per-call `/output` bind mount, an empty `/proc`, minimal `/dev`, a temporary
-  home, and only selected language runtimes/libraries mounted.
+  prior outputs and an immutable package generation read-only, one per-call
+  `/output` bind mount, an empty `/proc`, minimal `/dev`, a temporary home, and
+  only selected language runtimes/libraries mounted.
 - The computation namespace unshares networking and clears the inherited
   environment. Runtime probes and adversarial tests verify that outbound sockets,
   `/etc/passwd`, inherited test secrets, and workspace writes are unavailable.
@@ -52,6 +54,18 @@
 - A supported claim's external source URL and retrieval date must match raw MCP
   evidence; changing the model-selected claim type cannot bypass this check.
 - Repair loops are bounded.
+- Every report attempt retains the draft, deterministic findings, critic report,
+  and cumulative evidence. A critic transport/schema failure produces an explicit
+  inconclusive review rather than implicit approval; unexpected run failures retain
+  a hashed partial provenance bundle for diagnosis.
+- Package installation is a separate token-authenticated internal service with no
+  data or secret mount. Installer hooks see only one staging generation and tmpfs,
+  run as UID 10001, and cannot access sibling workspace environments. Direct URLs,
+  VCS/path requirements, flags, escaping symlinks, missing requested versions,
+  and over-size environments fail closed.
+- Package generations are immutable and atomically selected. Their exact package
+  inventory, installed-tree hash, and lock file are copied into computation
+  provenance before the resolved generation is mounted.
 
 ## Residual risks
 
@@ -62,9 +76,15 @@
   confidential data must not enable these tools.
 - NPM and Python dependencies execute in the controller environment. Exact pins,
   lockfiles, package review, and isolated deployment are still required.
-- The sandbox uses the host's curated Python and R installations as read-only
-  runtime mounts. Their package set is not yet locked per scientific task, and a
-  malicious native library in those trusted runtime roots is outside this boundary.
+- The base sandbox uses the image's curated Python and R installations as read-only
+  runtime mounts; a malicious native library in those trusted roots remains outside
+  this boundary. Workspace additions are locked, but the base-image digest must
+  also be retained by deployment tooling for full binary reproducibility.
+- Canonical top-level package registries do not constrain secondary downloads made
+  by package build hooks. Stronger deployments need an egress allow-list/proxy and
+  a download-then-offline-build pipeline.
+- An arbitrary package may require a native library absent from the public image;
+  installation or later import then fails explicitly.
 - The outer fleet container does not permit bubblewrap's additional
   `--disable-userns` hardening. Bubblewrap still unshares all available namespaces,
   but deployment on a dedicated host should disable nested user namespaces and use

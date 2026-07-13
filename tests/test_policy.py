@@ -90,3 +90,23 @@ def test_analysis_tools_are_opt_in_and_code_is_hashed_in_ledger(tmp_path):
     assert event["decision"] == "allow"
     assert event["arguments"]["code"]["bytes"] == len(code)
     assert code not in ledger_path.read_text(encoding="utf-8")
+
+
+def test_package_installation_tools_are_separately_opt_in(tmp_path):
+    default_gate = policy(tmp_path)
+    assert not default_gate.evaluate(
+        "install_python_packages", {"packages": ["polars"]}
+    )[0]
+    gate = ToolPolicy(
+        EventLedger(tmp_path / "package-events.jsonl"),
+        default_allowed_tools(
+            include_chrome=False,
+            enable_code=True,
+            enable_packages=True,
+        ),
+    )
+    allowed, reason = gate.evaluate(
+        "install_r_packages", {"packages": ["BiocGenerics"], "repository": "bioconductor"}
+    )
+    assert allowed
+    assert "canonical package registry" in reason

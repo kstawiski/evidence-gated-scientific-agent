@@ -1,0 +1,160 @@
+name: evidence-bench
+
+services:
+  evidence-bench:
+    build:
+      context: .
+      target: runtime
+    image: evidence-bench:0.3.0
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      WEB_HOST: 0.0.0.0
+      WEB_PORT: 8080
+      SCIENTIFIC_AGENT_DATA_DIR: /data
+      SCIENTIFIC_AGENT_SANDBOX_WORKER_URL: http://sandbox-worker:8090
+      SCIENTIFIC_AGENT_SANDBOX_WORKER_TOKEN: ${SANDBOX_WORKER_TOKEN:-}
+      SCIENTIFIC_AGENT_PACKAGE_WORKER_URL: http://environment-worker:8091
+      SCIENTIFIC_AGENT_PACKAGE_WORKER_TOKEN: ${PACKAGE_WORKER_TOKEN:-}
+    depends_on:
+      sandbox-worker:
+        condition: service_healthy
+      environment-worker:
+        condition: service_healthy
+    ports:
+      - "${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_PUBLISHED_PORT:-8080}:8080"
+    volumes:
+      - ${EVIDENCE_BENCH_DATA_PATH:-evidence-bench-data}:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=1g,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 512
+    mem_limit: 16g
+    cpus: 4
+    networks:
+      - default
+      - sandbox
+      - packages
+
+  sandbox-worker:
+    image: evidence-bench:0.3.0
+    command: ["scientific-agent-sandbox-worker"]
+    user: "0:0"
+    restart: unless-stopped
+    environment:
+      SCIENTIFIC_AGENT_DATA_DIR: /data
+      SCIENTIFIC_AGENT_SANDBOX_WORKER_TOKEN: ${SANDBOX_WORKER_TOKEN:-}
+      SCIENTIFIC_AGENT_PYTHON_PREFIX: /usr/local
+      SCIENTIFIC_AGENT_ENVIRONMENTS_DIR: /environments
+      SANDBOX_WORKER_HOST: 0.0.0.0
+      SANDBOX_WORKER_PORT: 8090
+      SANDBOX_OUTPUT_UID: 10001
+      SANDBOX_OUTPUT_GID: 10001
+      SCIENTIFIC_AGENT_MAX_WALL_SECONDS: ${SCIENTIFIC_AGENT_MAX_WALL_SECONDS:-300}
+      SCIENTIFIC_AGENT_MAX_MEMORY_BYTES: ${SCIENTIFIC_AGENT_MAX_MEMORY_BYTES:-8589934592}
+      SCIENTIFIC_AGENT_MAX_PROCESSES: ${SCIENTIFIC_AGENT_MAX_PROCESSES:-32}
+      SCIENTIFIC_AGENT_MAX_FILE_BYTES: ${SCIENTIFIC_AGENT_MAX_FILE_BYTES:-67108864}
+      SCIENTIFIC_AGENT_MAX_OUTPUT_BYTES: ${SCIENTIFIC_AGENT_MAX_OUTPUT_BYTES:-268435456}
+      SCIENTIFIC_AGENT_MAX_CODE_BYTES: ${SCIENTIFIC_AGENT_MAX_CODE_BYTES:-131072}
+      SCIENTIFIC_AGENT_MAX_CODE_CALLS: ${SCIENTIFIC_AGENT_MAX_CODE_CALLS:-12}
+    expose:
+      - "8090"
+    volumes:
+      - ${EVIDENCE_BENCH_DATA_PATH:-evidence-bench-data}:/data
+      - ${EVIDENCE_BENCH_ENVIRONMENTS_PATH:-evidence-bench-environments}:/environments:ro
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=1g,mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETFCAP
+      - SETGID
+      - SETPCAP
+      - SETUID
+      - SYS_ADMIN
+      - SYS_CHROOT
+    security_opt:
+      - apparmor=unconfined
+      - seccomp=unconfined
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 10g
+    cpus: 3
+    networks:
+      - sandbox
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/healthz', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+
+  environment-worker:
+    build:
+      context: .
+      target: environment-worker
+    image: evidence-bench-packages:0.3.0
+    restart: unless-stopped
+    user: "0:0"
+    environment:
+      SCIENTIFIC_AGENT_PACKAGE_WORKER_TOKEN: ${PACKAGE_WORKER_TOKEN:-}
+      SCIENTIFIC_AGENT_ENVIRONMENTS_DIR: /environments
+      PACKAGE_WORKER_HOST: 0.0.0.0
+      PACKAGE_WORKER_PORT: 8091
+      SCIENTIFIC_AGENT_MAX_PACKAGES_PER_CALL: ${SCIENTIFIC_AGENT_MAX_PACKAGES_PER_CALL:-24}
+      SCIENTIFIC_AGENT_PACKAGE_TIMEOUT_SECONDS: ${SCIENTIFIC_AGENT_PACKAGE_TIMEOUT_SECONDS:-900}
+      SCIENTIFIC_AGENT_MAX_ENVIRONMENT_BYTES: ${SCIENTIFIC_AGENT_MAX_ENVIRONMENT_BYTES:-21474836480}
+      SCIENTIFIC_AGENT_WORKER_IMAGE_ID: evidence-bench-packages:0.3.0
+    expose:
+      - "8091"
+    volumes:
+      - ${EVIDENCE_BENCH_ENVIRONMENTS_PATH:-evidence-bench-environments}:/environments
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=4g,mode=1777
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+      - SYS_ADMIN
+      - SYS_CHROOT
+    security_opt:
+      - apparmor=unconfined
+      - seccomp=unconfined
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 12g
+    cpus: 4
+    networks:
+      - packages
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8091/healthz', timeout=3)"]
+      interval: 15s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+
+volumes:
+  evidence-bench-data:
+  evidence-bench-environments:
+
+networks:
+  sandbox:
+    internal: true
+  packages:

@@ -8,16 +8,26 @@ version = "0.3.0"
 description = "Evidence-gated ADK workflow using Qwen as executor and Gemma as independent critic"
 readme = "README.md"
 requires-python = ">=3.11"
+license = "Apache-2.0"
+authors = [{ name = "Konrad Stawiski" }]
+keywords = ["a2a", "scientific-computing", "local-llm", "adk", "provenance"]
 dependencies = [
   "google-adk==2.3.0",
   "litellm==1.83.7",
   "mcp==1.28.1",
   "httpx>=0.28,<1",
+  "packaging>=24,<27",
   "pydantic>=2.11,<3",
   "a2a-sdk[fastapi]==1.1.0",
   "python-multipart>=0.0.20,<1",
   "uvicorn[standard]>=0.35,<1",
 ]
+
+[project.urls]
+Homepage = "https://github.com/kstawiski/evidence-gated-scientific-agent"
+Documentation = "https://github.com/kstawiski/evidence-gated-scientific-agent#readme"
+Issues = "https://github.com/kstawiski/evidence-gated-scientific-agent/issues"
+Source = "https://github.com/kstawiski/evidence-gated-scientific-agent"
 
 [project.optional-dependencies]
 dev = [
@@ -36,6 +46,8 @@ analysis = [
 [project.scripts]
 scientific-agent = "scientific_agent.cli:main"
 scientific-agent-web = "scientific_agent.web.app:main"
+scientific-agent-sandbox-worker = "scientific_agent.sandbox_worker:main"
+scientific-agent-environment-worker = "scientific_agent.environment_worker:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["scientific_agent"]

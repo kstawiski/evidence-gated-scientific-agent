@@ -94,6 +94,16 @@ class SandboxSettings:
         )
     )
     r_library: Path = field(default_factory=_r_library)
+    worker_url: str = field(
+        default_factory=lambda: os.environ.get(
+            "SCIENTIFIC_AGENT_SANDBOX_WORKER_URL", ""
+        ).rstrip("/")
+    )
+    worker_token: str = field(
+        default_factory=lambda: os.environ.get(
+            "SCIENTIFIC_AGENT_SANDBOX_WORKER_TOKEN", ""
+        )
+    )
     max_wall_seconds: int = int(
         os.environ.get("SCIENTIFIC_AGENT_MAX_WALL_SECONDS", "300")
     )
@@ -113,13 +123,34 @@ class SandboxSettings:
         os.environ.get("SCIENTIFIC_AGENT_MAX_CODE_BYTES", str(128 * 1024))
     )
     max_calls_per_attempt: int = int(
-        os.environ.get("SCIENTIFIC_AGENT_MAX_CODE_CALLS", "8")
+        os.environ.get("SCIENTIFIC_AGENT_MAX_CODE_CALLS", "12")
+    )
+
+
+@dataclass(frozen=True)
+class EnvironmentSettings:
+    worker_url: str = field(
+        default_factory=lambda: os.environ.get(
+            "SCIENTIFIC_AGENT_PACKAGE_WORKER_URL", ""
+        ).rstrip("/")
+    )
+    worker_token: str = field(
+        default_factory=lambda: os.environ.get(
+            "SCIENTIFIC_AGENT_PACKAGE_WORKER_TOKEN", ""
+        )
+    )
+    max_packages_per_call: int = int(
+        os.environ.get("SCIENTIFIC_AGENT_MAX_PACKAGES_PER_CALL", "24")
+    )
+    install_timeout_seconds: int = int(
+        os.environ.get("SCIENTIFIC_AGENT_PACKAGE_TIMEOUT_SECONDS", "900")
     )
 
 
 @dataclass(frozen=True)
 class Settings:
     sandbox: SandboxSettings = field(default_factory=SandboxSettings)
+    environment: EnvironmentSettings = field(default_factory=EnvironmentSettings)
     qwen: ModelEndpoint = field(
         default_factory=lambda: ModelEndpoint(
             base_url=os.environ.get(
@@ -175,31 +206,42 @@ def load_mcp_secrets(path: Path | None = None) -> dict[str, str]:
             str(Path.home() / ".config" / "mcp-services.env"),
         )
     )
-    if not secret_file.exists():
-        return {}
-    info = secret_file.lstat()
-    if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
-        raise PermissionError(f"secret file must be a regular non-symlink: {secret_file}")
-    if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o600:
-        raise PermissionError(f"secret file must be current-user-owned and mode 600: {secret_file}")
+    values: dict[str, str] = {
+        name: os.environ[name] for name in _SECRET_NAMES if os.environ.get(name)
+    }
+    if secret_file.exists():
+        info = secret_file.lstat()
+        if stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
+            raise PermissionError(
+                f"secret file must be a regular non-symlink: {secret_file}"
+            )
+        mode = stat.S_IMODE(info.st_mode)
+        owner_private = info.st_uid == os.getuid() and mode == 0o600
+        docker_secret = info.st_uid == 0 and mode in {0o400, 0o440, 0o444}
+        if not owner_private and not docker_secret:
+            raise PermissionError(
+                "secret file must be current-user-owned mode 600 or a "
+                f"root-owned read-only container secret: {secret_file}"
+            )
 
-    values: dict[str, str] = {}
-    for raw in secret_file.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        if line.startswith("export "):
-            line = line[7:].strip()
-        if "=" not in line:
-            continue
-        name, value = line.split("=", 1)
-        name = name.strip()
-        if name not in _SECRET_NAMES:
-            continue
-        parsed = shlex.split(value, posix=True)
-        if len(parsed) != 1:
-            raise ValueError(f"invalid secret assignment for {name}")
-        values[name] = parsed[0]
+        file_values: dict[str, str] = {}
+        for raw in secret_file.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[7:].strip()
+            if "=" not in line:
+                continue
+            name, value = line.split("=", 1)
+            name = name.strip()
+            if name not in _SECRET_NAMES:
+                continue
+            parsed = shlex.split(value, posix=True)
+            if len(parsed) != 1:
+                raise ValueError(f"invalid secret assignment for {name}")
+            file_values[name] = parsed[0]
+        values = {**file_values, **values}
 
     if "BRAVE_API_KEY" not in values and values.get("BRAVE_SEARCH_API_KEY"):
         values["BRAVE_API_KEY"] = values["BRAVE_SEARCH_API_KEY"]

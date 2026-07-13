@@ -4,7 +4,11 @@ from pathlib import Path
 import pytest
 
 from scientific_agent.config import SandboxSettings
-from scientific_agent.execution import AnalysisExecutor
+from scientific_agent.execution import (
+    AnalysisExecutor,
+    RemoteAnalysisExecutor,
+    sandbox_preflight,
+)
 
 
 def _executor(tmp_path: Path, **overrides) -> AnalysisExecutor:
@@ -12,6 +16,50 @@ def _executor(tmp_path: Path, **overrides) -> AnalysisExecutor:
     workspace.mkdir(parents=True)
     settings = replace(SandboxSettings(), **overrides)
     return AnalysisExecutor(workspace, tmp_path / "computations", settings)
+
+
+def test_environment_snapshot_resolves_immutable_generation_and_copies_lock(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    environments = tmp_path / "environments" / str(__import__("uuid").uuid4())
+    generation = environments / ".generations" / "python-one"
+    (generation / "packages").mkdir(parents=True)
+    (generation / "lock.json").write_text('{"installed":[]}\n', encoding="utf-8")
+    (environments / "python").symlink_to(".generations/python-one")
+    executor = AnalysisExecutor(
+        workspace,
+        tmp_path / "computations",
+        SandboxSettings(),
+        environment_dir=environments,
+    )
+    call_dir = executor.root / "snapshot"
+    call_dir.mkdir()
+    packages, locks, artifacts = executor._snapshot_environment("python", call_dir)
+    assert packages == (generation / "packages").resolve()
+    assert set(locks) == {"python"}
+    assert artifacts[0].path.endswith("environment-python-lock.json")
+
+
+def test_remote_preflight_uses_managed_worker_paths(tmp_path, monkeypatch):
+    calls = []
+
+    def execute(self, language, code, timeout_seconds=120):
+        del code, timeout_seconds
+        calls.append((language, self.workspace, self.root))
+        return {"status": "succeeded"}
+
+    monkeypatch.setenv("SCIENTIFIC_AGENT_DATA_DIR", str(tmp_path))
+    monkeypatch.setattr(RemoteAnalysisExecutor, "execute", execute)
+    settings = replace(
+        SandboxSettings(), worker_url="http://sandbox:8090", worker_token="x" * 32
+    )
+    result = sandbox_preflight(settings)
+
+    assert result["probes"] == {"python": "succeeded", "r": "succeeded"}
+    assert [item[0] for item in calls] == ["python", "r"]
+    assert all(item[1].parts[-1] == "files" for item in calls)
+    assert all("runs" in item[2].parts for item in calls)
+    assert not any((tmp_path / "workspaces").iterdir())
 
 
 @pytest.mark.live
@@ -83,6 +131,8 @@ pathlib.Path('/output/python_summary.json').write_text(json.dumps(summary))
         """
 data <- read.csv('/workspace/values.csv')
 means <- aggregate(value ~ group, data=data, FUN=mean)
+python_means <- read.csv('/prior/exec-001/output/python_means.csv')
+stopifnot(all.equal(means$value, python_means$value))
 write.csv(means, '/output/r_means.csv', row.names=FALSE)
 """,
         timeout_seconds=30,
@@ -121,3 +171,65 @@ def test_sandbox_rejects_timeout_symlink_and_excess_calls(tmp_path):
     denied = budgeted.execute("python", "print('second')", 10)
     assert denied["status"] == "policy_denied"
     assert "analysis call budget exhausted" in denied["violations"]
+    assert denied["calls_used"] == 2
+    assert denied["calls_remaining"] == 0
+    assert denied["stop_required"] is True
+
+
+@pytest.mark.live
+def test_repair_attempt_can_read_prior_attempt_history(tmp_path):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    history = tmp_path / "computations"
+    first = AnalysisExecutor(workspace, history / "attempt-0", SandboxSettings())
+    created = first.execute(
+        "python",
+        "open('/output/reference.json', 'w').write('{\"estimate\": 5}')",
+        10,
+    )
+    assert created["status"] == "succeeded"
+
+    repaired = AnalysisExecutor(workspace, history / "attempt-1", SandboxSettings())
+    compared = repaired.execute(
+        "python",
+        """
+import json
+value = json.load(open('/history/attempt-0/exec-001/output/reference.json'))
+open('/output/checked.txt', 'w').write(str(value['estimate']))
+""",
+        10,
+    )
+    assert compared["status"] == "succeeded", compared["stderr"]
+    assert Path(compared["artifacts"][-1]["path"]).read_text() == "5"
+
+
+@pytest.mark.live
+def test_failed_partial_outputs_are_auditable_but_not_reusable(tmp_path):
+    executor = _executor(tmp_path)
+    failed = executor.execute(
+        "python",
+        "open('/output/partial.json', 'w').write('{}'); raise RuntimeError('stop')",
+        10,
+    )
+    assert failed["status"] == "failed"
+    assert failed["output_previews"] == {}
+    rejected = [
+        item
+        for item in failed["artifacts"]
+        if item["description"] == "rejected sandbox output (not evidence)"
+    ]
+    assert len(rejected) == 1
+    assert "rejected_output" in rejected[0]["path"]
+    assert not (executor.root / "exec-001" / "output" / "partial.json").exists()
+
+    checked = executor.execute(
+        "python",
+        """
+from pathlib import Path
+visible = Path('/prior/exec-001/output/partial.json').exists()
+Path('/output/visibility.txt').write_text(str(visible))
+""",
+        10,
+    )
+    assert checked["status"] == "succeeded"
+    assert Path(checked["artifacts"][-1]["path"]).read_text() == "False"

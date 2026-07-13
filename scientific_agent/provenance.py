@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import platform
+import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -66,3 +68,51 @@ def build_manifest(run_dir: Path) -> dict[str, Any]:
     manifest = {"created_at": utc_now(), "files": files}
     write_json(run_dir / "manifest.json", manifest)
     return manifest
+
+
+def build_input_manifest(workspace: Path) -> dict[str, Any]:
+    """Describe immutable run inputs without copying potentially sensitive data."""
+
+    root = workspace.resolve()
+    files = []
+    for path in sorted(root.iterdir(), key=lambda item: item.name.lower()):
+        if path.is_symlink() or not path.is_file():
+            continue
+        files.append(
+            {
+                "path": path.name,
+                "bytes": path.stat().st_size,
+                "sha256": sha256_file(path),
+            }
+        )
+    return {"created_at": utc_now(), "files": files}
+
+
+def build_environment_snapshot(*, application_version: str) -> dict[str, Any]:
+    """Capture reproducibility-relevant controller/runtime identity."""
+
+    lockfiles = []
+    for path in (Path("/app/uv.lock"), Path("/var/lib/dpkg/status")):
+        if path.is_file():
+            lockfiles.append(
+                {
+                    "path": str(path),
+                    "bytes": path.stat().st_size,
+                    "sha256": sha256_file(path),
+                }
+            )
+    return {
+        "created_at": utc_now(),
+        "application": {"name": "Evidence Bench", "version": application_version},
+        "platform": {
+            "system": platform.system(),
+            "release": platform.release(),
+            "machine": platform.machine(),
+        },
+        "python": {
+            "implementation": platform.python_implementation(),
+            "version": platform.python_version(),
+            "executable": sys.executable,
+        },
+        "dependency_lockfiles": lockfiles,
+    }

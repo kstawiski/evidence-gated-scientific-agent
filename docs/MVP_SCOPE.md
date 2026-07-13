@@ -27,17 +27,28 @@
 14. Computation records containing source/log/output hashes, and deterministic
     rejection of computed claims that cite anything except a successful generated
     output artifact.
+15. Authenticated browser workbench, isolated persistent workspaces, uploads,
+    run history, artifact downloads, and provenance bundles.
+16. Standards-based A2A 1.0 Agent Card and JSON-RPC execution using the official
+    Python SDK.
+17. On-demand per-workspace PyPI, CRAN, and Bioconductor environments built by a
+    separate networked worker and mounted read-only into offline analyses.
+18. Cross-call analysis pipelines through read-only `/prior` artifacts and
+    deterministic success gates for every explicitly requested language.
+19. Per-attempt rejected-draft provenance, cumulative evidence reuse during repair,
+    and fail-soft preservation when an independent critic or later run stage is
+    unavailable.
 
 ## Explicitly deferred
 
-- Arbitrary host shell commands, Git mutation, package installation, workspace
-  writes, and database calls.
-- User-selectable environments or dependency installation inside a run.
+- Arbitrary host shell commands, Git mutation, operating-system package
+  installation, workspace writes, and database calls.
 - Domain validators for RNA-seq, variants, survival analysis, and figures.
 - Clean-environment computational reruns.
 - Visual Gemma audit of generated figures.
 - Human approval UI for irreversible or decision-critical actions.
-- Persistent services, authentication, or multi-user isolation.
+- Per-person accounts/roles and OIDC; the current trusted-lab deployment uses one
+  Basic Auth account plus an independent A2A bearer token.
 - Automatic task routing into the local-scientist lane.
 
 ## Implemented execution-tool gate
@@ -52,10 +63,10 @@
 - The tools remain absent from the allow-list unless the caller sets
   `--enable-code`; model agreement cannot grant that authority.
 
-## Gate before automatic routing
+## Gate before high-consequence automatic routing
 
-- All offline and live tests pass from a fresh environment (currently 29 offline,
-  3 model/MCP, and 2 local-sandbox gates).
+- All offline, container, model/MCP, package-registry, A2A, and scientific
+  simulation tests pass from a fresh environment.
 - At least 30 representative tasks and 20 adversarial cases are recorded.
 - Qwen-only, validators-only, review-every-operation, and evidence-gated modes
   are compared on error rate, completion, latency, tokens, and false blocking.

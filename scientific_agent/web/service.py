@@ -11,7 +11,7 @@ from typing import Awaitable, Callable
 
 from ..config import Settings
 from ..orchestrator import run_scientific_task
-from ..provenance import utc_now
+from ..provenance import build_manifest, utc_now, write_json
 from ..schemas import RunResult
 from .store import ACTIVE_RUN_STATES, WorkspaceStore
 
@@ -68,6 +68,9 @@ class TaskService:
             message="Independent plans are being prepared",
             started_at=utc_now(),
         )
+        existing_run_dirs = {
+            path.resolve() for path in runs_dir.iterdir() if path.is_dir()
+        }
         try:
             result = await self.runner(
                 run["objective"],
@@ -78,6 +81,23 @@ class TaskService:
                 progress=progress,
             )
         except Exception as exc:
+            provenance_dir = None
+            candidates = [
+                path.resolve()
+                for path in runs_dir.iterdir()
+                if path.is_dir() and path.resolve() not in existing_run_dirs
+            ]
+            if candidates:
+                partial = max(candidates, key=lambda path: path.stat().st_mtime_ns)
+                try:
+                    write_json(
+                        partial / "run_failure.json",
+                        {"error_type": type(exc).__name__, "failed_at": utc_now()},
+                    )
+                    build_manifest(partial)
+                    provenance_dir = str(partial)
+                except Exception:
+                    provenance_dir = None
             self.store.update_run(
                 run_id,
                 status="failed",
@@ -85,6 +105,7 @@ class TaskService:
                 message="The run stopped before producing a validated result",
                 finished_at=utc_now(),
                 error_type=type(exc).__name__,
+                provenance_dir=provenance_dir,
             )
             return self.store.get_run(run_id)
         self.store.update_run(

@@ -8,6 +8,7 @@ node output.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from typing import Any, TypeVar
 
@@ -100,7 +101,17 @@ async def request_structured(
                 if endpoint.api_key
                 else None
             )
-            response = await client.post(url, json=request_body, headers=headers)
+            for transport_attempt in range(2):
+                try:
+                    async with asyncio.timeout(timeout):
+                        response = await client.post(
+                            url, json=request_body, headers=headers
+                        )
+                    break
+                except httpx.TransportError:
+                    if transport_attempt == 1:
+                        raise
+                    await asyncio.sleep(0.25)
             response.raise_for_status()
             content, last_finish_reason = _message_content(response.json())
             last_content = content

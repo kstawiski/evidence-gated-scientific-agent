@@ -182,19 +182,27 @@ uv run scientific-agent run \
   - < /private/task.txt
 
 uv run scientific-agent run \
-  --enable-code --mcp '' \
+  --mode simple --enable-code --mcp '' \
   "Analyze data/cohort.csv in Python, independently check group summaries in R, and save result tables"
 ```
+
+`--mode simple` is the default for bounded retrieval, calculation, and evidence
+extraction: one lean Qwen plan/execution path, deterministic validation, and one
+final Gemma audit. It does not run dual plans or retry merely because the critic
+disagrees. Use `--mode full` for genuinely multi-stage scientific design.
 
 The base Python runtime exposes NumPy, pandas, SciPy, statsmodels, scikit-learn,
 and matplotlib. The base R runtime exposes ggplot2, dplyr, survival, data.table,
 and jsonlite. Additional PyPI/CRAN/Bioconductor packages are installed on demand
 per workspace. Scripts read inputs at `/workspace`, earlier calls in the current
 attempt at `/prior`, earlier repair attempts at `/history`, and
-must write outputs below `/output`. Each call is isolated, offline,
+must write outputs below `/output`. Code-enabled preflight
+imports the full Python/R analysis set inside the sandbox and fails before model
+execution if the host installation is incomplete. Each call is isolated, offline,
 resource-bounded, and capped by a per-attempt call budget.
-The default allowance is 12 calls per attempt so ordinary Python/R corrections
-remain usable; tool responses expose the remaining count and exhaustion fails closed.
+Full mode allows 12 calls per attempt so ordinary Python/R corrections remain
+usable; simple mode caps itself at four calls and 120 seconds per call. Tool
+responses expose the remaining count and exhaustion fails closed.
 
 Each run creates a mode-0700 directory under `runs/` containing the typed plan,
 lint result, report, Gemma audit, run configuration, private size-bounded MCP

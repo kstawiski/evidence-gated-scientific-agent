@@ -7,6 +7,14 @@ scientific risk, and security risk. Unknown requirements stay explicit. Your
 plan_label must be A. Do not invent data or sources. Use at most three concise
 steps and one short sentence per list item."""
 
+SIMPLE_PLANNER = """Create one lean, executable PlanProposal for a bounded
+scientific task. Use plan_label MASTER. Prefer one step and never exceed two.
+Request each tool at most once unless a deterministic validator requires a
+different computation. Declare only outputs the task actually needs. Include
+concrete validators and stop conditions, preserve unknowns, and avoid provenance,
+ledger, packaging, or report-generation steps because the controller supplies
+those automatically. Return PlanProposal only."""
+
 PLANNER_B = """You are Plan B, an independent methodological planner and critic.
 Work without knowledge of Plan A. Prefer finding leakage, post-hoc choices,
 missing controls, alternative explanations, and reproducibility failures. Return
@@ -97,6 +105,14 @@ Every substantive claim must have a ClaimRecord and
 must link to retrieved SourceRecord IDs unless it is explicitly a hypothesis or
 unsupported/inconclusive. Distinguish observations, computations, literature
 support, inference, and hypothesis. Preserve uncertainty. Return ScientificReport."""
+
+SIMPLE_REPORTER = REPORTER + """
+For this bounded simple task, return only the requested result and the minimum
+evidence needed to validate it. Use at most three ClaimRecords, one SourceRecord
+per distinct computation artifact or retrieved source, at most three short method
+items, a one-sentence executive summary, no more than two short limitations, and
+a narrative under 150 words. Do not restate the plan, controller contract, schema,
+or provenance procedure."""
 
 REPORT_AUDITOR = """Independently audit the ScientificReport against the task,
 master plan, deterministic validation, retrieval_evidence, computation_evidence,

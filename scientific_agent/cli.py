@@ -49,6 +49,12 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="authorize offline, resource-bounded Python and R analysis tools",
     )
+    execute.add_argument(
+        "--mode",
+        choices=("simple", "full"),
+        default="simple",
+        help="simple uses one lean Qwen plan and one final Gemma audit; full uses dual planning",
+    )
     return parser
 
 
@@ -101,6 +107,7 @@ def main(argv: list[str] | None = None) -> int:
             mcp_names=names,
             include_chrome=include_chrome,
             enable_code=args.enable_code,
+            simple_mode=args.mode == "simple",
         )
         print(result.model_dump_json(indent=2))
         return 0 if result.status in {"supported", "supported_with_comments"} else 3

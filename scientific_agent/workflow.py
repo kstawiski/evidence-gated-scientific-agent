@@ -13,7 +13,7 @@ from pydantic import BaseModel
 
 from .config import Settings
 from .linting import lint_plan
-from .prompts import PLAN_AUDITOR, PLANNER_A, PLANNER_B, SYNTHESIZER
+from .prompts import PLAN_AUDITOR, PLANNER_A, PLANNER_B, SIMPLE_PLANNER, SYNTHESIZER
 from .schemas import (
     MasterPlan,
     PlanBundle,
@@ -146,6 +146,45 @@ def package_planning(node_input: dict) -> PlanningResult:
         audit=audit,
         plan_lints=[master_lint],
         status=status,
+    )
+
+
+async def build_simple_planning(settings: Settings, task: TaskSpec) -> PlanningResult:
+    """Create one lean Qwen plan; final-result Gemma audit remains independent."""
+
+    proposal = await request_structured(
+        settings.qwen,
+        system_prompt=SIMPLE_PLANNER,
+        payload=task,
+        output_type=PlanProposal,
+        temperature=0.2,
+        max_tokens=1800,
+        timeout=90,
+        enable_thinking=False,
+    )
+    artifacts = list(proposal.expected_artifacts)
+    controller_report = "Evidence-backed scientific report with claim and source ledgers"
+    if controller_report in task.deliverables and controller_report not in artifacts:
+        artifacts.append(controller_report)
+    proposal = proposal.model_copy(
+        update={"plan_label": "MASTER", "expected_artifacts": artifacts}
+    )
+    lint = lint_plan(task, proposal)
+    audit = VerificationReport(
+        verdict="pass" if lint.passed else "inconclusive",
+        evidence_refs=["deterministic simple-plan lint; final Gemma result audit required"],
+    )
+    return PlanningResult(
+        master_plan=MasterPlan(
+            task=task,
+            plan=proposal,
+            resolutions=[],
+            method_lock_required=task.scientific_risk in {"confirmatory", "decision_critical"},
+            protocol_fields=[],
+        ),
+        audit=audit,
+        plan_lints=[lint],
+        status="supported" if lint.passed else "inconclusive",
     )
 
 

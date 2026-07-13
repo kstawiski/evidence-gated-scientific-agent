@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
@@ -26,6 +27,7 @@ from .prompts import (
     REPORT_AUDITOR,
     REPORTER,
     RESEARCHER,
+    SIMPLE_REPORTER,
     SYNTHESIZER,
 )
 from .provenance import (
@@ -50,7 +52,7 @@ from .schemas import (
     TaskSpec,
     VerificationReport,
 )
-from .workflow import build_planning_workflow, normalize_task
+from .workflow import build_planning_workflow, build_simple_planning, normalize_task
 from .workspace_tools import build_workspace_tools
 from .structured_client import request_structured
 
@@ -268,6 +270,7 @@ async def _produce_report(
     existing_computation: ComputationEvidence | None = None,
     controller_artifacts: tuple[ArtifactRef, ...] = (),
     controller_dates: tuple[str, ...] = (),
+    simple_mode: bool = False,
 ) -> tuple[ScientificReport, RetrievalEvidence, ComputationEvidence]:
     toolsets = build_mcp_toolsets(settings, mcp_names) if mcp_names else []
     workspace_tools = build_workspace_tools(settings.workspace)
@@ -282,10 +285,19 @@ async def _produce_report(
     if enable_code:
         if computation_dir is None:
             raise ValueError("computation_dir is required when code execution is enabled")
+        sandbox = (
+            replace(
+                settings.sandbox,
+                max_calls_per_attempt=min(settings.sandbox.max_calls_per_attempt, 4),
+                max_wall_seconds=min(settings.sandbox.max_wall_seconds, 120),
+            )
+            if simple_mode
+            else settings.sandbox
+        )
         executor = create_analysis_executor(
             settings.workspace,
             computation_dir,
-            settings.sandbox,
+            sandbox,
         )
         analysis_tools = build_analysis_tools(executor)
         if packages_enabled:
@@ -310,8 +322,8 @@ async def _produce_report(
         model=qwen_model(
             settings,
             temperature=0.3 if repairing else 0.6,
-            max_tokens=4000,
-            timeout=240,
+            max_tokens=2600 if simple_mode else 4000,
+            timeout=120 if simple_mode else 240,
         ),
         instruction=RESEARCHER,
         tools=[*workspace_tools, *environment_tools, *analysis_tools, *toolsets],
@@ -413,12 +425,14 @@ async def _produce_report(
     }
     report = await request_structured(
         settings.qwen,
-        system_prompt=REPAIRER if repairing else REPORTER,
+        system_prompt=(
+            REPAIRER if repairing else SIMPLE_REPORTER if simple_mode else REPORTER
+        ),
         payload=report_payload,
         output_type=ScientificReport,
         temperature=0.2 if repairing else 0.4,
-        max_tokens=5000,
-        timeout=180,
+        max_tokens=4000 if simple_mode else 5000,
+        timeout=90 if simple_mode else 180,
         enable_thinking=False,
     )
     return report, retrieval, computation
@@ -433,6 +447,7 @@ async def _audit_report(
     computation: ComputationEvidence,
     controller_artifacts: tuple[ArtifactRef, ...] = (),
     controller_dates: tuple[str, ...] = (),
+    simple_mode: bool = False,
 ) -> VerificationReport:
     payload = {
         "task": planning.master_plan.task.model_dump(mode="json"),
@@ -458,8 +473,8 @@ async def _audit_report(
         payload=payload,
         output_type=VerificationReport,
         temperature=0.3,
-        max_tokens=1600,
-        timeout=240,
+        max_tokens=1000 if simple_mode else 1600,
+        timeout=90 if simple_mode else 240,
         enable_thinking=False,
     )
 
@@ -474,6 +489,7 @@ async def _audit_report_resilient(
     ledger: EventLedger,
     controller_artifacts: tuple[ArtifactRef, ...] = (),
     controller_dates: tuple[str, ...] = (),
+    simple_mode: bool = False,
 ) -> VerificationReport:
     try:
         return await _audit_report(
@@ -485,6 +501,7 @@ async def _audit_report_resilient(
             computation,
             controller_artifacts,
             controller_dates,
+            simple_mode,
         )
     except Exception as exc:
         error_type = type(exc).__name__
@@ -548,6 +565,7 @@ async def run_scientific_task(
     mcp_names: tuple[str, ...] | None = None,
     include_chrome: bool = False,
     enable_code: bool = False,
+    simple_mode: bool = False,
     progress: Callable[[str, str], None] | None = None,
 ) -> RunResult:
     def report_progress(phase: str, message: str) -> None:
@@ -579,7 +597,12 @@ async def run_scientific_task(
         build_environment_snapshot(application_version=__version__),
     )
     selected_mcp = mcp_names if mcp_names is not None else settings.mcp_servers
-    report_progress("planning", "Qwen and Gemma are preparing independent plans")
+    report_progress(
+        "planning",
+        "Qwen is preparing one lean plan"
+        if simple_mode
+        else "Qwen and Gemma are preparing independent plans",
+    )
     write_json(
         run_dir / "run_configuration.json",
         {
@@ -614,14 +637,18 @@ async def run_scientific_task(
                 else {"enabled": False}
             ),
             "max_repair_rounds": settings.max_repair_rounds,
+            "execution_mode": "simple" if simple_mode else "full",
         },
     )
 
-    workflow = build_planning_workflow(settings)
     task = _prepare_task_spec(objective, enable_code=enable_code)
     planning_input = task.model_dump_json()
-    planning = await run_typed(workflow, planning_input, PlanningResult)
-    if planning.status == "requires_revision":
+    if simple_mode:
+        planning = await build_simple_planning(settings, task)
+    else:
+        workflow = build_planning_workflow(settings)
+        planning = await run_typed(workflow, planning_input, PlanningResult)
+    if planning.status == "requires_revision" and not simple_mode:
         report_progress("plan-review", "The plan audit found a concrete issue; repairing it")
         ledger.append("plan_repair_started", {"reason": planning.audit.verdict})
         planning = await _repair_plan(settings, planning)
@@ -670,6 +697,7 @@ async def run_scientific_task(
         computation_dir=run_dir / "computations" / "attempt-0",
         controller_artifacts=controller_artifacts,
         controller_dates=controller_dates,
+        simple_mode=simple_mode,
     )
     report_progress("validation", "Running deterministic claim and artifact checks")
     required_languages = tuple(
@@ -703,6 +731,7 @@ async def run_scientific_task(
         ledger,
         controller_artifacts,
         controller_dates,
+        simple_mode,
     )
     _write_attempt_bundle(
         run_dir, 0, report, validation, review, retrieval, computation
@@ -711,8 +740,16 @@ async def run_scientific_task(
     while (
         (
             not validation.passed
-            or review.verdict == "fail"
-            or (review.verdict == "inconclusive" and review.blocking_findings)
+            or (
+                not simple_mode
+                and (
+                    review.verdict == "fail"
+                    or (
+                        review.verdict == "inconclusive"
+                        and review.blocking_findings
+                    )
+                )
+            )
         )
         and repair_rounds < settings.max_repair_rounds
     ):
@@ -747,6 +784,7 @@ async def run_scientific_task(
             existing_computation=computation,
             controller_artifacts=controller_artifacts,
             controller_dates=controller_dates,
+            simple_mode=simple_mode,
         )
         retrieval = _merge_retrieval_evidence(retrieval, repair_retrieval)
         computation = _merge_computation_evidence(computation, repair_computation)
@@ -770,6 +808,7 @@ async def run_scientific_task(
             ledger,
             controller_artifacts,
             controller_dates,
+            simple_mode,
         )
         _write_attempt_bundle(
             run_dir,

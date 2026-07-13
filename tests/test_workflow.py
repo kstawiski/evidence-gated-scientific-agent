@@ -26,6 +26,7 @@ from scientific_agent.schemas import (
 )
 from scientific_agent.workflow import (
     bind_controller_task,
+    build_simple_planning,
     build_planning_workflow,
     merge_and_lint,
     normalize_task,
@@ -240,3 +241,22 @@ async def test_unavailable_critic_is_inconclusive_and_recorded(tmp_path, monkeyp
     assert review.verdict == "inconclusive"
     assert "TimeoutError" in review.unsupported_claims[0]
     assert "independent_critic_unavailable" in (tmp_path / "events.jsonl").read_text()
+
+
+def test_simple_planning_uses_one_qwen_request(monkeypatch):
+    calls = []
+
+    async def fake_request(*_args, **kwargs):
+        calls.append(kwargs["system_prompt"])
+        return _plan("MASTER")
+
+    monkeypatch.setattr("scientific_agent.workflow.request_structured", fake_request)
+    import asyncio
+
+    controller_report = "Evidence-backed scientific report with claim and source ledgers"
+    task = _task().model_copy(update={"deliverables": [controller_report]})
+    result = asyncio.run(build_simple_planning(Settings(), task))
+    assert result.status == "supported"
+    assert len(calls) == 1
+    assert result.audit.verdict == "pass"
+    assert controller_report in result.master_plan.plan.expected_artifacts

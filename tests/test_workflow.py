@@ -88,7 +88,10 @@ def test_simple_planning_uses_one_qwen_request(monkeypatch):
     monkeypatch.setattr("scientific_agent.workflow.request_structured", fake_request)
     import asyncio
 
-    result = asyncio.run(build_simple_planning(Settings(), _task()))
+    controller_report = "Evidence-backed scientific report with claim and source ledgers"
+    task = _task().model_copy(update={"deliverables": [controller_report]})
+    result = asyncio.run(build_simple_planning(Settings(), task))
     assert result.status == "supported"
     assert len(calls) == 1
     assert result.audit.verdict == "pass"
+    assert controller_report in result.master_plan.plan.expected_artifacts

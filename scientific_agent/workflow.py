@@ -149,7 +149,13 @@ async def build_simple_planning(settings: Settings, task: TaskSpec) -> PlanningR
         timeout=90,
         enable_thinking=False,
     )
-    proposal = proposal.model_copy(update={"plan_label": "MASTER"})
+    artifacts = list(proposal.expected_artifacts)
+    controller_report = "Evidence-backed scientific report with claim and source ledgers"
+    if controller_report in task.deliverables and controller_report not in artifacts:
+        artifacts.append(controller_report)
+    proposal = proposal.model_copy(
+        update={"plan_label": "MASTER", "expected_artifacts": artifacts}
+    )
     lint = lint_plan(task, proposal)
     audit = VerificationReport(
         verdict="pass" if lint.passed else "inconclusive",

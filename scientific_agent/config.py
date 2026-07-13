@@ -31,12 +31,12 @@ def _executable(env_name: str, command: str, *fallbacks: str | Path) -> Path:
 
 
 def _python_runtime() -> Path:
-    return _executable(
-        "SCIENTIFIC_AGENT_PYTHON",
-        "python3",
+    return _first_existing(
+        os.environ.get("SCIENTIFIC_AGENT_PYTHON"),
         Path.home() / "micromamba/bin/python3",
         Path.home() / "miniforge3/bin/python3",
         sys.executable,
+        shutil.which("python3"),
     )
 
 
@@ -52,8 +52,8 @@ def _python_packages() -> Path:
     version = f"python{sys.version_info.major}.{sys.version_info.minor}"
     return _first_existing(
         configured,
-        Path.home() / ".local/lib" / version / "site-packages",
         _python_prefix() / "lib" / version / "site-packages",
+        Path.home() / ".local/lib" / version / "site-packages",
     )
 
 

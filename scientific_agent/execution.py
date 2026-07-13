@@ -158,6 +158,15 @@ class AnalysisExecutor:
             "/output",
         ]
         if language == "python":
+            try:
+                python_rel = self.settings.python.resolve().relative_to(
+                    self.settings.python_prefix.resolve()
+                )
+            except ValueError as exc:
+                raise RuntimeError(
+                    "sandbox Python executable must be inside its configured prefix"
+                ) from exc
+            sandbox_python = Path("/opt/python-runtime") / python_rel
             bwrap.extend(
                 [
                     "--dir",
@@ -177,7 +186,7 @@ class AnalysisExecutor:
                     "--setenv",
                     "MPLCONFIGDIR",
                     "/tmp/matplotlib",
-                    "/opt/python-runtime/bin/python3",
+                    str(sandbox_python),
                     "-I",
                     "-c",
                     (

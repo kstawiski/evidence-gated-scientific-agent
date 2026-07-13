@@ -98,7 +98,7 @@ The loader rejects symlinks, foreign ownership, and any mode other than `0600`.
 
 ```bash
 uv run pytest -m 'not live'
-uv run scientific-agent preflight --include-chrome --enable-code
+uv run scientific-agent preflight --mcp context7,brave-search,chrome-devtools --enable-code
 uv run pytest -m live tests/test_live.py
 uv run pytest tests/test_execution.py
 ```

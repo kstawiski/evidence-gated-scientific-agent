@@ -20,13 +20,10 @@ def _models(base_url: str) -> list[str]:
 
 async def run_preflight(
     settings: Settings,
-    include_chrome: bool = False,
+    mcp_names: tuple[str, ...] | None = None,
     include_code: bool = False,
 ) -> dict:
-    selected = ("context7", "brave-search", "chrome-devtools") if include_chrome else (
-        "context7",
-        "brave-search",
-    )
+    selected = mcp_names if mcp_names is not None else settings.mcp_servers
     result: dict = {
         "qwen": {"models": _models(settings.qwen.base_url)},
         "gemma": {"models": _models(settings.gemma.base_url)},
@@ -81,13 +78,13 @@ async def run_preflight(
 
 def preflight(
     settings: Settings,
-    include_chrome: bool = False,
+    mcp_names: tuple[str, ...] | None = None,
     include_code: bool = False,
 ) -> dict:
     return asyncio.run(
         run_preflight(
             settings,
-            include_chrome=include_chrome,
+            mcp_names=mcp_names,
             include_code=include_code,
         )
     )

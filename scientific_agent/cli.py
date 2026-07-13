@@ -18,7 +18,11 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="scientific-agent")
     sub = parser.add_subparsers(dest="command", required=True)
     check = sub.add_parser("preflight", help="check model endpoints and MCP schemas")
-    check.add_argument("--include-chrome", action="store_true")
+    check.add_argument(
+        "--mcp",
+        default="context7,brave-search",
+        help="comma-separated MCP servers to validate; pass an empty value for none",
+    )
     check.add_argument(
         "--enable-code",
         action="store_true",
@@ -75,11 +79,12 @@ def main(argv: list[str] | None = None) -> int:
     settings = Settings()
     try:
         if args.command == "preflight":
+            names = tuple(name.strip() for name in args.mcp.split(",") if name.strip())
             print(
                 json.dumps(
                     preflight(
                         settings,
-                        args.include_chrome,
+                        mcp_names=names,
                         include_code=args.enable_code,
                     ),
                     indent=2,

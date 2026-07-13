@@ -15,7 +15,10 @@ from scientific_agent.workflow import build_planning_workflow
 @pytest.mark.live
 @pytest.mark.asyncio
 async def test_live_model_and_mcp_preflight():
-    result = await run_preflight(Settings(), include_chrome=True)
+    result = await run_preflight(
+        Settings(),
+        mcp_names=("context7", "brave-search", "chrome-devtools"),
+    )
     assert not any(item["missing_required"] for item in result["mcp"].values())
 
 

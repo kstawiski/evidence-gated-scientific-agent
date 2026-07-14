@@ -126,6 +126,38 @@ def test_ui_api_auth_workspace_upload_and_run(tmp_path):
             assert archive.read("report.md").startswith(b"# Validated")
 
 
+def test_browser_auth_can_be_disabled_without_disabling_a2a_auth(tmp_path):
+    web = WebSettings(
+        data_dir=tmp_path,
+        auth_enabled=False,
+        username="",
+        password="",
+        a2a_token="a2a-secret",
+        public_url="https://agent.example.test",
+        max_workers=1,
+    )
+    with TestClient(create_app(web, Settings(), runner=fake_runner)) as client:
+        assert client.get("/").status_code == 200
+        created = client.post(
+            "/api/workspaces", json={"name": "Passwordless internal workspace"}
+        )
+        assert created.status_code == 201
+        assert client.get("/api/config").json()["browser_auth"] is False
+        assert client.post("/a2a", json={}).status_code == 401
+
+
+def test_browser_auth_flag_loads_from_environment(tmp_path, monkeypatch):
+    monkeypatch.setenv("SCIENTIFIC_AGENT_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("WEB_AUTH_ENABLED", "false")
+    monkeypatch.setenv("WEB_USERNAME", "")
+    monkeypatch.setenv("WEB_PASSWORD", "")
+    monkeypatch.setenv("A2A_TOKEN", "a2a-secret")
+
+    settings = WebSettings()
+    settings.validate()
+    assert settings.auth_enabled is False
+
+
 def test_a2a_card_and_jsonrpc_execution(tmp_path):
     with _client(tmp_path) as client:
         card = client.get("/.well-known/agent-card.json")

@@ -30,11 +30,15 @@ process namespaces.
 ```bash
 cp .env.example .env
 # Edit .env: set independent WEB_PASSWORD and A2A_TOKEN values and model URLs.
+# For a trusted private network with no browser login, set WEB_AUTH_ENABLED=false
+# and remove WEB_USERNAME / WEB_PASSWORD.
 docker compose up --build -d
 curl http://127.0.0.1:8080/healthz
 ```
 
-Open <http://127.0.0.1:8080> and sign in with `WEB_USERNAME` / `WEB_PASSWORD`.
+Open <http://127.0.0.1:8080>. By default, sign in with `WEB_USERNAME` /
+`WEB_PASSWORD`. When `WEB_AUTH_ENABLED=false`, the browser and REST API require
+no login; A2A and internal worker tokens remain enforced.
 The safe Compose default publishes only on loopback. Put the service behind TLS
 before changing `WEB_BIND_ADDRESS` to a LAN or public interface.
 

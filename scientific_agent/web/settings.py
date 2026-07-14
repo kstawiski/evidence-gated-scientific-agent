@@ -21,6 +21,9 @@ class WebSettings:
             os.environ.get("SCIENTIFIC_AGENT_DATA_DIR", "./web-data")
         ).resolve()
     )
+    auth_enabled: bool = field(
+        default_factory=lambda: _flag("WEB_AUTH_ENABLED", True)
+    )
     username: str = field(
         default_factory=lambda: os.environ.get("WEB_USERNAME", "scientist")
     )
@@ -52,9 +55,9 @@ class WebSettings:
         return self.data_dir / "workspaces"
 
     def validate(self) -> None:
-        if not self.username or not self.password:
+        if self.auth_enabled and (not self.username or not self.password):
             raise RuntimeError(
-                "WEB_USERNAME and WEB_PASSWORD are required for the standalone service"
+                "WEB_USERNAME and WEB_PASSWORD are required when WEB_AUTH_ENABLED is true"
             )
         if self.a2a_enabled and not self.a2a_token:
             raise RuntimeError("A2A_TOKEN is required when A2A_ENABLED is true")

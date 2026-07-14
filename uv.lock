@@ -613,7 +613,7 @@ wheels = [
 
 [[package]]
 name = "evidence-gated-scientific-agent"
-version = "0.3.0"
+version = "0.3.1"
 source = { editable = "." }
 dependencies = [
     { name = "a2a-sdk", extra = ["fastapi"] },

@@ -10,8 +10,11 @@ seven days and coordinate disclosure after a fix is available.
 ## Deployment boundary
 
 Evidence Bench is designed for trusted single-organization deployments. It uses
-HTTP Basic authentication for the browser and a separate bearer token for A2A;
-place it behind TLS before exposing it beyond loopback or a private network.
+HTTP Basic authentication for the browser by default and a separate bearer token
+for A2A; place it behind TLS before exposing it beyond loopback or a private
+network. Setting `WEB_AUTH_ENABLED=false` intentionally opens the UI and REST API
+to every client that can reach the bound address. Use that mode only on a trusted,
+access-controlled LAN or Tailnet; it is not an authentication mechanism.
 Python/R execution is delegated to the non-published sandbox-worker container and
 nested inside bubblewrap. Package installation uses a separate non-published
 worker with outbound network access but no research-data or secret mounts. Both

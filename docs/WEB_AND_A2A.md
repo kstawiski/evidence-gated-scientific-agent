@@ -104,10 +104,17 @@ host root, user home, SSH configuration, or cloud credentials.
 ## Shared lab deployment and persistence
 
 For a private lab instance, bind the service only to a private LAN/Tailnet address
-or place it behind an authenticated TLS reverse proxy. `WEB_USERNAME` and
-`WEB_PASSWORD` protect the browser; A2A uses a separate token. A shared Basic Auth
-account is suitable for a small trusted lab, but deployments requiring per-user
-attribution should terminate OIDC/SSO at a reverse proxy.
+or place it behind an authenticated TLS reverse proxy. Browser Basic Auth is
+enabled by default: `WEB_USERNAME` and `WEB_PASSWORD` protect the UI and REST API,
+while A2A uses a separate token. A shared Basic Auth account is suitable for a
+small trusted lab, but deployments requiring per-user attribution should terminate
+OIDC/SSO at a reverse proxy.
+
+On a trusted private network, set `WEB_AUTH_ENABLED=false` to remove the browser
+login and omit `WEB_USERNAME` and `WEB_PASSWORD`. This opens the UI and REST API
+to every client that can reach the bound address. It deliberately does not disable
+the A2A bearer token, sandbox-worker token, or package-worker token: those protect
+programmatic execution boundaries and do not create a login prompt for lab users.
 
 Set `EVIDENCE_BENCH_DATA_PATH` and `EVIDENCE_BENCH_ENVIRONMENTS_PATH` to durable
 host directories. The first contains SQLite metadata, uploads, reports, and run

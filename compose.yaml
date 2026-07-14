@@ -5,7 +5,7 @@ services:
     build:
       context: .
       target: runtime
-    image: evidence-bench:0.3.0
+    image: evidence-bench:0.3.1
     restart: unless-stopped
     env_file:
       - path: .env
@@ -45,7 +45,7 @@ services:
       - packages
 
   sandbox-worker:
-    image: evidence-bench:0.3.0
+    image: evidence-bench:0.3.1
     command: ["scientific-agent-sandbox-worker"]
     user: "0:0"
     restart: unless-stopped
@@ -105,7 +105,7 @@ services:
     build:
       context: .
       target: environment-worker
-    image: evidence-bench-packages:0.3.0
+    image: evidence-bench-packages:0.3.1
     restart: unless-stopped
     user: "0:0"
     environment:
@@ -116,7 +116,7 @@ services:
       SCIENTIFIC_AGENT_MAX_PACKAGES_PER_CALL: ${SCIENTIFIC_AGENT_MAX_PACKAGES_PER_CALL:-24}
       SCIENTIFIC_AGENT_PACKAGE_TIMEOUT_SECONDS: ${SCIENTIFIC_AGENT_PACKAGE_TIMEOUT_SECONDS:-900}
       SCIENTIFIC_AGENT_MAX_ENVIRONMENT_BYTES: ${SCIENTIFIC_AGENT_MAX_ENVIRONMENT_BYTES:-21474836480}
-      SCIENTIFIC_AGENT_WORKER_IMAGE_ID: evidence-bench-packages:0.3.0
+      SCIENTIFIC_AGENT_WORKER_IMAGE_ID: evidence-bench-packages:0.3.1
     expose:
       - "8091"
     volumes:

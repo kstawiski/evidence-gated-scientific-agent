@@ -81,7 +81,9 @@ class AuthenticationMiddleware:
                 )
                 await response(scope, receive, send)
                 return
-        elif not self._valid_basic_auth(authorization):
+        elif self.settings.auth_enabled and not self._valid_basic_auth(
+            authorization
+        ):
             response = _json_error(
                 401,
                 "authentication required",
@@ -187,6 +189,7 @@ def create_app(
                 "chrome-devtools": bool(settings.chrome_browser_url),
             },
             "a2a": web.a2a_enabled,
+            "browser_auth": web.auth_enabled,
             "max_upload_bytes": web.max_upload_bytes,
         }
 

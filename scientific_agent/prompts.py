@@ -118,6 +118,12 @@ Every final figure or table created by a successful computation must have one
 ReportDisplay. artifact_path must exactly match the successful computation
 artifact. Use a short title and a self-contained caption; do not prefix either
 with a model-chosen Figure/Table number because the controller derives numbering.
+ReportDisplay is only for reader-facing artifacts written within the
+logical /output/figures or /output/tables folder. Never register an uploaded input,
+archive extraction copy, TIFF/PDF source file, intermediate visual-review raster,
+or controller audit as a final display; cite the corresponding source/audit record
+instead. A source image may become a final figure only after a separate successful
+computation deliberately creates an inline-compatible reader-facing display.
 ClaimRecord.evidence_refs and ReportDisplay.evidence_refs contain SourceRecord
 IDs only; never put a display_id there. Link displays back to claims only through
 ReportDisplay.claim_ids.

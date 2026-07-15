@@ -14,7 +14,7 @@ import zipfile
 from dataclasses import dataclass, replace
 from io import BytesIO
 from pathlib import Path
-from typing import Callable
+from typing import Callable, cast
 from urllib.parse import urlsplit
 
 from google.adk import Agent
@@ -24,7 +24,7 @@ from . import __version__
 from .config import Settings
 from .execution import build_analysis_tools, create_analysis_executor
 from .environment import EnvironmentManager, build_environment_tools
-from .linting import lint_plan, validate_report
+from .linting import lint_plan, reconciliation_verdict, validate_report
 from .literature import (
     LiteratureAcquirer,
     RemotePdfTextExtractor,
@@ -63,6 +63,7 @@ from .reporting import (
 from .runtime import run_text, run_typed
 from .schemas import (
     ArtifactRef,
+    CheckSpec,
     ComputationEvidence,
     DeterministicValidation,
     Finding,
@@ -247,6 +248,130 @@ class ResearchBudgetExceeded(RuntimeError):
 
 
 @dataclass
+class ScientificToolOrderGate:
+    """Reserve analysis capacity before optional repeated literature retrieval."""
+
+    required_languages: frozenset[str]
+    require_reconciliation: bool = False
+    pubmed_search_attempts: int = 0
+    pubmed_search_successes: int = 0
+    pubmed_acquisition_attempts: int = 0
+    pubmed_acquisition_successes: int = 0
+
+    def missing_languages(
+        self,
+        current: ComputationEvidence,
+        existing: ComputationEvidence | None = None,
+    ) -> list[str]:
+        successful = {
+            record.language
+            for evidence in (existing, current)
+            if evidence is not None
+            for record in evidence.records
+            if record.status == "succeeded"
+        }
+        return sorted(self.required_languages - successful)
+
+    @staticmethod
+    def _has_passing_reconciliation(evidence: ComputationEvidence | None) -> bool:
+        if evidence is None:
+            return False
+        for record in evidence.records:
+            if record.status != "succeeded":
+                continue
+            for artifact in record.artifacts:
+                path = Path(artifact.path)
+                if (
+                    artifact.description != "sandbox-generated analysis artifact"
+                    or not any(
+                        marker in path.name.casefold()
+                        for marker in ("reconciliation", "crosscheck", "cross-check")
+                    )
+                ):
+                    continue
+                if reconciliation_verdict(path) is True:
+                    return True
+        return False
+
+    def missing_requirements(
+        self,
+        current: ComputationEvidence,
+        existing: ComputationEvidence | None = None,
+    ) -> tuple[list[str], bool]:
+        languages = self.missing_languages(current, existing)
+        reconciliation = self.require_reconciliation and not any(
+            self._has_passing_reconciliation(evidence)
+            for evidence in (current, existing)
+        )
+        return languages, reconciliation
+
+    def before_tool(
+        self,
+        tool_name: str,
+        current: ComputationEvidence,
+        existing: ComputationEvidence | None = None,
+    ) -> dict | None:
+        missing, reconciliation = self.missing_requirements(current, existing)
+        if not missing and not reconciliation:
+            return None
+        search_limit_reached = (
+            self.pubmed_search_successes >= 1 or self.pubmed_search_attempts >= 3
+        )
+        acquisition_limit_reached = (
+            self.pubmed_acquisition_successes >= 1
+            or self.pubmed_acquisition_attempts >= 3
+        )
+        if tool_name == "search_pubmed" and search_limit_reached:
+            return self._deferred(tool_name, missing, reconciliation)
+        if tool_name == "acquire_pubmed_article" and acquisition_limit_reached:
+            return self._deferred(tool_name, missing, reconciliation)
+        return None
+
+    @staticmethod
+    def _deferred(tool_name: str, missing: list[str], reconciliation: bool) -> dict:
+        requirements = [*missing]
+        if reconciliation:
+            requirements.append("passing cross-language reconciliation")
+        description = ", ".join(requirements)
+        return {
+            "status": "policy_denied",
+            "error": "REQUIRED_COMPUTATION_PENDING",
+            "reason": (
+                f"{tool_name} is deferred until successful artifacts exist for "
+                f"the required scientific step(s): {description}. Reuse the already "
+                "acquired paper and run the locked analysis next."
+            ),
+            "missing_required_languages": missing,
+            "reconciliation_required": reconciliation,
+        }
+
+    def record_result(self, tool_name: str, result) -> None:
+        if (
+            isinstance(result, dict)
+            and result.get("error") == "REQUIRED_COMPUTATION_PENDING"
+        ):
+            return
+        if tool_name == "search_pubmed":
+            self.pubmed_search_attempts += 1
+            if (
+                isinstance(result, dict)
+                and not result.get("error")
+                and bool(result.get("articles"))
+            ):
+                self.pubmed_search_successes += 1
+        elif tool_name == "acquire_pubmed_article":
+            self.pubmed_acquisition_attempts += 1
+            source = result.get("source_record") if isinstance(result, dict) else None
+            if (
+                isinstance(result, dict)
+                and not result.get("error")
+                and isinstance(source, dict)
+                and isinstance(source.get("local_markdown_path"), str)
+            ):
+                self.pubmed_acquisition_successes += 1
+
+
+@dataclass
 class ResearchBudgetController:
     """Controller-owned cumulative budget for one scientific run."""
 
@@ -370,6 +495,75 @@ def _without_noop_typography(review: VerificationReport) -> VerificationReport:
     )
 
 
+def _bounded_unique_text(values: list[str], limit: int, label: str) -> list[str]:
+    unique = list(dict.fromkeys(values))
+    if len(unique) <= limit:
+        return unique
+    omitted = len(unique) - (limit - 1)
+    return [
+        *unique[: limit - 1],
+        f"Controller aggregation omitted {omitted} additional unique {label}; "
+        "the per-batch critic records preserve the complete raw responses.",
+    ]
+
+
+def _bounded_unique_models(values: list, limit: int) -> tuple[list, int]:
+    unique = []
+    seen: set[str] = set()
+    for value in values:
+        key = value.model_dump_json()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(value)
+    if len(unique) <= limit:
+        return unique, 0
+    return unique[:limit], len(unique) - limit
+
+
+def _bounded_findings(values: list[Finding], limit: int, label: str) -> list[Finding]:
+    unique, omitted = _bounded_unique_models(values, limit)
+    if not omitted:
+        return unique
+    retained = unique[: limit - 1]
+    finding_slug = label.replace(" ", "-")
+    retained.append(
+        Finding(
+            finding_id=f"controller-{finding_slug}-overflow",
+            location="critic batch aggregation",
+            problem=f"{omitted + 1} additional unique {label} were omitted from the bounded aggregate.",
+            why_it_matters=(
+                "The aggregate schema is bounded, so absence from this summary is "
+                "not evidence that the raw finding was resolved."
+            ),
+            evidence="Each per-batch critic response is preserved as a run artifact.",
+            falsification_test_or_correction=(
+                "Inspect the per-batch critic records before adjudicating the "
+                "overflowed findings."
+            ),
+        )
+    )
+    return retained
+
+
+def _bounded_checks(values: list[CheckSpec], limit: int) -> list[CheckSpec]:
+    unique, omitted = _bounded_unique_models(values, limit)
+    if not omitted:
+        return unique
+    return [
+        *unique[: limit - 1],
+        CheckSpec(
+            check_id="controller-falsification-tests-overflow",
+            description=(
+                f"Inspect per-batch critic records: {omitted + 1} additional unique "
+                "falsification tests were omitted from this bounded aggregate."
+            ),
+            check_type="human",
+            blocking=False,
+        ),
+    ]
+
+
 def _merge_reviews(
     report_review: VerificationReport,
     display_review: VerificationReport,
@@ -390,36 +584,46 @@ def _merge_reviews(
     )
     return VerificationReport(
         verdict=verdict,
-        blocking_findings=[
-            *report_review.blocking_findings,
-            *display_review.blocking_findings,
-        ],
-        nonblocking_findings=[
-            *report_review.nonblocking_findings,
-            *display_review.nonblocking_findings,
-        ],
-        protocol_deviations=list(
-            dict.fromkeys(
-                [
-                    *report_review.protocol_deviations,
-                    *display_review.protocol_deviations,
-                ]
-            )
+        blocking_findings=_bounded_findings(
+            [*report_review.blocking_findings, *display_review.blocking_findings],
+            200,
+            "blocking findings",
         ),
-        unsupported_claims=list(
-            dict.fromkeys(
-                [
-                    *report_review.unsupported_claims,
-                    *display_review.unsupported_claims,
-                ]
-            )
+        nonblocking_findings=_bounded_findings(
+            [
+                *report_review.nonblocking_findings,
+                *display_review.nonblocking_findings,
+            ],
+            200,
+            "nonblocking findings",
         ),
-        proposed_falsification_tests=[
-            *report_review.proposed_falsification_tests,
-            *display_review.proposed_falsification_tests,
-        ],
-        evidence_refs=list(
-            dict.fromkeys([*report_review.evidence_refs, *display_review.evidence_refs])
+        protocol_deviations=_bounded_unique_text(
+            [
+                *report_review.protocol_deviations,
+                *display_review.protocol_deviations,
+            ],
+            100,
+            "protocol deviations",
+        ),
+        unsupported_claims=_bounded_unique_text(
+            [
+                *report_review.unsupported_claims,
+                *display_review.unsupported_claims,
+            ],
+            100,
+            "unsupported claims",
+        ),
+        proposed_falsification_tests=_bounded_checks(
+            [
+                *report_review.proposed_falsification_tests,
+                *display_review.proposed_falsification_tests,
+            ],
+            200,
+        ),
+        evidence_refs=_bounded_unique_text(
+            [*report_review.evidence_refs, *display_review.evidence_refs],
+            100,
+            "evidence references",
         ),
     )
 
@@ -979,10 +1183,15 @@ async def _review_input_visual_evidence(
     ]
     attempted = len(batches)
     succeeded = 0
+    batch_reports: list[dict] = []
+    batch_errors: list[dict] = []
     for batch_number, (batch_images, batch_inputs) in enumerate(batches, start=1):
         _cancel_checkpoint(cancel_event)
         paths_by_visual_id = {
             str(item["visual_id"]): str(item["artifact_path"]) for item in batch_inputs
+        }
+        labels_by_visual_id = {
+            str(item["visual_id"]): str(item["source_label"]) for item in batch_inputs
         }
         allowed_paths = set(paths_by_visual_id.values())
         try:
@@ -1013,9 +1222,30 @@ async def _review_input_visual_evidence(
                 cancel_event=cancel_event,
             )
             succeeded += 1
+            batch_reports.append(
+                {
+                    "batch": batch_number,
+                    "visual_inputs": [
+                        {
+                            "visual_id": item["visual_id"],
+                            "source_label": item["source_label"],
+                            "sha256": item["sha256"],
+                        }
+                        for item in batch_inputs
+                    ],
+                    "report": result.model_dump(mode="json"),
+                }
+            )
         except asyncio.CancelledError:
             raise
         except Exception as exc:
+            batch_errors.append(
+                {
+                    "batch": batch_number,
+                    "error_type": type(exc).__name__,
+                    "visual_ids": [item["visual_id"] for item in batch_inputs],
+                }
+            )
             missing.extend(
                 f"{item['artifact_path']} (Gemma review unavailable: {type(exc).__name__})"
                 for item in batch_inputs
@@ -1038,17 +1268,37 @@ async def _review_input_visual_evidence(
             f"{path} (Gemma returned no structured observation)"
             for path in sorted(allowed_paths - observed_paths)
         )
-        cross_findings.extend(result.cross_artifact_findings)
-        limitations.extend(result.limitations)
+
+        def source_labeled(value: str) -> str:
+            for visual_id, source_label in labels_by_visual_id.items():
+                value = value.replace(visual_id, source_label)
+            return value
+
+        cross_findings.extend(
+            source_labeled(value) for value in result.cross_artifact_findings
+        )
+        limitations.extend(source_labeled(value) for value in result.limitations)
         missing.extend(
             paths_by_visual_id.get(item, item) for item in result.unreviewed_requests
         )
 
+    bounded_observations, omitted_observations = _bounded_unique_models(
+        all_observations, 100
+    )
+    if omitted_observations:
+        limitations.append(
+            f"Controller aggregation omitted {omitted_observations} duplicate or "
+            "excess visual observations; per-batch reports preserve the raw output."
+        )
     report = VisualEvidenceReport(
-        observations=all_observations,
-        cross_artifact_findings=list(dict.fromkeys(cross_findings)),
-        limitations=list(dict.fromkeys(limitations)),
-        unreviewed_requests=list(dict.fromkeys(missing)),
+        observations=bounded_observations,
+        cross_artifact_findings=_bounded_unique_text(
+            cross_findings, 100, "cross-artifact findings"
+        ),
+        limitations=_bounded_unique_text(limitations, 100, "visual limitations"),
+        unreviewed_requests=_bounded_unique_text(
+            missing, 100, "unreviewed visual requests"
+        ),
     )
     write_json(
         cache_path,
@@ -1056,13 +1306,19 @@ async def _review_input_visual_evidence(
             "audited_at": utc_now(),
             "critic_model": settings.gemma.model if succeeded else None,
             "review_source": (
-                "gemma_multimodal_input_critic" if succeeded else "controller_gate"
+                "controller_gate"
+                if succeeded == 0
+                else "gemma_multimodal_input_critic_partial"
+                if succeeded < attempted
+                else "gemma_multimodal_input_critic"
             ),
             "batches_attempted": attempted,
             "batches_succeeded": succeeded,
             "visual_critic": "Gemma",
             "qwen_image_inputs": 0,
             "visual_inputs": fingerprint,
+            "batch_reports": batch_reports,
+            "batch_errors": batch_errors,
             "report": report.model_dump(mode="json"),
         },
     )
@@ -1091,6 +1347,48 @@ def _figures_missing_ocr(display_inputs: list[dict]) -> list[str]:
         if not str(ocr.get("text") or "").strip():
             missing.append(str(item.get("display_id") or "unknown-figure"))
     return missing
+
+
+def _display_provenance_summary(
+    display_inputs: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    """Freeze bounded display facts from the exact inputs sent to the critic."""
+
+    figure_text_inputs = []
+    for item in display_inputs:
+        if item["kind"] != "figure":
+            continue
+        ocr = item.get("ocr") if isinstance(item.get("ocr"), dict) else {}
+        ocr_text = str(ocr.get("text") or "")
+        figure_text_inputs.append(
+            {
+                "display_id": item["display_id"],
+                "sha256": item["sha256"],
+                "media_type": item["media_type"],
+                "width": item["width"],
+                "height": item["height"],
+                "ocr_available": ocr.get("available") is True,
+                "ocr_character_count": len(ocr_text),
+                "ocr_text_sha256": (
+                    hashlib.sha256(ocr_text.encode("utf-8")).hexdigest()
+                    if ocr_text
+                    else None
+                ),
+                "geometry_available": bool(ocr.get("words")),
+            }
+        )
+    table_previews = [
+        {
+            "display_id": item["display_id"],
+            "sha256": item["sha256"],
+            "total_rows": item["total_rows"],
+            "total_columns": item["total_columns"],
+            "truncated": item["truncated"],
+        }
+        for item in display_inputs
+        if item["kind"] == "table"
+    ]
+    return figure_text_inputs, table_previews
 
 
 def _is_presentation_only_repair(
@@ -1599,10 +1897,36 @@ async def _produce_report(
             )
         ),
     )
+    tool_order = ScientificToolOrderGate(
+        required_languages=(
+            frozenset(planning.master_plan.task.required_computation_languages)
+            if enable_code
+            else frozenset()
+        ),
+        require_reconciliation=(
+            enable_code
+            and _requires_cross_language_reconciliation(planning.master_plan.task)
+        ),
+    )
 
     def before_research_tool(tool, args: dict, tool_context):
         name = getattr(tool, "name", type(tool).__name__)
         research_budget.record_tool_call(name, args, cancel_event)
+        order_response = tool_order.before_tool(
+            name,
+            executor.evidence() if executor is not None else ComputationEvidence(),
+            existing_computation,
+        )
+        if order_response is not None:
+            if activity is not None:
+                activity(
+                    "tool_policy",
+                    "Qwen",
+                    "research",
+                    f"{name}: deferred until required computations succeed",
+                    None,
+                )
+            return order_response
         policy_response = policy.before_tool(tool, args, tool_context)
         if activity is not None and policy_response is None:
             activity(
@@ -1624,6 +1948,7 @@ async def _produce_report(
         observed_result = (
             policy_response if policy_response is not None else tool_response
         )
+        tool_order.record_result(name, observed_result)
         research_budget.record_tool_result(
             name,
             args,
@@ -2002,7 +2327,7 @@ async def _audit_report(
     cancel_event: threading.Event | None = None,
     on_visible_text: Callable[[str], None] | None = None,
     audit_outputs: dict[str, VerificationReport] | None = None,
-    audit_metadata: dict[str, int] | None = None,
+    audit_metadata: dict[str, object] | None = None,
 ) -> VerificationReport:
     _cancel_checkpoint(cancel_event)
     acquired_article_evidence = build_acquired_article_audit(report, retrieval)
@@ -2056,6 +2381,11 @@ async def _audit_report(
         if audit_outputs is not None:
             audit_outputs["gemma_display"] = display_result
         return _merge_reviews(report_result, display_result)
+    if audit_metadata is not None:
+        figure_summary, table_summary = _display_provenance_summary(display_inputs)
+        audit_metadata["figure_text_inputs"] = figure_summary
+        audit_metadata["table_previews"] = table_summary
+        audit_metadata["figures_missing_ocr"] = _figures_missing_ocr(display_inputs)
     if not display_inputs:
         return report_result
 
@@ -2135,8 +2465,14 @@ async def _audit_report(
                     cancel_event=cancel_event,
                 )
                 display_results.append(model_result)
+                if audit_outputs is not None:
+                    audit_outputs[f"gemma_display_batch_{batch_number:03d}"] = (
+                        model_result
+                    )
                 if audit_metadata is not None:
-                    audit_metadata["display_batches_succeeded"] += 1
+                    audit_metadata["display_batches_succeeded"] = (
+                        int(cast(int, audit_metadata["display_batches_succeeded"])) + 1
+                    )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -2205,10 +2541,13 @@ async def _audit_report_resilient(
 
     try:
         audit_outputs: dict[str, VerificationReport] = {}
-        audit_metadata: dict[str, int] = {
+        audit_metadata: dict[str, object] = {
             "display_batches_attempted": 0,
             "display_batches_succeeded": 0,
             "display_inputs_invalid": 0,
+            "figure_text_inputs": [],
+            "table_previews": [],
+            "figures_missing_ocr": [],
         }
         result = await _audit_report(
             settings,
@@ -2234,56 +2573,25 @@ async def _audit_report_resilient(
             if display_review is not None:
                 display_review_path = live_dir / "gemma_display_review.json"
                 write_json(display_review_path, display_review)
+            for name, batch_review in audit_outputs.items():
+                if name.startswith("gemma_display_batch_"):
+                    write_json(live_dir / f"{name}.json", batch_review)
             review_path = live_dir / "gemma_scientific_review.json"
             write_json(review_path, result)
-            try:
-                _, display_inputs = prepare_display_audit(report, computation)
-            except (OSError, ValueError, Image.DecompressionBombError):
-                display_inputs = []
-            figure_text_inputs = []
-            for item in display_inputs:
-                if item["kind"] != "figure":
-                    continue
-                ocr = item.get("ocr") if isinstance(item.get("ocr"), dict) else {}
-                ocr_text = str(ocr.get("text") or "")
-                figure_text_inputs.append(
-                    {
-                        "display_id": item["display_id"],
-                        "sha256": item["sha256"],
-                        "media_type": item["media_type"],
-                        "width": item["width"],
-                        "height": item["height"],
-                        "ocr_available": ocr.get("available") is True,
-                        "ocr_character_count": len(ocr_text),
-                        "ocr_text_sha256": (
-                            hashlib.sha256(ocr_text.encode("utf-8")).hexdigest()
-                            if ocr_text
-                            else None
-                        ),
-                        "geometry_available": bool(ocr.get("words")),
-                    }
-                )
-            table_previews = [
-                {
-                    "display_id": item["display_id"],
-                    "sha256": item["sha256"],
-                    "total_rows": item["total_rows"],
-                    "total_columns": item["total_columns"],
-                    "truncated": item["truncated"],
-                }
-                for item in display_inputs
-                if item["kind"] == "table"
-            ]
+            figure_text_inputs = list(
+                cast(list[dict], audit_metadata["figure_text_inputs"])
+            )
+            table_previews = list(cast(list[dict], audit_metadata["table_previews"]))
             display_audit_path: Path | None = None
             if display_review is not None:
                 display_audit_path = live_dir.parent / "gemma_display_audit.json"
-                attempted = audit_metadata["display_batches_attempted"]
-                succeeded = audit_metadata["display_batches_succeeded"]
+                attempted = cast(int, audit_metadata["display_batches_attempted"])
+                succeeded = cast(int, audit_metadata["display_batches_succeeded"])
                 multimodal = bool(figure_text_inputs)
                 if succeeded == 0:
                     critic_model = None
                     review_source = "controller_gate"
-                    if audit_metadata["display_inputs_invalid"]:
+                    if cast(int, audit_metadata["display_inputs_invalid"]):
                         review_mode = "invalid_display_inputs"
                     else:
                         review_mode = (
@@ -2318,7 +2626,9 @@ async def _audit_report_resilient(
                         "visual_critic": "Gemma",
                         "qwen_image_inputs": 0,
                         "verdict": display_review.verdict,
-                        "figures_missing_ocr": _figures_missing_ocr(display_inputs),
+                        "figures_missing_ocr": list(
+                            cast(list[str], audit_metadata["figures_missing_ocr"])
+                        ),
                         "figure_text_inputs": figure_text_inputs,
                         "table_previews": table_previews,
                     },
@@ -2441,6 +2751,24 @@ def _requires_pubmed_literature(task: TaskSpec) -> bool:
     )
     return bool(words & biomedical_words) or any(
         re.search(pattern, context) for pattern in biomedical_phrases
+    )
+
+
+def _requires_cross_language_reconciliation(task: TaskSpec) -> bool:
+    languages = set(task.required_computation_languages)
+    if not {"python", "r"}.issubset(languages):
+        return False
+    objective = task.objective.casefold()
+    return any(
+        marker in objective
+        for marker in (
+            "reconcil",
+            "cross-check",
+            "crosscheck",
+            "cross-language",
+            "independently reproduce",
+            "discrepanc",
+        )
     )
 
 
@@ -2920,10 +3248,8 @@ async def run_scientific_task(
     computation = _merge_computation_evidence(parent_computation, computation)
     report_progress("validation", "Running deterministic claim and artifact checks")
     required_languages = tuple(planning.master_plan.task.required_computation_languages)
-    objective_lower = objective.lower()
-    require_reconciliation = {"python", "r"}.issubset(required_languages) and any(
-        marker in objective_lower
-        for marker in ("reconcil", "cross-check", "crosscheck", "cross-language")
+    require_reconciliation = _requires_cross_language_reconciliation(
+        planning.master_plan.task
     )
     require_pubmed_literature = _requires_pubmed_literature(planning.master_plan.task)
     validation = validate_report(

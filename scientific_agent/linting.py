@@ -21,6 +21,7 @@ from .reporting import (
     read_table_preview,
     resolve_display_artifact,
 )
+
 from .schemas import (
     ArtifactRef,
     DeterministicValidation,
@@ -32,6 +33,32 @@ from .schemas import (
     ScientificReport,
     TaskSpec,
 )
+
+
+RECONCILIATION_JSON_MAX_BYTES = 1024 * 1024
+
+
+def reconciliation_verdict(path: Path) -> bool | None:
+    """Read one bounded, top-level cross-language reconciliation verdict."""
+
+    try:
+        if not path.is_file() or path.stat().st_size > RECONCILIATION_JSON_MAX_BYTES:
+            return None
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(value, dict):
+        return None
+    for key in (
+        "all_pass",
+        "passed",
+        "within_tolerance",
+        "reconciliation_passed",
+    ):
+        verdict = value.get(key)
+        if isinstance(verdict, bool):
+            return verdict
+    return None
 
 
 _WORD = re.compile(r"[a-z0-9]{4,}")
@@ -462,6 +489,70 @@ def _table_json_numeric_mismatches(
     return examples
 
 
+def _ambiguous_group_table_rows(
+    preview: dict[str, Any], *, example_limit: int = 5
+) -> list[str]:
+    """Find overall estimates incorrectly placed beneath one group header."""
+
+    columns = [str(column).strip() for column in preview.get("columns", [])]
+    normalized = [_numeric_key(column) for column in columns]
+    group_header_tokens = {
+        "control",
+        "controls",
+        "treatment",
+        "treatments",
+        "placebo",
+        "placebos",
+        "intervention",
+        "interventions",
+        "comparator",
+        "comparators",
+        "exposed",
+        "unexposed",
+        "case",
+        "cases",
+    }
+    group_indexes = {
+        index
+        for index, header in enumerate(normalized[1:], start=1)
+        if set(header.split("_")) & group_header_tokens
+    }
+    if len(group_indexes) < 2:
+        return []
+    overall_markers = (
+        "estimand",
+        "difference",
+        "p_value",
+        "pvalue",
+        "cohen",
+        "hedges",
+        "adjusted_effect",
+        "r_squared",
+        "rsquared",
+        "confidence_interval",
+        "95_ci",
+    )
+    examples = []
+    for row_number, row in enumerate(preview.get("rows", []), start=1):
+        if not row:
+            continue
+        label = _numeric_key(str(row[0]))
+        if not any(marker in label for marker in overall_markers):
+            continue
+        populated = [
+            index for index, value in enumerate(row[1:], start=1) if str(value).strip()
+        ]
+        if len(populated) != 1:
+            continue
+        index = populated[0]
+        if index >= len(columns) or index not in group_indexes:
+            continue
+        examples.append(f"row {row_number} ({row[0]}) under {columns[index]}")
+        if len(examples) >= example_limit:
+            break
+    return examples
+
+
 def _figure_ocr_semantic_findings(
     ocr: dict[str, Any], machine_numbers: dict[str, list[Decimal]]
 ) -> list[tuple[str, str]]:
@@ -504,6 +595,35 @@ def _figure_ocr_semantic_findings(
     return findings
 
 
+def _figure_caption_semantic_findings(
+    caption: str, alt_text: str, ocr: dict[str, Any]
+) -> list[tuple[str, str]]:
+    """Reject high-confidence claims about annotations absent from the raster."""
+
+    if not ocr.get("available"):
+        return []
+    narrative = " ".join(f"{caption} {alt_text}".casefold().split())
+    visible = " ".join(str(ocr.get("text", "")).casefold().split())
+    r_squared = r"(?:adjusted\s+)?r(?:\s*[- ]?squared|\s*[²2])"
+    claims_visible_annotation = re.search(
+        rf"\b(?:annotation|label|panel|figure)s?\b.{{0,100}}\b{r_squared}\b",
+        narrative,
+    ) or re.search(
+        rf"\b{r_squared}\b.{{0,100}}\b(?:annotation|label|panel|figure)s?\b",
+        narrative,
+    )
+    if claims_visible_annotation and not re.search(rf"\b{r_squared}\b", visible):
+        return [
+            (
+                "figure_caption_claims_missing_annotation",
+                "The caption or alt text says the figure contains an R-squared "
+                "annotation, but no such label is recoverable from the rendered "
+                "raster; correct the caption or add the promised annotation.",
+            )
+        ]
+    return []
+
+
 def validate_report(
     report: ScientificReport,
     retrieval: RetrievalEvidence | None = None,
@@ -515,6 +635,7 @@ def validate_report(
     controller_dates: tuple[str, ...] = (),
 ) -> DeterministicValidation:
     findings: list[LintFinding] = []
+    valid_reconciliation_paths: set[str] = set()
     if require_pubmed_literature:
         retrieval_tools = set(retrieval.tools if retrieval else ())
         if "search_pubmed" not in retrieval_tools:
@@ -647,24 +768,14 @@ def validate_report(
             verdicts: list[bool] = []
             for artifact in candidates:
                 path = Path(artifact.path)
-                if path.suffix.lower() != ".json" or not path.is_file():
+                if path.suffix.lower() != ".json":
                     continue
-                try:
-                    value = json.loads(path.read_text(encoding="utf-8"))
-                except (OSError, ValueError):
+                verdict = reconciliation_verdict(path)
+                if verdict is None:
                     continue
-                if not isinstance(value, dict):
-                    continue
-                for key in (
-                    "all_pass",
-                    "passed",
-                    "within_tolerance",
-                    "reconciliation_passed",
-                ):
-                    verdict = value.get(key)
-                    if isinstance(verdict, bool):
-                        verdicts.append(verdict)
-                        break
+                verdicts.append(verdict)
+                if verdict:
+                    valid_reconciliation_paths.add(os.path.normpath(str(path)))
             if not verdicts:
                 findings.append(
                     LintFinding(
@@ -711,10 +822,64 @@ def validate_report(
         )
     known = set(source_ids)
     sources_by_id = {source.source_id: source for source in report.sources}
+    if require_reconciliation and valid_reconciliation_paths:
+        for index, claim in enumerate(report.claims):
+            if not re.search(
+                r"\b(?:cross[- ]language|independent\s+r\b.{0,80}\b(?:reproduc|match)|absolute\s+difference)",
+                claim.text,
+                re.IGNORECASE,
+            ):
+                continue
+            cited_paths = {
+                os.path.normpath(source.artifact_path)
+                for source_id in claim.evidence_refs
+                if (source := sources_by_id.get(source_id)) is not None
+                and source.artifact_path is not None
+            }
+            if cited_paths.isdisjoint(valid_reconciliation_paths):
+                findings.append(
+                    LintFinding(
+                        code="cross_language_claim_missing_reconciliation_source",
+                        location=f"claims[{index}]",
+                        message=(
+                            "A cross-language agreement claim must cite the successful "
+                            "reconciliation JSON, not only one language's output."
+                        ),
+                    )
+                )
     controller_paths = {
         os.path.normpath(artifact.path) for artifact in controller_artifacts
     }
     methods_text = " ".join(report.methods)
+    report_text = " ".join(
+        (
+            report.executive_summary,
+            report.introduction,
+            methods_text,
+            report.results,
+            report.discussion,
+            report.conclusions,
+            *(claim.text for claim in report.claims),
+        )
+    )
+    report_text = " ".join(report_text.split())
+    if re.search(
+        r"\bbaseline\b.{0,180}\b(?:differ|imbalance|p\s*[=<]).{0,180}"
+        r"\bjustif(?:y|ies|ied|ying)\b.{0,80}\bprespecif",
+        report_text,
+        re.IGNORECASE,
+    ):
+        findings.append(
+            LintFinding(
+                code="posthoc_result_cannot_justify_prespecification",
+                location="report",
+                message=(
+                    "An observed baseline result cannot justify that an analysis "
+                    "was prespecified. Cite the task/protocol for timing and describe "
+                    "the baseline result only as interpretation context."
+                ),
+            )
+        )
     if _PROTOCOL_TIMING.search(methods_text) and not any(
         source.artifact_path is not None
         and os.path.normpath(source.artifact_path) in controller_paths
@@ -1107,6 +1272,19 @@ def validate_report(
             artifact_path = resolve_display_artifact(
                 display, computation or ComputationEvidence()
             )
+            if logical_report_output_key(artifact_path) is None:
+                findings.append(
+                    LintFinding(
+                        code="display_not_reader_facing_output",
+                        location=location,
+                        message=(
+                            "A ReportDisplay must be a deliberate artifact within "
+                            "/output/figures or /output/tables; uploaded, "
+                            "extracted, and visual-review evidence remains a source "
+                            "artifact rather than an inline display."
+                        ),
+                    )
+                )
             if display.kind == "figure":
                 if len(display.alt_text.strip()) < 10:
                     findings.append(
@@ -1142,8 +1320,28 @@ def validate_report(
                     findings.append(
                         LintFinding(code=code, location=location, message=message)
                     )
+                for code, message in _figure_caption_semantic_findings(
+                    display.caption, display.alt_text, figure_ocr
+                ):
+                    findings.append(
+                        LintFinding(code=code, location=location, message=message)
+                    )
             else:
                 table_preview = read_table_preview(artifact_path)
+                ambiguous_rows = _ambiguous_group_table_rows(table_preview)
+                if ambiguous_rows:
+                    findings.append(
+                        LintFinding(
+                            code="table_ambiguous_overall_estimate_column",
+                            location=location,
+                            message=(
+                                "Overall estimates must not appear beneath one group "
+                                "header. Add a neutral Estimate/Overall column or use "
+                                "a separate estimand table. Examples: "
+                                + "; ".join(ambiguous_rows)
+                            ),
+                        )
+                    )
                 precision_examples = excessive_table_precision(table_preview)
                 if precision_examples:
                     findings.append(

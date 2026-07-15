@@ -1,4 +1,7 @@
+from PIL import Image
+
 from scientific_agent.linting import lint_plan, validate_report
+from scientific_agent.provenance import sha256_file
 from scientific_agent.schemas import (
     CheckSpec,
     ClaimRecord,
@@ -9,6 +12,7 @@ from scientific_agent.schemas import (
     PlanProposal,
     PlanStep,
     RetrievalEvidence,
+    ReportDisplay,
     ScientificReport,
     SourceRecord,
     TaskSpec,
@@ -956,3 +960,291 @@ def test_report_validator_requires_passing_reconciliation_artifact(tmp_path):
         finding.code == "superseded_reconciliation_failure" and not finding.blocking
         for finding in superseded.findings
     )
+
+
+def test_cross_language_claim_must_cite_reconciliation_artifact(tmp_path):
+    reconciliation_path = tmp_path / "cross_language_reconciliation.json"
+    reconciliation_path.write_text(
+        '{"all_pass": true, "absolute_difference": 0.0}\n', encoding="utf-8"
+    )
+    r_path = tmp_path / "r_verification.json"
+    r_path.write_text('{"r_point_estimate": 5.0}\n', encoding="utf-8")
+    artifacts = [
+        ArtifactRef(
+            path=str(path),
+            sha256=token * 64,
+            description="sandbox-generated analysis artifact",
+        )
+        for path, token in ((reconciliation_path, "a"), (r_path, "b"))
+    ]
+    computation = ComputationEvidence(
+        successful_calls=1,
+        records=[
+            ComputationRecord(
+                execution_id="exec-001",
+                language="python",
+                code_sha256="c" * 64,
+                started_at="2026-07-15T00:00:00Z",
+                duration_seconds=1,
+                exit_code=0,
+                status="succeeded",
+                stdout_path=str(tmp_path / "stdout.txt"),
+                stderr_path=str(tmp_path / "stderr.txt"),
+                artifacts=artifacts,
+            )
+        ],
+        artifacts=artifacts,
+    )
+    claim = ClaimRecord(
+        claim_id="c-r",
+        text=(
+            "Independent R computation reproduces the Python estimate exactly "
+            "with absolute difference 0.0."
+        ),
+        claim_type="computed",
+        evidence_refs=["s-r"],
+        status=EvidenceStatus.SUPPORTED,
+    )
+    report = article_report(
+        claims=[claim],
+        sources=[
+            SourceRecord(
+                source_id="s-r",
+                title="R verification",
+                artifact_path=str(r_path),
+                source_type="other",
+                retrieved_at="2026-07-15T00:00:00Z",
+                supporting_passage="R point estimate 5.0.",
+            )
+        ],
+    )
+
+    bad = validate_report(report, computation=computation, require_reconciliation=True)
+
+    assert "cross_language_claim_missing_reconciliation_source" in {
+        finding.code for finding in bad.findings
+    }
+    corrected = report.model_copy(
+        update={
+            "sources": [
+                report.sources[0].model_copy(
+                    update={"artifact_path": str(reconciliation_path)}
+                )
+            ]
+        }
+    )
+    good = validate_report(
+        corrected, computation=computation, require_reconciliation=True
+    )
+    assert good.passed
+    assert "cross_language_claim_missing_reconciliation_source" not in {
+        finding.code for finding in good.findings
+    }
+
+
+def _display_computation(tmp_path, artifact_path):
+    artifact = ArtifactRef(
+        path=str(artifact_path),
+        sha256=sha256_file(artifact_path),
+        description="sandbox-generated analysis artifact",
+    )
+    return ComputationEvidence(
+        successful_calls=1,
+        records=[
+            ComputationRecord(
+                execution_id="exec-001",
+                language="python",
+                code_sha256="e" * 64,
+                started_at="2026-07-15T00:00:00Z",
+                duration_seconds=1,
+                exit_code=0,
+                status="succeeded",
+                stdout_path=str(tmp_path / "stdout.txt"),
+                stderr_path=str(tmp_path / "stderr.txt"),
+                artifacts=[artifact],
+            )
+        ],
+        artifacts=[artifact],
+    )
+
+
+def test_group_table_cannot_place_overall_estimates_under_control(tmp_path):
+    table = tmp_path / "output" / "tables" / "results.csv"
+    table.parent.mkdir(parents=True)
+    table.write_text(
+        "Metric,Control,Treatment\n"
+        "Mean,0.05,5.05\n"
+        "Primary estimand (difference),5.00,\n"
+        "Two-sided p-value,< 0.001,\n",
+        encoding="utf-8",
+    )
+    report = article_report(
+        results="Table 1 reports the group results.",
+        displays=[
+            ReportDisplay(
+                display_id="group-table",
+                kind="table",
+                title="Group results",
+                caption="Control, treatment, and overall estimates.",
+                artifact_path=str(table),
+            )
+        ],
+    )
+
+    validation = validate_report(
+        report, computation=_display_computation(tmp_path, table)
+    )
+
+    assert "table_ambiguous_overall_estimate_column" in {
+        finding.code for finding in validation.findings
+    }
+
+
+def test_group_table_accepts_neutral_overall_estimate_column(tmp_path):
+    table = tmp_path / "output" / "tables" / "results.csv"
+    table.parent.mkdir(parents=True)
+    table.write_text(
+        "Metric,Control group,Treatment group,Estimate\n"
+        "Mean,0.05,5.05,\n"
+        "Primary estimand (difference),,,5.00\n"
+        "Two-sided p-value,,,< 0.001\n",
+        encoding="utf-8",
+    )
+    report = article_report(
+        results="Table 1 reports the group results.",
+        displays=[
+            ReportDisplay(
+                display_id="group-table",
+                kind="table",
+                title="Group results",
+                caption="Group summaries and neutral overall estimates.",
+                artifact_path=str(table),
+            )
+        ],
+    )
+
+    validation = validate_report(
+        report, computation=_display_computation(tmp_path, table)
+    )
+
+    assert validation.passed
+    assert "table_ambiguous_overall_estimate_column" not in {
+        finding.code for finding in validation.findings
+    }
+
+
+def test_figure_caption_cannot_claim_absent_r_squared_annotation(tmp_path, monkeypatch):
+    figure = tmp_path / "output" / "figures" / "effect.png"
+    figure.parent.mkdir(parents=True)
+    Image.new("RGB", (800, 600), color="white").save(figure, dpi=(300, 300))
+    monkeypatch.setattr(
+        "scientific_agent.linting.extract_figure_ocr",
+        lambda _path: {
+            "available": True,
+            "text": "Treatment effect 5.00 95% CI 4.21 to 5.79",
+            "words": [{"text": "Treatment"}],
+        },
+    )
+    report = article_report(
+        results="Figure 1 reports the estimate.",
+        displays=[
+            ReportDisplay(
+                display_id="effect-figure",
+                kind="figure",
+                title="Treatment effect",
+                caption="Panel annotations include adjusted R-squared.",
+                artifact_path=str(figure),
+                alt_text="A treatment effect with confidence interval.",
+            )
+        ],
+    )
+
+    validation = validate_report(
+        report, computation=_display_computation(tmp_path, figure)
+    )
+
+    assert "figure_caption_claims_missing_annotation" in {
+        finding.code for finding in validation.findings
+    }
+
+
+def test_unavailable_figure_ocr_does_not_invalidate_truthful_caption(
+    tmp_path, monkeypatch
+):
+    figure = tmp_path / "output" / "figures" / "effect.png"
+    figure.parent.mkdir(parents=True)
+    Image.new("RGB", (800, 600), color="white").save(figure, dpi=(300, 300))
+    monkeypatch.setattr(
+        "scientific_agent.linting.extract_figure_ocr",
+        lambda _path: {"available": False, "reason": "ocr_worker_failed"},
+    )
+    report = article_report(
+        results="Figure 1 reports the estimate.",
+        displays=[
+            ReportDisplay(
+                display_id="effect-figure",
+                kind="figure",
+                title="Treatment effect",
+                caption="Panel annotations include adjusted R-squared.",
+                artifact_path=str(figure),
+                alt_text="A treatment effect with confidence interval.",
+            )
+        ],
+    )
+
+    validation = validate_report(
+        report, computation=_display_computation(tmp_path, figure)
+    )
+
+    assert validation.passed
+    assert "figure_caption_claims_missing_annotation" not in {
+        finding.code for finding in validation.findings
+    }
+
+
+def test_observed_baseline_result_cannot_justify_prespecification():
+    report = article_report(
+        discussion=(
+            "Baseline values differed significantly (p = 0.006),\njustifying the "
+            "prespecified ANCOVA sensitivity analysis."
+        )
+    )
+
+    validation = validate_report(report)
+
+    assert "posthoc_result_cannot_justify_prespecification" in {
+        finding.code for finding in validation.findings
+    }
+
+
+def test_extracted_source_image_cannot_be_registered_as_final_display(
+    tmp_path, monkeypatch
+):
+    figure = tmp_path / "output" / "extracted" / "source.png"
+    figure.parent.mkdir(parents=True)
+    Image.new("RGB", (800, 600), color="white").save(figure, dpi=(300, 300))
+    monkeypatch.setattr(
+        "scientific_agent.linting.extract_figure_ocr",
+        lambda _path: {"available": True, "text": "Source image", "words": []},
+    )
+    report = article_report(
+        results="Figure 1 shows the extracted source image.",
+        displays=[
+            ReportDisplay(
+                display_id="source-image",
+                kind="figure",
+                title="Source image",
+                caption="An archive extraction copy.",
+                artifact_path=str(figure),
+                alt_text="An extracted scientific source image.",
+            )
+        ],
+    )
+
+    validation = validate_report(
+        report, computation=_display_computation(tmp_path, figure)
+    )
+
+    assert "display_not_reader_facing_output" in {
+        finding.code for finding in validation.findings
+    }

@@ -9,6 +9,7 @@ from PIL import Image
 import scientific_agent.orchestrator as orchestrator_module
 from scientific_agent.config import Settings
 from scientific_agent.orchestrator import (
+    ScientificToolOrderGate,
     _audit_report_resilient,
     _can_continue_after_research_error,
     _compact_computation_summary,
@@ -317,6 +318,101 @@ def test_research_budget_checks_cancellation_before_limits():
         budget.record_model_turn(cancelled)
     with pytest.raises(asyncio.CancelledError):
         budget.record_tool_call("search_pubmed", {}, cancelled)
+
+
+def test_tool_order_gate_defers_optional_pubmed_calls_until_required_code_succeeds():
+    gate = ScientificToolOrderGate(frozenset({"python", "r"}))
+    empty = ComputationEvidence()
+    search_result = {"articles": [{"pmid": "1"}]}
+    acquisition_result = {
+        "source_record": {"local_markdown_path": "/workspace/references/paper.md"}
+    }
+    gate.record_result("search_pubmed", search_result)
+    gate.record_result("acquire_pubmed_article", acquisition_result)
+
+    denied_search = gate.before_tool("search_pubmed", empty)
+    denied_acquisition = gate.before_tool("acquire_pubmed_article", empty)
+
+    assert denied_search is not None
+    assert denied_acquisition is not None
+    assert denied_search["error"] == "REQUIRED_COMPUTATION_PENDING"
+    assert denied_acquisition["missing_required_languages"] == ["python", "r"]
+    assert gate.before_tool("run_python_analysis", empty) is None
+    gate.record_result("search_pubmed", denied_search)
+    assert gate.pubmed_search_attempts == 1
+
+
+def test_tool_order_gate_allows_broader_zero_hit_search_and_lifts_after_code():
+    gate = ScientificToolOrderGate(frozenset({"python"}))
+    empty = ComputationEvidence()
+    gate.record_result("search_pubmed", {"articles": []})
+
+    assert gate.before_tool("search_pubmed", empty) is None
+
+    successful = ComputationEvidence(
+        records=[
+            ComputationRecord(
+                execution_id="exec-001",
+                language="python",
+                code_sha256="a" * 64,
+                started_at="2026-07-15T00:00:00+00:00",
+                duration_seconds=1,
+                exit_code=0,
+                status="succeeded",
+                stdout_path="/tmp/stdout",
+                stderr_path="/tmp/stderr",
+            )
+        ]
+    )
+    gate.record_result("search_pubmed", {"articles": [{"pmid": "1"}]})
+
+    assert gate.before_tool("search_pubmed", successful) is None
+
+
+def test_tool_order_gate_requires_passing_cross_language_reconciliation(tmp_path):
+    gate = ScientificToolOrderGate(
+        frozenset({"python", "r"}), require_reconciliation=True
+    )
+    gate.record_result("search_pubmed", {"articles": [{"pmid": "1"}]})
+    records = [
+        ComputationRecord(
+            execution_id=f"exec-{index:03d}",
+            language=language,
+            code_sha256=str(index) * 64,
+            started_at="2026-07-15T00:00:00+00:00",
+            duration_seconds=1,
+            exit_code=0,
+            status="succeeded",
+            stdout_path=str(tmp_path / f"stdout-{index}"),
+            stderr_path=str(tmp_path / f"stderr-{index}"),
+        )
+        for index, language in enumerate(("python", "r"), start=1)
+    ]
+    languages_only = ComputationEvidence(records=records)
+
+    denied = gate.before_tool("search_pubmed", languages_only)
+
+    assert denied is not None
+    assert denied["missing_required_languages"] == []
+    assert denied["reconciliation_required"] is True
+    reconciliation = tmp_path / "cross_language_reconciliation.json"
+    reconciliation.write_text('{"all_pass": true}\n', encoding="utf-8")
+    artifact = ArtifactRef(
+        path=str(reconciliation),
+        sha256="f" * 64,
+        description="sandbox-generated analysis artifact",
+    )
+    reconciled = ComputationEvidence(
+        records=[records[0].model_copy(update={"artifacts": [artifact]}), records[1]],
+        artifacts=[artifact],
+    )
+    assert gate.before_tool("search_pubmed", reconciled) is None
+
+    reconciliation.write_text(
+        json.dumps({"padding": "x" * (90 * 1024), "all_pass": True}),
+        encoding="utf-8",
+    )
+    assert gate.before_tool("search_pubmed", reconciled) is None
 
 
 def test_adk_graph_builds_and_validates():
@@ -673,6 +769,63 @@ def test_article_and_display_reviews_merge_to_strictest_verdict():
     assert merged.unsupported_claims == ["article caveat", "display mismatch"]
 
 
+def test_review_merge_caps_unique_findings_with_explicit_overflow_record():
+    def finding(index):
+        return Finding(
+            finding_id=f"finding-{index}",
+            location=f"item {index}",
+            problem=f"Problem {index}",
+            why_it_matters="It changes scientific interpretation.",
+            evidence=f"Evidence {index}",
+            falsification_test_or_correction=f"Check item {index}.",
+        )
+
+    first = VerificationReport(
+        verdict="fail", blocking_findings=[finding(index) for index in range(200)]
+    )
+    second = VerificationReport(
+        verdict="fail",
+        blocking_findings=[finding(index) for index in range(200, 400)],
+    )
+
+    merged = _merge_reviews(first, second)
+
+    assert len(merged.blocking_findings) == 200
+    assert merged.blocking_findings[-1].finding_id == (
+        "controller-blocking-findings-overflow"
+    )
+    assert "201 additional" in merged.blocking_findings[-1].problem
+
+
+def test_review_merge_caps_falsification_tests_with_explicit_overflow_record():
+    def checks(start):
+        return [
+            CheckSpec(
+                check_id=f"check-{index}",
+                description=f"Run falsification test {index}",
+                check_type="test",
+            )
+            for index in range(start, start + 200)
+        ]
+
+    merged = _merge_reviews(
+        VerificationReport(
+            verdict="pass_with_nonblocking_comments",
+            proposed_falsification_tests=checks(0),
+        ),
+        VerificationReport(
+            verdict="pass_with_nonblocking_comments",
+            proposed_falsification_tests=checks(200),
+        ),
+    )
+
+    assert len(merged.proposed_falsification_tests) == 200
+    overflow = merged.proposed_falsification_tests[-1]
+    assert overflow.check_id == "controller-falsification-tests-overflow"
+    assert "201 additional" in overflow.description
+    assert overflow.blocking is False
+
+
 def test_review_merge_preserves_findings_from_multiple_full_batches():
     def findings(prefix):
         return [
@@ -955,6 +1108,67 @@ async def test_display_audit_failure_preserves_completed_report_review(
 
 
 @pytest.mark.anyio
+async def test_display_provenance_uses_exact_review_inputs_without_second_read(
+    tmp_path, monkeypatch
+):
+    planning, report = _display_audit_fixture()
+    image = tmp_path / "effect.png"
+    image.write_bytes(b"reviewed raster")
+    preparations = 0
+
+    def prepare(*_args):
+        nonlocal preparations
+        preparations += 1
+        if preparations > 1:
+            raise OSError("artifact changed after review")
+        return (
+            [image],
+            [
+                {
+                    "display_id": "effect-figure",
+                    "kind": "figure",
+                    "sha256": "a" * 64,
+                    "media_type": "image/png",
+                    "width": 800,
+                    "height": 600,
+                    "ocr": {
+                        "available": True,
+                        "text": "Treatment effect 5.00",
+                        "words": [{"text": "Treatment"}],
+                    },
+                }
+            ],
+        )
+
+    monkeypatch.setattr("scientific_agent.orchestrator.prepare_display_audit", prepare)
+
+    async def passing_review(*_args, **_kwargs):
+        return VerificationReport(verdict="pass")
+
+    monkeypatch.setattr(
+        "scientific_agent.orchestrator.request_structured", passing_review
+    )
+
+    review = await _audit_report_resilient(
+        Settings(),
+        planning,
+        report,
+        DeterministicValidation(passed=True),
+        RetrievalEvidence(),
+        ComputationEvidence(),
+        EventLedger(tmp_path / "events.jsonl"),
+        live_dir=tmp_path / "live",
+    )
+
+    assert review.verdict == "pass"
+    assert preparations == 1
+    audit = json.loads((tmp_path / "gemma_display_audit.json").read_text())
+    assert audit["review_source"] == "gemma_multimodal_critic"
+    assert audit["review_mode"] == "raster_with_ocr_geometry_and_table_previews"
+    assert audit["figure_text_inputs"][0]["display_id"] == "effect-figure"
+
+
+@pytest.mark.anyio
 async def test_invalid_display_preparation_preserves_completed_article_audit(
     tmp_path, monkeypatch
 ):
@@ -1231,6 +1445,118 @@ async def test_source_images_are_reviewed_only_by_gemma_and_cached_by_hash(
     assert audit["qwen_image_inputs"] == 0
     assert audit["batches_attempted"] == 1
     assert audit["batches_succeeded"] == 1
+
+
+def _visual_review_planning():
+    planning, _report = _display_audit_fixture()
+    return planning.model_copy(
+        update={
+            "master_plan": planning.master_plan.model_copy(
+                update={
+                    "task": planning.master_plan.task.model_copy(
+                        update={
+                            "objective": "Inspect all attached source figures",
+                            "deliverables": ["visual evidence report"],
+                        }
+                    )
+                }
+            )
+        }
+    )
+
+
+@pytest.mark.anyio
+async def test_partial_source_visual_review_has_explicit_partial_provenance(
+    tmp_path, monkeypatch
+):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    for index in range(6):
+        Image.new("RGB", (32, 24), color=(index * 20, 80, 120)).save(
+            workspace / f"source-{index}.png"
+        )
+    calls = 0
+
+    async def review(_endpoint, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("second batch unavailable")
+        return VisualEvidenceReport(
+            observations=[
+                VisualEvidenceObservation(
+                    artifact_path=visual_id,
+                    observed_content="A scientific source figure is visible.",
+                    scientific_interpretation="It supports a bounded visual audit.",
+                )
+                for visual_id in kwargs["payload"]["visual_input_order"]
+            ]
+        )
+
+    monkeypatch.setattr("scientific_agent.orchestrator.request_structured", review)
+    run_dir = tmp_path / "run"
+
+    report = await orchestrator_module._review_input_visual_evidence(
+        Settings(workspace=workspace),
+        _visual_review_planning(),
+        ComputationEvidence(),
+        "bounded research context",
+        run_dir,
+    )
+
+    assert len(report.observations) == 5
+    audit = json.loads((run_dir / "gemma_input_visual_review.json").read_text())
+    assert audit["batches_attempted"] == 2
+    assert audit["batches_succeeded"] == 1
+    assert audit["review_source"] == "gemma_multimodal_input_critic_partial"
+    assert len(audit["batch_reports"]) == 1
+    assert len(audit["batch_errors"]) == 1
+
+
+@pytest.mark.anyio
+async def test_source_visual_finding_aggregation_is_bounded_and_preserves_batches(
+    tmp_path, monkeypatch
+):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    for index in range(6):
+        Image.new("RGB", (32, 24), color=(index * 20, 80, 120)).save(
+            workspace / f"source-{index}.png"
+        )
+    calls = 0
+
+    async def review(_endpoint, **kwargs):
+        nonlocal calls
+        calls += 1
+        return VisualEvidenceReport(
+            observations=[
+                VisualEvidenceObservation(
+                    artifact_path=visual_id,
+                    observed_content="A scientific source figure is visible.",
+                    scientific_interpretation="It supports a bounded visual audit.",
+                )
+                for visual_id in kwargs["payload"]["visual_input_order"]
+            ],
+            cross_artifact_findings=[
+                f"batch {calls} finding {index}" for index in range(100)
+            ],
+        )
+
+    monkeypatch.setattr("scientific_agent.orchestrator.request_structured", review)
+    run_dir = tmp_path / "run"
+
+    report = await orchestrator_module._review_input_visual_evidence(
+        Settings(workspace=workspace),
+        _visual_review_planning(),
+        ComputationEvidence(),
+        "bounded research context",
+        run_dir,
+    )
+
+    assert len(report.cross_artifact_findings) == 100
+    assert "101 additional" in report.cross_artifact_findings[-1]
+    audit = json.loads((run_dir / "gemma_input_visual_review.json").read_text())
+    assert len(audit["batch_reports"]) == 2
 
 
 def test_visual_evidence_accepts_single_finding_strings():

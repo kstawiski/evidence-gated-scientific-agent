@@ -14,6 +14,7 @@ from scientific_agent.sandbox_worker import (
     WorkerState,
     _worker_authorized,
 )
+from scientific_agent.schemas import ComputationEvidence
 
 
 def _state(tmp_path: Path) -> tuple[WorkerState, Path, Path]:
@@ -46,6 +47,109 @@ def test_worker_accepts_only_matching_confined_workspace_and_run_paths(tmp_path)
     request.computation_root = str(tmp_path / "outside")
     with pytest.raises(ValueError):
         state.confined_paths(request)
+
+
+def test_worker_uses_caller_attempt_budget_and_rejects_budget_changes(
+    tmp_path, monkeypatch
+):
+    state, workspace, root = _state(tmp_path)
+    observed = []
+
+    def execute(self, language, code, timeout_seconds=120):
+        del language, code, timeout_seconds
+        observed.append(self.settings.max_calls_per_attempt)
+        return {"status": "succeeded"}
+
+    monkeypatch.setattr(
+        "scientific_agent.sandbox_worker.AnalysisExecutor.execute", execute
+    )
+    monkeypatch.setattr(
+        "scientific_agent.sandbox_worker.AnalysisExecutor.evidence",
+        lambda self: ComputationEvidence(),
+    )
+    request = ExecuteRequest(
+        request_id=str(uuid.uuid4()),
+        workspace=str(workspace),
+        computation_root=str(root),
+        language="python",
+        code="print(1)",
+        timeout_seconds=10,
+        max_calls_per_attempt=8,
+    )
+
+    state.execute(request)
+
+    assert observed == [8]
+    changed = request.model_copy(
+        update={
+            "request_id": str(uuid.uuid4()),
+            "max_calls_per_attempt": 9,
+        }
+    )
+    with pytest.raises(ValueError, match="budget cannot change"):
+        state.execute(changed)
+
+
+def test_worker_call_budget_is_capped_by_worker_configuration(tmp_path, monkeypatch):
+    state, workspace, root = _state(tmp_path)
+    observed = []
+
+    def execute(self, language, code, timeout_seconds=120):
+        del language, code, timeout_seconds
+        observed.append(self.settings.max_calls_per_attempt)
+        return {"status": "succeeded"}
+
+    monkeypatch.setattr(
+        "scientific_agent.sandbox_worker.AnalysisExecutor.execute", execute
+    )
+    monkeypatch.setattr(
+        "scientific_agent.sandbox_worker.AnalysisExecutor.evidence",
+        lambda self: ComputationEvidence(),
+    )
+    request = ExecuteRequest(
+        request_id=str(uuid.uuid4()),
+        workspace=str(workspace),
+        computation_root=str(root),
+        language="python",
+        code="print(1)",
+        timeout_seconds=10,
+        max_calls_per_attempt=80,
+    )
+
+    state.execute(request)
+
+    assert observed == [state.settings.max_calls_per_attempt]
+
+
+def test_worker_omitted_caller_budget_uses_worker_configuration(tmp_path, monkeypatch):
+    state, workspace, root = _state(tmp_path)
+    state.settings = SandboxSettings(max_calls_per_attempt=40)
+    observed = []
+
+    def execute(self, language, code, timeout_seconds=120):
+        del language, code, timeout_seconds
+        observed.append(self.settings.max_calls_per_attempt)
+        return {"status": "succeeded"}
+
+    monkeypatch.setattr(
+        "scientific_agent.sandbox_worker.AnalysisExecutor.execute", execute
+    )
+    monkeypatch.setattr(
+        "scientific_agent.sandbox_worker.AnalysisExecutor.evidence",
+        lambda self: ComputationEvidence(),
+    )
+    request = ExecuteRequest(
+        request_id=str(uuid.uuid4()),
+        workspace=str(workspace),
+        computation_root=str(root),
+        language="python",
+        code="print(1)",
+        timeout_seconds=10,
+    )
+
+    state.execute(request)
+
+    assert observed == [40]
 
 
 def test_worker_rejects_a_run_path_belonging_to_another_workspace(tmp_path):

@@ -738,6 +738,7 @@ class RemoteAnalysisExecutor:
                     "language": language,
                     "code": code,
                     "timeout_seconds": timeout,
+                    "max_calls_per_attempt": self.settings.max_calls_per_attempt,
                 },
                 timeout=timeout + 15,
             )

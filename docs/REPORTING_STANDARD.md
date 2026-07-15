@@ -17,6 +17,13 @@ that overruns this boundary is a defect the independent Gemma audit
 required to fix. Human review remains required before any consequential
 scientific or clinical decision.
 
+The critic evaluates the user-supplied scientific task and evidence ceiling; it
+is not an autonomous manuscript-readiness judge. It must not invent journal
+requirements, combine main-manuscript and supplement word counts unless the task
+explicitly defines that scope, or treat task-authorized science-lock placeholders
+as scientific blockers. A possibly relevant but unverified readiness rule is an
+unresolved nonblocking question, not permission to rewrite or reject the report.
+
 ## Article sections
 
 `render_report_markdown()` renders one portable Markdown article with a
@@ -63,6 +70,10 @@ arbitrary images or inline data.
   successful sandbox computation** (`resolve_display_artifact`); an
   artifact whose hash no longer matches the recorded computation evidence,
   or that isn't a successful-call output, is rejected.
+- The artifact must be a deliberate reader-facing output within the
+  logical `/output/figures` or `/output/tables` folder. Uploaded inputs, archive
+  extraction copies, TIFF/PDF source files, intermediate visual-review rasters,
+  and controller audits remain evidence artifacts rather than report displays.
 - **Figures** must be PNG, JPEG, or WebP (`FIGURE_MEDIA_TYPES`), 1 byte–20 MB,
   with dimensions between 240×160 and 20,000×20,000, and the file extension
   must match the actual encoded format (`inspect_figure`). When raster DPI

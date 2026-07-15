@@ -69,6 +69,9 @@ never a claim of peer review, science lock, manuscript readiness, or
 submission readiness. See
 [`docs/REPORTING_STANDARD.md`](docs/REPORTING_STANDARD.md) for the article
 and evidence-gating contract.
+The critic is constrained to the stated task contract: it does not invent journal
+word-count scopes, merge manuscript and supplement counts, or reject authorized
+placeholders as though it were an autonomous submission-readiness service.
 
 The web workbench also provides reviewed workflow starters, a “reuse protocol”
 action, immutable input and environment manifests, and a downloadable provenance

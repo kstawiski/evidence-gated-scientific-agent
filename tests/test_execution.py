@@ -108,6 +108,44 @@ def test_remote_executor_releases_matching_worker_state(tmp_path, monkeypatch):
     }
 
 
+def test_remote_executor_sends_controller_attempt_budget(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspaces" / "workspace-id" / "files"
+    root = tmp_path / "workspaces" / "workspace-id" / "runs" / "run-1" / "computations"
+    workspace.mkdir(parents=True)
+    root.mkdir(parents=True)
+    calls = []
+
+    class Response:
+        is_error = False
+
+        @staticmethod
+        def json():
+            return {
+                "result": {"status": "succeeded"},
+                "evidence": {"successful_calls": 0, "records": [], "artifacts": []},
+            }
+
+    def post(url, **kwargs):
+        calls.append((url, kwargs))
+        return Response()
+
+    monkeypatch.setattr("scientific_agent.execution.httpx.post", post)
+    executor = RemoteAnalysisExecutor(
+        workspace,
+        root,
+        replace(
+            SandboxSettings(),
+            worker_url="http://sandbox:8090",
+            worker_token="x" * 32,
+            max_calls_per_attempt=8,
+        ),
+    )
+
+    executor.execute("python", "print(1)", 10)
+
+    assert calls[0][1]["json"]["max_calls_per_attempt"] == 8
+
+
 def test_preflight_probes_advertised_python_and_r_packages(tmp_path, monkeypatch):
     seen: list[tuple[str, str]] = []
 

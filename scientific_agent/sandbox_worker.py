@@ -39,6 +39,7 @@ class ExecuteRequest(BaseModel):
     language: Literal["python", "r"]
     code: str = Field(max_length=128 * 1024)
     timeout_seconds: int = Field(ge=1, le=3600)
+    max_calls_per_attempt: int | None = Field(default=None, ge=1)
 
 
 class CancelRequest(BaseModel):
@@ -541,6 +542,14 @@ class WorkerState:
         # still needs an existing read-only bind source for /history.
         root.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
         key = str(root)
+        requested_call_budget = (
+            request.max_calls_per_attempt
+            if request.max_calls_per_attempt is not None
+            else self.settings.max_calls_per_attempt
+        )
+        effective_call_budget = min(
+            requested_call_budget, self.settings.max_calls_per_attempt
+        )
         try:
             with self.lock:
                 executor = self.executors.get(key)
@@ -561,13 +570,20 @@ class WorkerState:
                     executor = AnalysisExecutor(
                         staged_workspace,
                         staged_root,
-                        self.settings,
+                        replace(
+                            self.settings,
+                            max_calls_per_attempt=effective_call_budget,
+                        ),
                         environment_dir=environment_dir,
                         history_dir=root.parent,
                     )
                     self.executors[key] = executor
                     self.staging_roots[key] = staged_root
                     self.executor_locks[key] = threading.Lock()
+                elif executor.settings.max_calls_per_attempt != effective_call_budget:
+                    raise ValueError(
+                        "analysis call budget cannot change within one attempt"
+                    )
                 executor_lock = self.executor_locks[key]
             with executor_lock:
                 executor.cancel_event = cancellation

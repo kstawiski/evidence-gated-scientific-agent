@@ -122,6 +122,21 @@ def test_report_auditor_accepts_controller_protocol_authority():
     )
 
 
+def test_report_auditor_does_not_invent_submission_readiness_rules():
+    assert "Do not import generic journal, submission-package" in REPORT_AUDITOR
+    assert "Never combine manuscript and supplement word counts" in REPORT_AUDITOR
+    assert "A placeholder explicitly permitted" in REPORT_AUDITOR
+    assert "unresolved nonblocking question" in REPORT_AUDITOR
+    assert "fixed schema with task-specific top-level headings" in REPORT_AUDITOR
+
+
+def test_report_contract_does_not_register_extracted_source_images_as_displays():
+    for prompt in (REPORTER, REPAIRER):
+        assert "logical /output/figures or /output/tables" in prompt
+        assert "archive extraction copy" in prompt
+        assert "intermediate visual-review raster" in prompt
+
+
 def test_report_contract_scopes_method_recommendations_and_literature_reviews():
     assert '"robust default" language' in REPORTER
     assert "literature-only evidence synthesis" in REPORTER

@@ -57,7 +57,13 @@ location, a short quotation from the supplied plan, why the issue matters, and o
 falsifiable test or concrete correction. A pass has no finding. Deterministic lint
 failures cannot be overruled. This is pre-execution review: do not penalize evidence
 that an existing step explicitly schedules for retrieval. Stop immediately after
-all five statuses and return only PlanAuditChecklist."""
+all five statuses and return only PlanAuditChecklist.
+For a source-visual task, the controller automatically routes bounded rasters to
+Gemma after research and returns structured observations before report drafting.
+Require the plan to acknowledge that checkpoint when it is scientifically
+material, but never ask Qwen to interpret pixels or produce a visual-audit file.
+Phrase any correction as a controller-routed Gemma visual comparison with a
+falsifiable validator, not as a model-generated output artifact."""
 
 SCIENTIFIC_REPORT_CONTRACT = """
 Write a standards-derived exploratory scientific report, never a claim of peer
@@ -534,8 +540,15 @@ inconclusive and state exactly what evidence is missing."""
 INPUT_VISUAL_AUDITOR = """Act as the sole image-understanding scientist for the
 supplied task evidence. Qwen cannot see these images. Inspect every raster in the
 exact visual_input_order and return one VisualEvidenceObservation per image using
-the identical artifact_path. Describe only visible content, then separately state
-its evidence-bounded scientific relevance. Identify unreadable text, clipping,
+the identical artifact_path, copied byte for byte without normalization or typo.
+Return exactly one VisualEvidenceReport object with these keys:
+`observations`, `cross_artifact_findings`, `limitations`, and
+`unreviewed_requests`. Every `observations` item must use exactly
+`artifact_path`, `observed_content`, `scientific_interpretation`, and
+`limitations`; do not substitute `observation`, `scientific_relevance`,
+`visual_evidence_observations`, or another wrapper name. Describe only visible
+content in `observed_content`, then separately state its evidence-bounded relevance
+in `scientific_interpretation`. Identify unreadable text, clipping,
 inconsistent panels, misleading encodings, missing denominators/units, suspicious
 image reuse, or disagreement with the supplied task context. Do not infer patient
 identity, diagnoses, causal effects, numerical values, or statistical significance

@@ -549,12 +549,7 @@ class WorkerState:
                     staged_workspace = staging / "workspace"
                     staged_root = staging / "computations"
                     staged_workspace.mkdir(mode=0o700)
-                    for source in workspace.iterdir():
-                        if source.is_symlink() or not source.is_file():
-                            raise ValueError(
-                                "workspace inputs must be flat regular files"
-                            )
-                        shutil.copy2(source, staged_workspace / source.name)
+                    self._stage_workspace_inputs(workspace, staged_workspace)
                     environment_dir = None
                     if self.environments_dir is not None:
                         candidate = (
@@ -595,6 +590,19 @@ class WorkerState:
         finally:
             with self.lock:
                 self.cancellation_events.pop(request.request_id, None)
+
+    @staticmethod
+    def _stage_workspace_inputs(workspace: Path, staged_workspace: Path) -> None:
+        """Copy uploaded root files while excluding controller-managed directories."""
+
+        for source in workspace.iterdir():
+            if source.is_symlink():
+                raise ValueError("workspace inputs must not contain symlinks")
+            if source.is_dir():
+                continue
+            if not source.is_file():
+                raise ValueError("workspace inputs must be regular files")
+            shutil.copy2(source, staged_workspace / source.name)
 
     def cancel(self, request_id: str) -> bool:
         with self.lock:

@@ -63,6 +63,34 @@ def test_worker_rejects_a_run_path_belonging_to_another_workspace(tmp_path):
         state.confined_paths(request)
 
 
+def test_worker_stages_uploaded_files_after_literature_acquisition(tmp_path):
+    state, workspace, _ = _state(tmp_path)
+    uploaded = workspace / "known_effect.csv"
+    uploaded.write_text("group,outcome\ncontrol,1\n", encoding="utf-8")
+    reference = workspace / "references" / "markdown" / "article.md"
+    reference.parent.mkdir(parents=True)
+    reference.write_text("article", encoding="utf-8")
+    staged = tmp_path / "staged"
+    staged.mkdir()
+
+    state._stage_workspace_inputs(workspace, staged)
+
+    assert (staged / uploaded.name).read_bytes() == uploaded.read_bytes()
+    assert not (staged / "references").exists()
+
+
+def test_worker_rejects_symlinked_workspace_input(tmp_path):
+    state, workspace, _ = _state(tmp_path)
+    outside = tmp_path / "outside.csv"
+    outside.write_text("secret", encoding="utf-8")
+    (workspace / "linked.csv").symlink_to(outside)
+    staged = tmp_path / "staged"
+    staged.mkdir()
+
+    with pytest.raises(ValueError, match="symlinks"):
+        state._stage_workspace_inputs(workspace, staged)
+
+
 def test_handoff_tolerates_root_squashed_nfs_chown(tmp_path, monkeypatch):
     state, _, root = _state(tmp_path)
     artifact = root / "artifact.txt"

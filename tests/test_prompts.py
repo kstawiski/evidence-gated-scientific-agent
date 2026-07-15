@@ -1,4 +1,6 @@
 from scientific_agent.prompts import (
+    INPUT_VISUAL_AUDITOR,
+    PLAN_AUDITOR,
     PLANNER_A,
     PLANNER_B,
     REPORT_DISCUSSION,
@@ -25,6 +27,19 @@ def test_planners_do_not_invent_input_names_or_qwen_visual_audits():
         assert "controller-routed" in prompt
         assert "Gemma audit" in prompt
     assert "Do not list a Gemma audit as a\nQwen-produced output" in SIMPLE_PLANNER
+
+
+def test_plan_auditor_preserves_controller_ownership_of_visual_checkpoint():
+    assert "controller automatically routes bounded rasters" in PLAN_AUDITOR
+    assert "never ask Qwen to interpret pixels" in PLAN_AUDITOR
+    assert "not as a model-generated output artifact" in PLAN_AUDITOR
+
+
+def test_input_visual_auditor_requires_exact_schema_and_artifact_paths():
+    assert "copied byte for byte" in INPUT_VISUAL_AUDITOR
+    assert "`observed_content`" in INPUT_VISUAL_AUDITOR
+    assert "`scientific_interpretation`" in INPUT_VISUAL_AUDITOR
+    assert "do not substitute `observation`" in INPUT_VISUAL_AUDITOR
 
 
 def test_researcher_encourages_each_default_mcp_without_assuming_availability():

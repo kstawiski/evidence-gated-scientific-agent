@@ -957,7 +957,19 @@ async def _review_input_visual_evidence(
                 str(visible_path),
             )
 
-    batches, rejected = _bounded_visual_batches(images, inputs)
+    review_inputs = [
+        {
+            **item,
+            "visual_id": f"visual-{index:03d}",
+            "source_label": (
+                item["artifact_path"]
+                if str(item["artifact_path"]).startswith("/workspace/")
+                else item["display_id"]
+            ),
+        }
+        for index, item in enumerate(inputs, start=1)
+    ]
+    batches, rejected = _bounded_visual_batches(images, review_inputs)
     all_observations = []
     cross_findings: list[str] = []
     limitations: list[str] = []
@@ -969,7 +981,10 @@ async def _review_input_visual_evidence(
     succeeded = 0
     for batch_number, (batch_images, batch_inputs) in enumerate(batches, start=1):
         _cancel_checkpoint(cancel_event)
-        allowed_paths = {str(item["artifact_path"]) for item in batch_inputs}
+        paths_by_visual_id = {
+            str(item["visual_id"]): str(item["artifact_path"]) for item in batch_inputs
+        }
+        allowed_paths = set(paths_by_visual_id.values())
         try:
             result = await request_structured(
                 settings.gemma,
@@ -979,15 +994,15 @@ async def _review_input_visual_evidence(
                     "research_context": research_packet[:20_000],
                     "visual_inputs": [
                         {
-                            key: value
-                            for key, value in item.items()
-                            if key != "display_id"
+                            "artifact_path": item["visual_id"],
+                            "source_label": item["source_label"],
+                            "source": item["source"],
+                            "sha256": item["sha256"],
+                            "bytes": item["bytes"],
                         }
                         for item in batch_inputs
                     ],
-                    "visual_input_order": [
-                        item["artifact_path"] for item in batch_inputs
-                    ],
+                    "visual_input_order": [item["visual_id"] for item in batch_inputs],
                     "batch": {"number": batch_number, "total": len(batches)},
                 },
                 output_type=VisualEvidenceReport,
@@ -1008,21 +1023,26 @@ async def _review_input_visual_evidence(
             continue
         observed_paths: set[str] = set()
         for observation in result.observations:
-            if observation.artifact_path not in allowed_paths:
+            artifact_path = paths_by_visual_id.get(observation.artifact_path)
+            if artifact_path is None:
                 limitations.append(
-                    "Gemma returned an observation for an unsupplied artifact path; "
-                    "the observation was discarded."
+                    "Gemma returned an observation for an unknown controller visual "
+                    "identifier; the observation was discarded."
                 )
                 continue
-            observed_paths.add(observation.artifact_path)
-            all_observations.append(observation)
+            observed_paths.add(artifact_path)
+            all_observations.append(
+                observation.model_copy(update={"artifact_path": artifact_path})
+            )
         missing.extend(
             f"{path} (Gemma returned no structured observation)"
             for path in sorted(allowed_paths - observed_paths)
         )
         cross_findings.extend(result.cross_artifact_findings)
         limitations.extend(result.limitations)
-        missing.extend(result.unreviewed_requests)
+        missing.extend(
+            paths_by_visual_id.get(item, item) for item in result.unreviewed_requests
+        )
 
     report = VisualEvidenceReport(
         observations=all_observations,

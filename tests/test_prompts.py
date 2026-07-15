@@ -36,15 +36,26 @@ def test_plan_auditor_preserves_controller_ownership_of_visual_checkpoint():
 
 
 def test_input_visual_auditor_requires_exact_schema_and_artifact_paths():
-    assert "copied byte for byte" in INPUT_VISUAL_AUDITOR
+    assert "short controller-issued artifact_path identifier" in INPUT_VISUAL_AUDITOR
     assert "`observed_content`" in INPUT_VISUAL_AUDITOR
     assert "`scientific_interpretation`" in INPUT_VISUAL_AUDITOR
+    assert "and `concerns`" in INPUT_VISUAL_AUDITOR
     assert "do not substitute `observation`" in INPUT_VISUAL_AUDITOR
+    assert "Do not reproduce a host filesystem path" in INPUT_VISUAL_AUDITOR
 
 
 def test_researcher_encourages_each_default_mcp_without_assuming_availability():
     assert "Research connections are normally enabled by default" in RESEARCHER
     assert "When available\nin this run" in RESEARCHER
+
+
+def test_researcher_prioritizes_locked_computation_over_optional_retrieval():
+    assert (
+        "after at most one PubMed\nsearch and one article-acquisition call"
+        in RESEARCHER
+    )
+    assert "every required computation language" in RESEARCHER
+    assert "before retrieving optional additional papers" in RESEARCHER
     assert "Context7" in RESEARCHER
     assert "Brave Search" in RESEARCHER
     assert "Chrome DevTools" in RESEARCHER

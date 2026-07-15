@@ -5,7 +5,7 @@ from __future__ import annotations
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field, HttpUrl, model_validator
+from pydantic import BaseModel, Field, HttpUrl, field_validator, model_validator
 
 
 class EvidenceStatus(StrEnum):
@@ -416,6 +416,11 @@ class VisualEvidenceObservation(BaseModel):
     concerns: list[str] = Field(default_factory=list, max_length=12)
     limitations: list[str] = Field(default_factory=list, max_length=12)
 
+    @field_validator("concerns", "limitations", mode="before")
+    @classmethod
+    def accept_one_finding_as_text(cls, value):
+        return [value] if isinstance(value, str) else value
+
 
 class VisualEvidenceReport(BaseModel):
     observations: list[VisualEvidenceObservation] = Field(
@@ -424,6 +429,13 @@ class VisualEvidenceReport(BaseModel):
     cross_artifact_findings: list[str] = Field(default_factory=list, max_length=100)
     limitations: list[str] = Field(default_factory=list, max_length=100)
     unreviewed_requests: list[str] = Field(default_factory=list, max_length=100)
+
+    @field_validator(
+        "cross_artifact_findings", "limitations", "unreviewed_requests", mode="before"
+    )
+    @classmethod
+    def accept_one_finding_as_text(cls, value):
+        return [value] if isinstance(value, str) else value
 
 
 class RetrievalEvidence(BaseModel):

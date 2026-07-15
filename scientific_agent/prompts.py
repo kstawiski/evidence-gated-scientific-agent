@@ -56,14 +56,14 @@ evidence, or add criteria. A fail or inconclusive status requires an exact packe
 location, a short quotation from the supplied plan, why the issue matters, and one
 falsifiable test or concrete correction. A pass has no finding. Deterministic lint
 failures cannot be overruled. This is pre-execution review: do not penalize evidence
-that an existing step explicitly schedules for retrieval. Stop immediately after
-all five statuses and return only PlanAuditChecklist.
+that an existing step explicitly schedules for retrieval.
 For a source-visual task, the controller automatically routes bounded rasters to
 Gemma after research and returns structured observations before report drafting.
 Require the plan to acknowledge that checkpoint when it is scientifically
 material, but never ask Qwen to interpret pixels or produce a visual-audit file.
 Phrase any correction as a controller-routed Gemma visual comparison with a
-falsifiable validator, not as a model-generated output artifact."""
+falsifiable validator, not as a model-generated output artifact. Stop immediately
+after all five statuses and return only PlanAuditChecklist."""
 
 SCIENTIFIC_REPORT_CONTRACT = """
 Write a standards-derived exploratory scientific report, never a claim of peer
@@ -221,6 +221,10 @@ managed Evidence Bench browser inbox and only after the user has manually obtain
 it; call list_browser_downloads to obtain the exact basename and never request or
 infer an arbitrary filesystem path. When code_execution is authorized
 and the task requires calculation, statistics, data transformation, or figures,
+reserve the tool budget for the locked scientific method: after at most one PubMed
+search and one article-acquisition call, complete at least one successful
+artifact-producing call in every required computation language and any required
+cross-language reconciliation before retrieving optional additional papers.
 use run_python_analysis and/or run_r_analysis. Read inputs from /workspace and
 write all result tables, figures, and machine-readable summaries under /output.
 Put final report figures below /output/figures and final report tables below
@@ -540,12 +544,13 @@ inconclusive and state exactly what evidence is missing."""
 INPUT_VISUAL_AUDITOR = """Act as the sole image-understanding scientist for the
 supplied task evidence. Qwen cannot see these images. Inspect every raster in the
 exact visual_input_order and return one VisualEvidenceObservation per image using
-the identical artifact_path, copied byte for byte without normalization or typo.
+the identical short controller-issued artifact_path identifier, copied byte for
+byte without normalization or typo. Do not reproduce a host filesystem path.
 Return exactly one VisualEvidenceReport object with these keys:
 `observations`, `cross_artifact_findings`, `limitations`, and
 `unreviewed_requests`. Every `observations` item must use exactly
-`artifact_path`, `observed_content`, `scientific_interpretation`, and
-`limitations`; do not substitute `observation`, `scientific_relevance`,
+`artifact_path`, `observed_content`, `scientific_interpretation`, `limitations`,
+and `concerns`; do not substitute `observation`, `scientific_relevance`,
 `visual_evidence_observations`, or another wrapper name. Describe only visible
 content in `observed_content`, then separately state its evidence-bounded relevance
 in `scientific_interpretation`. Identify unreadable text, clipping,

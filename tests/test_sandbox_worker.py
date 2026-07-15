@@ -1,3 +1,4 @@
+import os
 import threading
 import uuid
 from pathlib import Path
@@ -88,6 +89,28 @@ def test_worker_rejects_symlinked_workspace_input(tmp_path):
     staged.mkdir()
 
     with pytest.raises(ValueError, match="symlinks"):
+        state._stage_workspace_inputs(workspace, staged)
+
+
+def test_worker_rejects_symlinked_workspace_directory(tmp_path):
+    state, workspace, _ = _state(tmp_path)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (workspace / "linked-directory").symlink_to(outside, target_is_directory=True)
+    staged = tmp_path / "staged"
+    staged.mkdir()
+
+    with pytest.raises(ValueError, match="symlinks"):
+        state._stage_workspace_inputs(workspace, staged)
+
+
+def test_worker_rejects_special_workspace_file(tmp_path):
+    state, workspace, _ = _state(tmp_path)
+    os.mkfifo(workspace / "named-pipe")
+    staged = tmp_path / "staged"
+    staged.mkdir()
+
+    with pytest.raises(ValueError, match="regular files"):
         state._stage_workspace_inputs(workspace, staged)
 
 

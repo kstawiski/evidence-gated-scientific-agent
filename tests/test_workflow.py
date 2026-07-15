@@ -1208,6 +1208,22 @@ async def test_source_images_are_reviewed_only_by_gemma_and_cached_by_hash(
     assert calls[0][0] is settings.gemma
     assert image in calls[0][1]["image_paths"]
     assert len(calls[0][1]["image_paths"]) == 2
+    assert calls[0][1]["payload"]["visual_input_order"] == [
+        "visual-001",
+        "visual-002",
+    ]
+    assert all(
+        item["artifact_path"].startswith("visual-")
+        for item in calls[0][1]["payload"]["visual_inputs"]
+    )
+    assert all(
+        not item["artifact_path"].startswith("/data/")
+        for item in calls[0][1]["payload"]["visual_inputs"]
+    )
+    reviewed_paths = {item.artifact_path for item in first.observations}
+    assert "/workspace/source.png" in reviewed_paths
+    assert len(reviewed_paths) == 2
+    assert all(not path.startswith("visual-") for path in reviewed_paths)
     assert "sole image-understanding scientist" in calls[0][1]["system_prompt"]
     assert any("visual-proof.pdf" in item for item in first.unreviewed_requests)
     audit = json.loads((run_dir / "gemma_input_visual_review.json").read_text())
@@ -1215,6 +1231,31 @@ async def test_source_images_are_reviewed_only_by_gemma_and_cached_by_hash(
     assert audit["qwen_image_inputs"] == 0
     assert audit["batches_attempted"] == 1
     assert audit["batches_succeeded"] == 1
+
+
+def test_visual_evidence_accepts_single_finding_strings():
+    report = VisualEvidenceReport.model_validate(
+        {
+            "observations": [
+                {
+                    "artifact_path": "visual-001",
+                    "observed_content": "A complete chart is visible.",
+                    "scientific_interpretation": "It reports a descriptive estimate.",
+                    "concerns": "The unit is not visible.",
+                    "limitations": "Only one panel was supplied.",
+                }
+            ],
+            "cross_artifact_findings": "The two views agree.",
+            "limitations": "The evidence is descriptive.",
+            "unreviewed_requests": "A second page was not supplied.",
+        }
+    )
+
+    assert report.observations[0].concerns == ["The unit is not visible."]
+    assert report.observations[0].limitations == ["Only one panel was supplied."]
+    assert report.cross_artifact_findings == ["The two views agree."]
+    assert report.limitations == ["The evidence is descriptive."]
+    assert report.unreviewed_requests == ["A second page was not supplied."]
 
 
 @pytest.mark.anyio

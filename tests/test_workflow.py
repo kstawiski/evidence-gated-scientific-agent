@@ -23,13 +23,14 @@ from scientific_agent.orchestrator import (
     _needs_repair,
     _merge_retrieval_evidence,
     _prepare_task_spec,
+    _register_computation_path_evidence,
     _remove_display_ids_from_claim_evidence,
     _requires_pubmed_literature,
     _write_attempt_bundle,
     ResearchBudgetController,
     ResearchBudgetExceeded,
 )
-from scientific_agent.provenance import EventLedger
+from scientific_agent.provenance import EventLedger, sha256_file
 from scientific_agent.schemas import (
     ArtifactRef,
     CheckSpec,
@@ -98,6 +99,89 @@ def test_visible_tool_activity_exposes_useful_fields_without_code_or_url_secrets
     assert "url_origin='https://example.org'" in browser
     assert "/article" not in browser
     assert "token" not in browser
+
+
+def test_exact_computation_path_ref_is_registered_without_inventing_science(tmp_path):
+    result_path = tmp_path / "result.json"
+    result_path.write_text('{"estimate":5.0}\n', encoding="utf-8")
+    artifact = ArtifactRef(
+        path=str(result_path),
+        sha256=sha256_file(result_path),
+        description="sandbox-generated analysis artifact",
+    )
+    computation = ComputationEvidence(
+        records=[
+            ComputationRecord(
+                execution_id="exec-001",
+                language="python",
+                code_sha256="a" * 64,
+                started_at="2026-07-15T00:00:00Z",
+                duration_seconds=1,
+                exit_code=0,
+                status="succeeded",
+                stdout_path=str(tmp_path / "stdout.txt"),
+                stderr_path=str(tmp_path / "stderr.txt"),
+                artifacts=[artifact],
+            )
+        ],
+        artifacts=[artifact],
+    )
+    report = ScientificReport(
+        title="Artifact registration",
+        executive_summary="A generated estimate was recorded.",
+        introduction="This test checks structural provenance normalization.",
+        methods=["A generated JSON artifact was used."],
+        results="The estimate is reported.",
+        discussion="Interpretation is restricted to the generated artifact.",
+        conclusions="The artifact remains directly inspectable.",
+        sources=[],
+        claims=[
+            ClaimRecord(
+                claim_id="estimate",
+                text="The estimate is 5.0.",
+                claim_type="computed",
+                evidence_refs=[str(result_path)],
+                status="supported",
+            )
+        ],
+    )
+
+    normalized = _register_computation_path_evidence(report, computation)
+
+    assert len(normalized.sources) == 1
+    assert normalized.claims[0].evidence_refs == [normalized.sources[0].source_id]
+    assert normalized.sources[0].artifact_path == str(result_path)
+    assert "5.0" not in normalized.sources[0].supporting_passage
+
+    result_path.write_text('{"estimate":999.0}\n', encoding="utf-8")
+    tampered = _register_computation_path_evidence(report, computation)
+    assert tampered == report
+
+
+def test_unknown_path_ref_is_not_silently_registered():
+    report = ScientificReport(
+        title="Unknown artifact",
+        executive_summary="An unknown path remains unknown.",
+        introduction="This test preserves validation failures.",
+        methods=["No generated computation was available."],
+        results="No result is accepted.",
+        discussion="The missing source remains unresolved.",
+        conclusions="No claim is supported.",
+        sources=[],
+        claims=[
+            ClaimRecord(
+                claim_id="unknown",
+                text="An unsupported value is 5.0.",
+                claim_type="computed",
+                evidence_refs=["/unknown/result.json"],
+                status="unsupported",
+            )
+        ],
+    )
+
+    normalized = _register_computation_path_evidence(report, ComputationEvidence())
+
+    assert normalized == report
 
 
 def test_visible_tool_result_links_execution_source_without_output_content():
@@ -395,24 +479,88 @@ def test_tool_order_gate_requires_passing_cross_language_reconciliation(tmp_path
     assert denied is not None
     assert denied["missing_required_languages"] == []
     assert denied["reconciliation_required"] is True
+    python_output = tmp_path / "python.json"
+    r_output = tmp_path / "r.json"
+    python_output.write_text('{"primary":{"point_estimate":5.0}}\n', encoding="utf-8")
+    r_output.write_text('{"primary":{"point_estimate":5.0}}\n', encoding="utf-8")
     reconciliation = tmp_path / "cross_language_reconciliation.json"
-    reconciliation.write_text('{"all_pass": true}\n', encoding="utf-8")
+    reconciliation.write_text(
+        json.dumps(
+            {
+                "all_pass": True,
+                "comparisons": [
+                    {
+                        "metric": "primary_point_estimate",
+                        "python": {
+                            "language": "python",
+                            "artifact_sha256": sha256_file(python_output),
+                            "json_path": "primary.point_estimate",
+                            "value": 5.0,
+                        },
+                        "r": {
+                            "language": "r",
+                            "artifact_sha256": sha256_file(r_output),
+                            "json_path": "primary.point_estimate",
+                            "value": 5.0,
+                        },
+                        "absolute_difference": 0.0,
+                        "tolerance": 1e-6,
+                        "passed": True,
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    python_artifact = ArtifactRef(
+        path=str(python_output),
+        sha256=sha256_file(python_output),
+        description="sandbox-generated analysis artifact",
+    )
+    r_artifact = ArtifactRef(
+        path=str(r_output),
+        sha256=sha256_file(r_output),
+        description="sandbox-generated analysis artifact",
+    )
     artifact = ArtifactRef(
         path=str(reconciliation),
-        sha256="f" * 64,
+        sha256=sha256_file(reconciliation),
         description="sandbox-generated analysis artifact",
     )
     reconciled = ComputationEvidence(
-        records=[records[0].model_copy(update={"artifacts": [artifact]}), records[1]],
-        artifacts=[artifact],
+        records=[
+            records[0].model_copy(update={"artifacts": [python_artifact, artifact]}),
+            records[1].model_copy(update={"artifacts": [r_artifact]}),
+        ],
+        artifacts=[python_artifact, r_artifact, artifact],
     )
     assert gate.before_tool("search_pubmed", reconciled) is None
 
     reconciliation.write_text(
-        json.dumps({"padding": "x" * (90 * 1024), "all_pass": True}),
+        json.dumps(
+            {
+                **json.loads(reconciliation.read_text(encoding="utf-8")),
+                "padding": "x" * (90 * 1024),
+            }
+        ),
         encoding="utf-8",
     )
-    assert gate.before_tool("search_pubmed", reconciled) is None
+    assert gate.before_tool("search_pubmed", reconciled) is not None
+    padded_artifact = artifact.model_copy(
+        update={"sha256": sha256_file(reconciliation)}
+    )
+    padded = reconciled.model_copy(
+        update={
+            "records": [
+                reconciled.records[0].model_copy(
+                    update={"artifacts": [python_artifact, padded_artifact]}
+                ),
+                reconciled.records[1],
+            ],
+            "artifacts": [python_artifact, r_artifact, padded_artifact],
+        }
+    )
+    assert gate.before_tool("search_pubmed", padded) is None
 
 
 def test_adk_graph_builds_and_validates():

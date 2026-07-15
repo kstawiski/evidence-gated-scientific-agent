@@ -291,6 +291,16 @@ class SourceRecord(BaseModel):
 
     @model_validator(mode="after")
     def exactly_one_evidence_location(self) -> "SourceRecord":
+        if (
+            self.url is not None
+            and self.artifact_path is not None
+            and self.local_markdown_path is not None
+            and self.artifact_path == self.local_markdown_path
+        ):
+            # Local article Markdown supplements the canonical literature URL; it
+            # is not a second evidence location. Normalize this frequent model
+            # serialization error before enforcing the unambiguous contract.
+            self.artifact_path = None
         if (self.url is None) == (self.artifact_path is None):
             raise ValueError("exactly one of url or artifact_path is required")
         if self.local_pdf_path is not None and self.url is None:

@@ -71,6 +71,25 @@ def test_source_record_requires_exactly_one_evidence_location():
         )
 
 
+def test_literature_markdown_duplicate_artifact_path_is_normalized():
+    markdown = "/run/references/example.md"
+    source = SourceRecord(
+        source_id="pubmed-1",
+        title="Acquired article",
+        url="https://pubmed.ncbi.nlm.nih.gov/12345/",
+        artifact_path=markdown,
+        pmid="12345",
+        local_markdown_path=markdown,
+        full_text_status="abstract_only",
+        source_type="review",
+        retrieved_at="2026-07-15T00:00:00Z",
+        supporting_passage="A bounded article passage.",
+    )
+
+    assert source.artifact_path is None
+    assert source.local_markdown_path == markdown
+
+
 @pytest.mark.parametrize(
     "field,value",
     [

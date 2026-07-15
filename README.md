@@ -472,6 +472,16 @@ rounds allow up to eight calls and 120 seconds per call. Display-only repair reu
 must not repeat valid estimation, reconciliation, or controller provenance. Tool
 responses expose the remaining count and exhaustion fails closed.
 
+Cross-language reconciliation is controller-verified rather than trusted as model
+prose. Its JSON must list at least one Python/R comparison, bind both values to
+successful JSON artifacts by SHA-256 and dot-delimited JSON path, and record the
+tolerance, absolute difference, and per-comparison verdict. The controller reloads
+the hashed artifacts and recomputes every difference and the top-level verdict; a
+bare `all_pass: true` is invalid. Exact generated-artifact paths mistakenly placed
+in a claim's `evidence_refs` are converted to stable, inspectable `SourceRecord`
+IDs only when the path exactly matches successful computation evidence. Unknown
+paths still fail validation.
+
 Each run creates a mode-0700 directory under `runs/` containing the typed plan,
 lint result, report, Gemma audit, run configuration, private size-bounded MCP
 evidence artifacts, source scripts and logs, generated computation artifacts,

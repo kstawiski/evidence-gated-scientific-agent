@@ -72,6 +72,7 @@ from .schemas import (
     RunResult,
     RetrievalEvidence,
     ScientificReport,
+    SourceRecord,
     TaskSpec,
     VerificationReport,
     VisualEvidenceReport,
@@ -290,7 +291,7 @@ class ScientificToolOrderGate:
                     )
                 ):
                     continue
-                if reconciliation_verdict(path) is True:
+                if reconciliation_verdict(path, evidence) is True:
                     return True
         return False
 
@@ -1458,6 +1459,91 @@ def _remove_display_ids_from_claim_evidence(
     return report.model_copy(update={"claims": claims}) if changed else report
 
 
+def _register_computation_path_evidence(
+    report: ScientificReport,
+    computation: ComputationEvidence,
+) -> ScientificReport:
+    """Replace exact generated-artifact path refs with stable SourceRecord IDs.
+
+    This is a structural provenance normalization only. Unknown paths remain
+    untouched so validation still rejects them, and no scientific paraphrase is
+    invented from artifact contents.
+    """
+
+    artifacts: dict[str, tuple[ArtifactRef, str]] = {}
+    for record in computation.records:
+        if record.status != "succeeded":
+            continue
+        for artifact in record.artifacts:
+            path = Path(artifact.path)
+            if (
+                artifact.description != "sandbox-generated analysis artifact"
+                or path.suffix.lower() not in {".json", ".csv", ".tsv", ".txt"}
+                or not artifact.sha256
+            ):
+                continue
+            try:
+                if sha256_file(path) != artifact.sha256:
+                    continue
+            except OSError:
+                continue
+            artifacts[os.path.normpath(artifact.path)] = (
+                artifact,
+                record.started_at,
+            )
+    if not artifacts:
+        return report
+
+    source_ids = {source.source_id for source in report.sources}
+    source_id_by_path = {
+        os.path.normpath(source.artifact_path): source.source_id
+        for source in report.sources
+        if source.artifact_path is not None
+    }
+    additions: list[SourceRecord] = []
+    claims = []
+    changed = False
+    for claim in report.claims:
+        normalized_refs = []
+        for reference in claim.evidence_refs:
+            normalized = os.path.normpath(reference)
+            if normalized not in artifacts:
+                normalized_refs.append(reference)
+                continue
+            source_id = source_id_by_path.get(normalized)
+            if source_id is None:
+                artifact, started_at = artifacts[normalized]
+                token = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:12]
+                source_id = f"artifact-{token}"
+                suffix = 2
+                while source_id in source_ids:
+                    source_id = f"artifact-{token}-{suffix}"
+                    suffix += 1
+                source_ids.add(source_id)
+                source_id_by_path[normalized] = source_id
+                additions.append(
+                    SourceRecord(
+                        source_id=source_id,
+                        title=f"Generated computation artifact: {Path(normalized).name}",
+                        artifact_path=artifact.path,
+                        source_type="other",
+                        retrieved_at=started_at,
+                        supporting_passage=(
+                            "Controller-registered generated artifact; exact claims "
+                            "must be checked against the linked machine-readable file."
+                        ),
+                    )
+                )
+            normalized_refs.append(source_id)
+        changed = changed or normalized_refs != claim.evidence_refs
+        claims.append(claim.model_copy(update={"evidence_refs": normalized_refs}))
+    if not changed:
+        return report
+    return report.model_copy(
+        update={"claims": claims, "sources": [*report.sources, *additions]}
+    )
+
+
 def _ensure_declared_display_mentions(report: ScientificReport) -> ScientificReport:
     """Add neutral controller cross-references without changing scientific claims."""
 
@@ -2287,7 +2373,9 @@ async def _produce_report(
         cancel_event=cancel_event,
     )
     normalized_report = _ensure_declared_display_mentions(
-        _remove_display_ids_from_claim_evidence(report)
+        _remove_display_ids_from_claim_evidence(
+            _register_computation_path_evidence(report, effective_computation)
+        )
     )
     if normalized_report is not report:
         ledger.append(
@@ -2295,6 +2383,7 @@ async def _produce_report(
             {
                 "rules": [
                     "ClaimRecord.evidence_refs accept SourceRecord IDs only",
+                    "Exact generated-artifact path refs become registered SourceRecords",
                     "Registered displays are referenced in their declared section",
                 ],
             },

@@ -324,9 +324,21 @@ literature acquisition record.
 After every required analysis language has a successful call with a generated
 artifact, complete any explicitly required cross-language reconciliation before
 writing the research packet. The reconciliation must be a JSON artifact whose
-filename contains reconciliation or crosscheck and whose top-level object contains
-all_pass, passed, within_tolerance, or reconciliation_passed as a boolean. Report exact computation artifact
-paths and failed checks in the research packet."""
+filename contains reconciliation or crosscheck. Its top-level object must contain
+an all_pass boolean and a non-empty comparisons array. Each comparison must contain
+metric, tolerance, absolute_difference, passed, and python/r objects. Each language
+object must contain language, artifact_sha256, json_path, and value. Hash the exact
+successful JSON source artifact, use a dot-delimited JSON path to the compared
+number, and never copy one implementation's value into the other. The controller
+reloads both hashed artifacts and independently recomputes every difference and
+verdict; a bare model-authored all_pass boolean is invalid. Report exact computation
+artifact paths and failed checks in the research packet. Use this exact shape:
+{"all_pass": true, "comparisons": [{"metric": "primary_point_estimate",
+"python": {"language": "python", "artifact_sha256": "<64 hex>",
+"json_path": "primary.point_estimate", "value": 5.0}, "r": {"language": "r",
+"artifact_sha256": "<64 hex>", "json_path": "primary.point_estimate",
+"value": 5.0}, "absolute_difference": 0.0, "tolerance": 1e-6,
+"passed": true}]}."""
 
 REPORTER = (
     """You are the primary scientific report writer. Use only the supplied
@@ -379,6 +391,13 @@ or a bibliography-only citation into the final evidence ledger.
 Do not claim that a statistical method is robust to assumption violations unless
 that general methodological assertion cites a retrieved literature source; without
 one, retain the concern as a limitation rather than presenting reassurance.
+Never say that similar primary and adjusted estimates prove robustness, stability,
+absence of confounding, algorithmic equivalence, or pipeline validity. State the
+observed estimates and bounded comparison. A nonsignificant Shapiro-Wilk or Levene
+test means only that the diagnostic did not detect a departure; it does not prove
+that an assumption is met, and its limited power must remain explicit. Do not
+report a named diagnostic unless its statistic and p-value occur in a successful
+registered computation artifact.
 When the study design is unspecified, do not introduce intervention language even
 as generic background framing; describe a measurement interval or a between-group
 change instead. When the outcome domain or units are unspecified, discuss unknown
@@ -452,8 +471,8 @@ created by a sandbox computation or reject it merely because it appears only in
 controller_evidence. Reject general robustness or validity claims
 supported only by the analysis they are intended to justify. Do not reward verbosity.
 Failed execution attempts remain in the audit trail but are not blocking when the
-required language later succeeds and the reconciliation artifact explicitly names
-the successful execution IDs it compared.
+required language later succeeds and the reconciliation artifact binds the exact
+successful Python and R source artifacts by their recorded SHA-256 hashes.
 Audit the article section roles, abstract/body numerical consistency, reporting of
 denominators/effect uncertainty/null and sensitivity findings, design-matched
 language, and causal or clinical overreach. Review every criterion point by point
@@ -461,8 +480,13 @@ instead of stopping after the first defect. Primary estimates and uncertainty
 belong in Results; Discussion must interpret rather than duplicate the Results
 paragraph; Conclusions must lead with the scientific answer rather than workflow
 machinery. Explicitly audit recommendations, dominance/robustness language, and
-each precise number wherever they appear in the abstract or body. Independently
-recheck every reported equation, algebraic reduction, boundary condition, and
+each precise number wherever they appear in the abstract or body. Treat
+nonsignificant Shapiro-Wilk or Levene tests as failure to detect a departure,
+not proof that assumptions are met. Similar primary and adjusted estimates support
+a bounded numerical comparison, not absence of confounding, algorithmic
+equivalence, pipeline validity, robustness, or stability. Block those stronger
+interpretations unless separately and directly established by appropriate evidence.
+Independently recheck every reported equation, algebraic reduction, boundary condition, and
 claim that two methods coincide; block it when the exact relation lacks a matching
 ClaimRecord plus direct acquired-source support or a reproducible calculation.
 Do not accept equality of a single intermediate quantity as proof that the full

@@ -158,6 +158,13 @@ to eight sandbox calls. They must not repeat valid Python/R estimation,
 cross-language reconciliation, or controller provenance; one display-generation
 call plus one direct retry is the expected path.
 
+For cross-language work, agreement is not established by a model-authored boolean.
+The reconciliation JSON identifies each Python and R source using its SHA-256 and
+numeric JSON path. The controller reloads those successful artifacts, verifies the
+declared values, recomputes the absolute difference against the declared tolerance,
+and derives the verdict. Invalid, unbound, or internally inconsistent comparison
+records fail closed.
+
 Correctable typos, labels, clutter, overlaps, false captions, inconsistent
 numbers, and excessive display precision remain blocking. An inherent study
 limitation may become nonblocking only when it cannot be resolved with the

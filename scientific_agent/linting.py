@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import math
 import os
 import re
 import unicodedata
@@ -40,27 +42,173 @@ from .schemas import (
 RECONCILIATION_JSON_MAX_BYTES = 1024 * 1024
 
 
-def reconciliation_verdict(path: Path) -> bool | None:
-    """Read one bounded, top-level cross-language reconciliation verdict."""
+def _bounded_json_object(path: Path) -> dict[str, Any] | None:
+    """Read one strict, bounded JSON object."""
 
     try:
         if not path.is_file() or path.stat().st_size > RECONCILIATION_JSON_MAX_BYTES:
             return None
-        value = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
+        value = json.loads(
+            path.read_text(encoding="utf-8"),
+            parse_constant=_reject_nonfinite_json,
+        )
+    except (OSError, UnicodeError, ValueError):
         return None
-    if not isinstance(value, dict):
+    return value if isinstance(value, dict) else None
+
+
+def _json_number(value: Any) -> float | None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
         return None
-    for key in (
-        "all_pass",
-        "passed",
-        "within_tolerance",
-        "reconciliation_passed",
+    number = float(value)
+    return number if math.isfinite(number) else None
+
+
+def _json_path_number(document: Any, json_path: str) -> float | None:
+    if not json_path or not re.fullmatch(
+        r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*", json_path
     ):
-        verdict = value.get(key)
-        if isinstance(verdict, bool):
-            return verdict
-    return None
+        return None
+    current = document
+    for component in json_path.split("."):
+        if not isinstance(current, dict) or component not in current:
+            return None
+        current = current[component]
+    return _json_number(current)
+
+
+def reconciliation_verdict(
+    path: Path,
+    computation: ComputationEvidence | None = None,
+) -> bool | None:
+    """Independently validate one cross-language reconciliation artifact.
+
+    A model-authored top-level boolean is not evidence. Each comparison must bind
+    Python and R values to successful, content-hashed JSON artifacts; this function
+    reloads those values and recomputes the declared difference and verdict.
+    """
+
+    value = _bounded_json_object(path)
+    if value is None or computation is None:
+        return None
+    try:
+        reconciliation_digest = hashlib.sha256(path.read_bytes()).hexdigest()
+    except OSError:
+        return None
+    normalized_reconciliation_path = os.path.normpath(str(path))
+    if not any(
+        record.status == "succeeded"
+        and any(
+            os.path.normpath(artifact.path) == normalized_reconciliation_path
+            and artifact.sha256 == reconciliation_digest
+            and artifact.description == "sandbox-generated analysis artifact"
+            for artifact in record.artifacts
+        )
+        for record in computation.records
+    ):
+        return None
+    top_level_verdicts = [
+        candidate
+        for key in (
+            "all_pass",
+            "passed",
+            "within_tolerance",
+            "reconciliation_passed",
+        )
+        if isinstance((candidate := value.get(key)), bool)
+    ]
+    verdict = top_level_verdicts[0] if top_level_verdicts else None
+    comparisons = value.get("comparisons")
+    if (
+        verdict is None
+        or any(candidate is not verdict for candidate in top_level_verdicts[1:])
+        or not isinstance(comparisons, list)
+        or not comparisons
+    ):
+        return None
+
+    artifacts_by_language_and_hash: dict[tuple[str, str], Path] = {}
+    for record in computation.records:
+        if record.status != "succeeded":
+            continue
+        for artifact in record.artifacts:
+            if (
+                artifact.description == "sandbox-generated analysis artifact"
+                and artifact.sha256
+                and re.fullmatch(r"[0-9a-fA-F]{64}", artifact.sha256)
+                and Path(artifact.path).suffix.lower() == ".json"
+            ):
+                artifacts_by_language_and_hash[
+                    (record.language, artifact.sha256.lower())
+                ] = Path(artifact.path)
+
+    observed_passes: list[bool] = []
+    for comparison in comparisons:
+        if (
+            not isinstance(comparison, dict)
+            or not str(comparison.get("metric", "")).strip()
+        ):
+            return None
+        sources: dict[str, float] = {}
+        for side in ("python", "r"):
+            source = comparison.get(side)
+            if not isinstance(source, dict) or source.get("language") != side:
+                return None
+            digest = source.get("artifact_sha256")
+            json_path = source.get("json_path")
+            declared = _json_number(source.get("value"))
+            if (
+                not isinstance(digest, str)
+                or not re.fullmatch(r"[0-9a-fA-F]{64}", digest)
+                or not isinstance(json_path, str)
+                or declared is None
+            ):
+                return None
+            source_path = artifacts_by_language_and_hash.get((side, digest.lower()))
+            if source_path is None:
+                return None
+            try:
+                if (
+                    hashlib.sha256(source_path.read_bytes()).hexdigest()
+                    != digest.lower()
+                ):
+                    return None
+            except OSError:
+                return None
+            document = _bounded_json_object(source_path)
+            observed = _json_path_number(document, json_path) if document else None
+            if observed is None or not math.isclose(
+                declared, observed, rel_tol=1e-12, abs_tol=1e-12
+            ):
+                return None
+            sources[side] = observed
+
+        tolerance = _json_number(comparison.get("tolerance"))
+        declared_difference = _json_number(comparison.get("absolute_difference"))
+        declared_pass = comparison.get("passed")
+        if (
+            tolerance is None
+            or tolerance < 0
+            or declared_difference is None
+            or declared_difference < 0
+            or not isinstance(declared_pass, bool)
+        ):
+            return None
+        observed_difference = abs(sources["python"] - sources["r"])
+        if not math.isclose(
+            declared_difference,
+            observed_difference,
+            rel_tol=1e-12,
+            abs_tol=1e-12,
+        ):
+            return None
+        observed_pass = observed_difference <= tolerance
+        if declared_pass is not observed_pass:
+            return None
+        observed_passes.append(observed_pass)
+
+    observed_verdict = all(observed_passes)
+    return verdict if verdict is observed_verdict else None
 
 
 _WORD = re.compile(r"[a-z0-9]{4,}")
@@ -143,6 +291,25 @@ _EQUATION_OPERANDS = re.compile(
     r"(?P<left>[^\s,;:=()]+)\s*(?<![<>])=(?!=)\s*"
     r"(?P<right>[^\s,;:=().]+)",
     re.UNICODE,
+)
+_COMPUTED_DIAGNOSTIC_TERMS = {
+    "shapiro": re.compile(r"\bshapiro(?:-wilk)?\b", re.IGNORECASE),
+    "levene": re.compile(r"\blevene(?:'s)?\b", re.IGNORECASE),
+}
+_OVERSTATED_SENSITIVITY_LANGUAGE = re.compile(
+    r"\b(?:confirm(?:s|ed|ing)?\s+(?:the\s+)?robustness|"
+    r"(?:baseline|age|covariates?).{0,60}\bdid not (?:materially )?confound|"
+    r"validat(?:e[sd]?|ing) (?:the )?(?:analytical|analysis) pipeline|"
+    r"confirm(?:s|ed|ing)? algorithmic equivalence|"
+    r"sensitivity analys(?:is|es).{0,50}\bconfirm(?:s|ed|ing)? stability)\b",
+    re.IGNORECASE,
+)
+_ASSUMPTION_ACCEPTANCE_LANGUAGE = re.compile(
+    r"\b(?:normality|homoscedasticity|equal[- ]variance).{0,100}"
+    r"\bassumptions? (?:are |were )?(?:met|satisfied|supported)\b|"
+    r"\bassumptions? (?:are |were )?(?:met|satisfied|supported).{0,100}"
+    r"\b(?:shapiro|levene|normality|homoscedasticity|equal[- ]variance)\b",
+    re.IGNORECASE,
 )
 
 
@@ -772,7 +939,7 @@ def validate_report(
                 path = Path(artifact.path)
                 if path.suffix.lower() != ".json":
                     continue
-                verdict = reconciliation_verdict(path)
+                verdict = reconciliation_verdict(path, computation)
                 if verdict is None:
                     continue
                 verdicts.append(verdict)
@@ -784,9 +951,10 @@ def validate_report(
                         code="reconciliation_artifact_invalid",
                         location="computation_evidence",
                         message=(
-                            "The reconciliation artifact must be JSON with a top-level "
-                            "boolean all_pass, passed, within_tolerance, or "
-                            "reconciliation_passed verdict."
+                            "The reconciliation JSON must bind each Python/R value "
+                            "to a successful hashed JSON artifact and JSON path, then "
+                            "declare a tolerance, absolute difference, per-comparison "
+                            "pass, and consistent top-level verdict."
                         ),
                     )
                 )
@@ -865,6 +1033,32 @@ def validate_report(
         )
     )
     report_text = " ".join(report_text.split())
+    if _OVERSTATED_SENSITIVITY_LANGUAGE.search(report_text):
+        findings.append(
+            LintFinding(
+                code="sensitivity_analysis_overclaim",
+                location="report",
+                message=(
+                    "Similarity between a primary and sensitivity estimate does not "
+                    "prove absence of confounding, algorithmic equivalence, pipeline "
+                    "validity, robustness, or stability. Report the observed numerical "
+                    "agreement and its scope directly."
+                ),
+            )
+        )
+    if _ASSUMPTION_ACCEPTANCE_LANGUAGE.search(report_text):
+        findings.append(
+            LintFinding(
+                code="diagnostic_nonrejection_overclaim",
+                location="report",
+                message=(
+                    "A nonsignificant Shapiro-Wilk or Levene test does not establish "
+                    "that an assumption is met. State that the diagnostic did not "
+                    "detect a departure, report its limited power, and retain the "
+                    "relevant assumption as a limitation."
+                ),
+            )
+        )
     if re.search(
         r"\bbaseline\b.{0,180}\b(?:differ|imbalance|p\s*[=<]).{0,180}"
         r"\bjustif(?:y|ies|ied|ying)\b.{0,80}\bprespecif",
@@ -1514,6 +1708,20 @@ def validate_report(
                     )
                 )
             if claim.claim_type == "literature_supported":
+                if re.search(r"\bguidelines?\b", claim.text, re.IGNORECASE) and not any(
+                    source.source_type == "guideline" for source in referenced_sources
+                ):
+                    findings.append(
+                        LintFinding(
+                            code="literature_source_type_mismatch",
+                            location=location,
+                            message=(
+                                "A claim attributed to reporting guidelines must cite "
+                                "a source classified and acquired as a guideline; do "
+                                "not relabel an unrelated primary study or review."
+                            ),
+                        )
+                    )
                 claim_terms = _grounding_terms(claim.text)
                 for source in referenced_sources:
                     acquired_text = acquired_text_by_source.get(source.source_id)
@@ -1574,6 +1782,45 @@ def validate_report(
                         ),
                     )
                 )
+            if claim.claim_type == "computed":
+                artifact_texts: list[str] = []
+                for source in referenced_sources:
+                    if source.artifact_path is None:
+                        continue
+                    path = Path(source.artifact_path)
+                    try:
+                        if (
+                            path.suffix.lower() in {".json", ".csv", ".tsv", ".txt"}
+                            and path.is_file()
+                            and not path.is_symlink()
+                            and path.stat().st_size <= RECONCILIATION_JSON_MAX_BYTES
+                        ):
+                            artifact_texts.append(
+                                path.read_text(
+                                    encoding="utf-8", errors="replace"
+                                ).lower()
+                            )
+                    except OSError:
+                        continue
+                missing_diagnostics = sorted(
+                    label
+                    for label, pattern in _COMPUTED_DIAGNOSTIC_TERMS.items()
+                    if pattern.search(claim.text)
+                    and artifact_texts
+                    and not any(label in text for text in artifact_texts)
+                )
+                if missing_diagnostics:
+                    findings.append(
+                        LintFinding(
+                            code="computed_diagnostic_not_in_artifact",
+                            location=location,
+                            message=(
+                                "A named diagnostic must occur in a directly cited "
+                                "machine-readable computation artifact. Missing: "
+                                + ", ".join(missing_diagnostics)
+                            ),
+                        )
+                    )
             if (
                 claim.claim_type == "inference"
                 and _METHODOLOGICAL_GENERALIZATION.search(claim.text)

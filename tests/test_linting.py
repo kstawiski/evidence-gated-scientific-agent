@@ -1,3 +1,5 @@
+import json
+
 from PIL import Image
 
 from scientific_agent.linting import lint_plan, validate_report
@@ -66,6 +68,41 @@ def article_report(**overrides):
     }
     values.update(overrides)
     return ScientificReport(**values)
+
+
+def reconciliation_document(
+    python_path,
+    r_path,
+    *,
+    python_value: float,
+    r_value: float,
+    tolerance: float = 1e-6,
+):
+    difference = abs(python_value - r_value)
+    passed = difference <= tolerance
+    return {
+        "all_pass": passed,
+        "comparisons": [
+            {
+                "metric": "primary_point_estimate",
+                "python": {
+                    "language": "python",
+                    "artifact_sha256": sha256_file(python_path),
+                    "json_path": "primary.point_estimate",
+                    "value": python_value,
+                },
+                "r": {
+                    "language": "r",
+                    "artifact_sha256": sha256_file(r_path),
+                    "json_path": "primary.point_estimate",
+                    "value": r_value,
+                },
+                "absolute_difference": difference,
+                "tolerance": tolerance,
+                "passed": passed,
+            }
+        ],
+    }
 
 
 def test_plan_linter_accepts_complete_read_only_plan():
@@ -881,30 +918,61 @@ def test_report_validator_requires_passing_reconciliation_artifact(tmp_path):
         sources=[],
         narrative="Comparison",
     )
-    artifact_path = tmp_path / "reconciliation.json"
-    artifact_path.write_text('{"all_pass": false}\n', encoding="utf-8")
+    python_path = tmp_path / "python.json"
+    r_path = tmp_path / "r.json"
+    python_path.write_text('{"primary":{"point_estimate":5.0}}\n', encoding="utf-8")
+    r_path.write_text('{"primary":{"point_estimate":5.1}}\n', encoding="utf-8")
+    artifact_path = tmp_path / "reconciliation-original.json"
+    artifact_path.write_text(
+        json.dumps(
+            reconciliation_document(python_path, r_path, python_value=5.0, r_value=5.1)
+        ),
+        encoding="utf-8",
+    )
+    python_artifact = ArtifactRef(
+        path=str(python_path),
+        sha256=sha256_file(python_path),
+        description="sandbox-generated analysis artifact",
+    )
+    r_artifact = ArtifactRef(
+        path=str(r_path),
+        sha256=sha256_file(r_path),
+        description="sandbox-generated analysis artifact",
+    )
     artifact = ArtifactRef(
         path=str(artifact_path),
-        sha256="abc",
+        sha256=sha256_file(artifact_path),
         description="sandbox-generated analysis artifact",
     )
     computation = ComputationEvidence(
-        successful_calls=1,
+        successful_calls=2,
         records=[
             ComputationRecord(
                 execution_id="exec-001",
                 language="python",
-                code_sha256="abc",
+                code_sha256="a" * 64,
                 started_at="2026-07-13T14:59:00Z",
                 duration_seconds=0.1,
                 exit_code=0,
                 status="succeeded",
                 stdout_path=str(tmp_path / "stdout.txt"),
                 stderr_path=str(tmp_path / "stderr.txt"),
-                artifacts=[artifact],
-            )
+                artifacts=[python_artifact, artifact],
+            ),
+            ComputationRecord(
+                execution_id="exec-002",
+                language="r",
+                code_sha256="b" * 64,
+                started_at="2026-07-13T15:00:00Z",
+                duration_seconds=0.1,
+                exit_code=0,
+                status="succeeded",
+                stdout_path=str(tmp_path / "stdout-r.txt"),
+                stderr_path=str(tmp_path / "stderr-r.txt"),
+                artifacts=[r_artifact],
+            ),
         ],
-        artifacts=[artifact],
+        artifacts=[python_artifact, r_artifact, artifact],
     )
 
     failed = validate_report(
@@ -916,38 +984,45 @@ def test_report_validator_requires_passing_reconciliation_artifact(tmp_path):
         finding.code for finding in failed.findings
     }
 
-    artifact_path.write_text('{"all_pass": true}\n', encoding="utf-8")
-    passed = validate_report(
-        report,
-        computation=computation,
-        require_reconciliation=True,
+    corrected_r_path = tmp_path / "r-corrected.json"
+    corrected_r_path.write_text(
+        '{"primary":{"point_estimate":5.0}}\n', encoding="utf-8"
     )
-    assert passed.passed
-
-    artifact_path.write_text('{"all_pass": false}\n', encoding="utf-8")
     corrected_path = tmp_path / "reconciliation-corrected.json"
-    corrected_path.write_text('{"all_pass": true}\n', encoding="utf-8")
+    corrected_path.write_text(
+        json.dumps(
+            reconciliation_document(
+                python_path, corrected_r_path, python_value=5.0, r_value=5.0
+            )
+        ),
+        encoding="utf-8",
+    )
+    corrected_r = ArtifactRef(
+        path=str(corrected_r_path),
+        sha256=sha256_file(corrected_r_path),
+        description="sandbox-generated analysis artifact",
+    )
     corrected = ArtifactRef(
         path=str(corrected_path),
-        sha256="def",
+        sha256=sha256_file(corrected_path),
         description="sandbox-generated analysis artifact",
     )
     corrected_record = ComputationRecord(
-        execution_id="exec-002",
+        execution_id="exec-003",
         language="r",
-        code_sha256="def",
-        started_at="2026-07-13T15:00:00Z",
+        code_sha256="c" * 64,
+        started_at="2026-07-13T15:01:00Z",
         duration_seconds=0.1,
         exit_code=0,
         status="succeeded",
         stdout_path=str(tmp_path / "stdout-2.txt"),
         stderr_path=str(tmp_path / "stderr-2.txt"),
-        artifacts=[corrected],
+        artifacts=[corrected_r, corrected],
     )
     corrected_computation = computation.model_copy(
         update={
             "records": [*computation.records, corrected_record],
-            "artifacts": [*computation.artifacts, corrected],
+            "artifacts": [*computation.artifacts, corrected_r, corrected],
         }
     )
     superseded = validate_report(
@@ -962,23 +1037,76 @@ def test_report_validator_requires_passing_reconciliation_artifact(tmp_path):
     )
 
 
-def test_cross_language_claim_must_cite_reconciliation_artifact(tmp_path):
-    reconciliation_path = tmp_path / "cross_language_reconciliation.json"
-    reconciliation_path.write_text(
-        '{"all_pass": true, "absolute_difference": 0.0}\n', encoding="utf-8"
+def test_reconciliation_rejects_model_authored_forged_pass(tmp_path):
+    python_path = tmp_path / "python.json"
+    r_path = tmp_path / "r.json"
+    python_path.write_text('{"primary":{"point_estimate":5.0}}\n', encoding="utf-8")
+    r_path.write_text('{"primary":{"point_estimate":5.1}}\n', encoding="utf-8")
+    payload = reconciliation_document(
+        python_path, r_path, python_value=5.0, r_value=5.1
     )
-    r_path = tmp_path / "r_verification.json"
-    r_path.write_text('{"r_point_estimate": 5.0}\n', encoding="utf-8")
+    payload["all_pass"] = True
+    payload["comparisons"][0]["passed"] = True
+    reconciliation_path = tmp_path / "cross_language_reconciliation.json"
+    reconciliation_path.write_text(json.dumps(payload), encoding="utf-8")
     artifacts = [
         ArtifactRef(
             path=str(path),
-            sha256=token * 64,
+            sha256=sha256_file(path),
             description="sandbox-generated analysis artifact",
         )
-        for path, token in ((reconciliation_path, "a"), (r_path, "b"))
+        for path in (python_path, r_path, reconciliation_path)
+    ]
+    records = [
+        ComputationRecord(
+            execution_id=f"exec-{index}",
+            language=language,
+            code_sha256=str(index) * 64,
+            started_at="2026-07-13T15:00:00Z",
+            duration_seconds=0.1,
+            exit_code=0,
+            status="succeeded",
+            stdout_path=str(tmp_path / f"stdout-{index}.txt"),
+            stderr_path=str(tmp_path / f"stderr-{index}.txt"),
+            artifacts=record_artifacts,
+        )
+        for index, (language, record_artifacts) in enumerate(
+            (("python", [artifacts[0], artifacts[2]]), ("r", [artifacts[1]])),
+            start=1,
+        )
+    ]
+    validation = validate_report(
+        article_report(),
+        computation=ComputationEvidence(records=records, artifacts=artifacts),
+        require_reconciliation=True,
+    )
+    assert "reconciliation_artifact_invalid" in {
+        finding.code for finding in validation.findings
+    }
+
+
+def test_cross_language_claim_must_cite_reconciliation_artifact(tmp_path):
+    python_path = tmp_path / "python_estimate.json"
+    python_path.write_text('{"primary":{"point_estimate":5.0}}\n', encoding="utf-8")
+    r_path = tmp_path / "r_verification.json"
+    r_path.write_text('{"primary":{"point_estimate":5.0}}\n', encoding="utf-8")
+    reconciliation_path = tmp_path / "cross_language_reconciliation.json"
+    reconciliation_path.write_text(
+        json.dumps(
+            reconciliation_document(python_path, r_path, python_value=5.0, r_value=5.0)
+        ),
+        encoding="utf-8",
+    )
+    artifacts = [
+        ArtifactRef(
+            path=str(path),
+            sha256=sha256_file(path),
+            description="sandbox-generated analysis artifact",
+        )
+        for path in (reconciliation_path, python_path, r_path)
     ]
     computation = ComputationEvidence(
-        successful_calls=1,
+        successful_calls=2,
         records=[
             ComputationRecord(
                 execution_id="exec-001",
@@ -990,8 +1118,20 @@ def test_cross_language_claim_must_cite_reconciliation_artifact(tmp_path):
                 status="succeeded",
                 stdout_path=str(tmp_path / "stdout.txt"),
                 stderr_path=str(tmp_path / "stderr.txt"),
-                artifacts=artifacts,
-            )
+                artifacts=artifacts[:2],
+            ),
+            ComputationRecord(
+                execution_id="exec-002",
+                language="r",
+                code_sha256="d" * 64,
+                started_at="2026-07-15T00:01:00Z",
+                duration_seconds=1,
+                exit_code=0,
+                status="succeeded",
+                stdout_path=str(tmp_path / "stdout-r.txt"),
+                stderr_path=str(tmp_path / "stderr-r.txt"),
+                artifacts=[artifacts[2]],
+            ),
         ],
         artifacts=artifacts,
     )
@@ -1040,6 +1180,113 @@ def test_cross_language_claim_must_cite_reconciliation_artifact(tmp_path):
     assert "cross_language_claim_missing_reconciliation_source" not in {
         finding.code for finding in good.findings
     }
+
+
+def test_computed_diagnostic_must_exist_in_cited_artifact(tmp_path):
+    result_path = tmp_path / "analysis.json"
+    result_path.write_text(
+        '{"primary":{"point_estimate":5.0,"p_value":2.3e-15}}\n',
+        encoding="utf-8",
+    )
+    artifact = ArtifactRef(
+        path=str(result_path),
+        sha256=sha256_file(result_path),
+        description="sandbox-generated analysis artifact",
+    )
+    computation = ComputationEvidence(
+        records=[
+            ComputationRecord(
+                execution_id="exec-001",
+                language="python",
+                code_sha256="a" * 64,
+                started_at="2026-07-15T00:00:00Z",
+                duration_seconds=1,
+                exit_code=0,
+                status="succeeded",
+                stdout_path=str(tmp_path / "stdout.txt"),
+                stderr_path=str(tmp_path / "stderr.txt"),
+                artifacts=[artifact],
+            )
+        ],
+        artifacts=[artifact],
+    )
+    report = article_report(
+        claims=[
+            ClaimRecord(
+                claim_id="diagnostics",
+                text="Shapiro-Wilk p = 0.117 and Levene's p = 1.00.",
+                claim_type="computed",
+                evidence_refs=["analysis"],
+                status=EvidenceStatus.SUPPORTED,
+            )
+        ],
+        sources=[
+            SourceRecord(
+                source_id="analysis",
+                title="Analysis results",
+                artifact_path=str(result_path),
+                source_type="other",
+                retrieved_at="2026-07-15T00:00:00Z",
+                supporting_passage="Machine-readable analysis result.",
+            )
+        ],
+    )
+
+    validation = validate_report(report, computation=computation)
+
+    assert "computed_diagnostic_not_in_artifact" in {
+        finding.code for finding in validation.findings
+    }
+
+
+def test_guideline_claim_requires_guideline_source_type():
+    report = article_report(
+        claims=[
+            ClaimRecord(
+                claim_id="guideline",
+                text="Reporting guidelines require confidence intervals.",
+                claim_type="literature_supported",
+                evidence_refs=["review"],
+                status=EvidenceStatus.SUPPORTED,
+            )
+        ],
+        sources=[
+            SourceRecord(
+                source_id="review",
+                title="Unrelated systematic review",
+                url="https://example.org/review",
+                source_type="review",
+                retrieved_at="2026-07-15T00:00:00Z",
+                supporting_passage="A review of an intervention.",
+            )
+        ],
+    )
+
+    validation = validate_report(report)
+
+    assert "literature_source_type_mismatch" in {
+        finding.code for finding in validation.findings
+    }
+
+
+def test_sensitivity_and_diagnostic_nonrejection_are_not_proof():
+    report = article_report(
+        results=(
+            "The adjusted estimate was similar, confirming robustness to baseline "
+            "imbalance. Shapiro-Wilk and Levene tests were nonsignificant, so the "
+            "normality and homoscedasticity assumptions were met."
+        ),
+        discussion=(
+            "The covariates did not materially confound the estimate, validating "
+            "the analytical pipeline and confirming algorithmic equivalence."
+        ),
+    )
+
+    validation = validate_report(report)
+    codes = {finding.code for finding in validation.findings}
+
+    assert "sensitivity_analysis_overclaim" in codes
+    assert "diagnostic_nonrejection_overclaim" in codes
 
 
 def _display_computation(tmp_path, artifact_path):

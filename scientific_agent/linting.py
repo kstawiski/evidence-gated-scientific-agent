@@ -79,6 +79,13 @@ _PROCEDURE_EQUIVALENCE = re.compile(
     r".{0,80}\b(?:tests?|methods?|procedures?|results?|p-?values?)\b)",
     re.IGNORECASE,
 )
+_PLANNED_INPUT_FILENAME = re.compile(
+    r"(?<![A-Za-z0-9._-])([A-Za-z0-9][A-Za-z0-9._-]*\."
+    r"(?:csv|tsv|txt|json|jsonl|parquet|feather|xlsx?|ods|rds|rdata|"
+    r"png|jpe?g|webp|tiff?|svg|pdf|docx?|pptx?|zip|tar|gz|bz2|xz|"
+    r"py|r|rmd|qmd|ipynb|fasta|fastq|bam|sam|vcf|bed|gff3?|gtf))\b",
+    re.IGNORECASE,
+)
 _GROUNDING_STOPWORDS = {
     "abstract",
     "analysis",
@@ -178,6 +185,44 @@ def lint_plan(task: TaskSpec, plan: PlanProposal) -> PlanLintReport:
                 message="Plan step IDs must be unique.",
             )
         )
+
+    available_names = {
+        Path(item.path).name.casefold() for item in task.available_inputs
+    }
+    produced_names = {
+        Path(item).name.casefold()
+        for item in [
+            *plan.expected_artifacts,
+            *(output for step in plan.steps for output in step.outputs),
+        ]
+    }
+    declared_inputs = [
+        *(
+            ("required_data", index, item)
+            for index, item in enumerate(plan.required_data)
+        ),
+        *(
+            (f"steps[{step_index}].inputs", input_index, item)
+            for step_index, step in enumerate(plan.steps)
+            for input_index, item in enumerate(step.inputs)
+        ),
+    ]
+    for field, index, value in declared_inputs:
+        for match in _PLANNED_INPUT_FILENAME.finditer(value):
+            name = match.group(1).casefold()
+            if name in available_names or name in produced_names:
+                continue
+            findings.append(
+                LintFinding(
+                    code="unknown_plan_input_artifact",
+                    location=f"{field}[{index}]",
+                    message=(
+                        f"Plan input {match.group(1)} is neither an immutable "
+                        "uploaded input nor a declared plan output; use an exact "
+                        "available filename or a generic input description."
+                    ),
+                )
+            )
 
     for index, step in enumerate(plan.steps):
         location = f"steps[{index}]"

@@ -1,10 +1,13 @@
 from scientific_agent.prompts import (
+    PLANNER_A,
+    PLANNER_B,
     REPORT_DISCUSSION,
     REPORT_AUDITOR,
     REPORTER,
     REPAIRER,
     RESEARCHER,
     SIMPLE_REPORTER,
+    SIMPLE_PLANNER,
 )
 
 
@@ -12,6 +15,16 @@ def test_researcher_forbids_mixed_effect_scales_and_zero_rounded_p_values():
     assert "never plot an\nunstandardized estimate" in RESEARCHER
     assert "Hedges g" in RESEARCHER
     assert "never as zero after fixed-decimal rounding" in RESEARCHER
+
+
+def test_planners_do_not_invent_input_names_or_qwen_visual_audits():
+    for prompt in (PLANNER_A, PLANNER_B, SIMPLE_PLANNER):
+        assert "filename" in prompt
+        assert "Qwen cannot" in prompt
+        assert "image pixels" in prompt
+        assert "controller-routed" in prompt
+        assert "Gemma audit" in prompt
+    assert "Do not list a Gemma audit as a\nQwen-produced output" in SIMPLE_PLANNER
 
 
 def test_researcher_encourages_each_default_mcp_without_assuming_availability():

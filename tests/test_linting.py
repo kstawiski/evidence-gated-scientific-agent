@@ -80,6 +80,35 @@ def test_plan_linter_rejects_duplicate_ids_and_irreversible_action():
     }
 
 
+def test_plan_linter_rejects_invented_input_filename_and_accepts_manifest_name():
+    planned = good_plan()
+    planned.required_data = ["invented_dataset.csv", "uploaded dataset"]
+    planned.steps[0].inputs = ["invented_dataset.csv"]
+    manifest_task = task().model_copy(
+        update={
+            "available_inputs": [
+                ArtifactRef(
+                    path="/workspace/known_effect.csv",
+                    sha256="a" * 64,
+                    description="immutable uploaded workspace input",
+                )
+            ]
+        }
+    )
+
+    rejected = lint_plan(manifest_task, planned)
+
+    assert [item.code for item in rejected.findings].count(
+        "unknown_plan_input_artifact"
+    ) == 2
+    planned.required_data = ["known_effect.csv", "uploaded dataset"]
+    planned.steps[0].inputs = ["known_effect.csv"]
+    accepted = lint_plan(manifest_task, planned)
+    assert "unknown_plan_input_artifact" not in {
+        item.code for item in accepted.findings
+    }
+
+
 def test_report_validator_requires_known_evidence():
     report = article_report(
         title="Test report",

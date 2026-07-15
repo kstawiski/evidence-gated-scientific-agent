@@ -2424,10 +2424,24 @@ def _requires_pubmed_literature(task: TaskSpec) -> bool:
     )
 
 
-def _prepare_task_spec(objective: str, *, enable_code: bool) -> TaskSpec:
+def _prepare_task_spec(
+    objective: str,
+    *,
+    enable_code: bool,
+    input_manifest: dict | None = None,
+) -> TaskSpec:
     """Bind inferred computation requirements to the run's authorization."""
 
     task = normalize_task(objective)
+    available_inputs = [
+        ArtifactRef(
+            path=f"/workspace/{item['path']}",
+            sha256=item.get("sha256"),
+            description="immutable uploaded workspace input",
+        )
+        for item in (input_manifest or {}).get("files", [])
+        if isinstance(item, dict) and isinstance(item.get("path"), str)
+    ]
     constraints = [
         constraint
         for constraint in task.constraints
@@ -2453,6 +2467,7 @@ def _prepare_task_spec(objective: str, *, enable_code: bool) -> TaskSpec:
                 "constraints": constraints,
                 "acceptance_tests": acceptance_tests,
                 "security_risk": "medium",
+                "available_inputs": available_inputs,
             }
         )
 
@@ -2464,6 +2479,7 @@ def _prepare_task_spec(objective: str, *, enable_code: bool) -> TaskSpec:
         update={
             "constraints": constraints,
             "required_computation_languages": [],
+            "available_inputs": available_inputs,
         }
     )
 
@@ -2519,9 +2535,8 @@ async def run_scientific_task(
             "objective_bytes": len(objective_bytes),
         },
     )
-    write_json(
-        run_dir / "input_manifest.json", build_input_manifest(settings.workspace)
-    )
+    input_manifest = build_input_manifest(settings.workspace)
+    write_json(run_dir / "input_manifest.json", input_manifest)
     write_json(
         run_dir / "environment.json",
         build_environment_snapshot(application_version=__version__),
@@ -2741,7 +2756,11 @@ async def run_scientific_task(
                 str(lineage_path),
             )
     else:
-        task = _prepare_task_spec(objective, enable_code=enable_code)
+        task = _prepare_task_spec(
+            objective,
+            enable_code=enable_code,
+            input_manifest=input_manifest,
+        )
         planning_input = task.model_dump_json()
         if simple_mode:
             planning = await build_simple_planning(

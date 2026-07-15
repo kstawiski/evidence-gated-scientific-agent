@@ -402,6 +402,30 @@ def test_run_authorization_clears_languages_for_documentation_only_task():
     assert any("no code-execution authorization" in item for item in task.constraints)
 
 
+def test_task_spec_exposes_exact_virtual_input_manifest_to_planners():
+    task = _prepare_task_spec(
+        "Analyze the uploaded dataset in Python.",
+        enable_code=True,
+        input_manifest={
+            "files": [
+                {
+                    "path": "known_effect.csv",
+                    "bytes": 123,
+                    "sha256": "b" * 64,
+                }
+            ]
+        },
+    )
+
+    assert [item.model_dump() for item in task.available_inputs] == [
+        {
+            "path": "/workspace/known_effect.csv",
+            "sha256": "b" * 64,
+            "description": "immutable uploaded workspace input",
+        }
+    ]
+
+
 def test_controller_task_cannot_be_shortened_by_plan_synthesis():
     full = normalize_task(
         "Analyze the dataset in Python and R, then save a reconciliation artifact."

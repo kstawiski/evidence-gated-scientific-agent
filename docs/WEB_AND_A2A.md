@@ -45,6 +45,10 @@ If that repair also repeats or is invalid, the controller writes an explicit
 `plan-critic-unavailable` finding and terminates the plan as `inconclusive` before
 research. It does not expose the private text, retry indefinitely, or treat a
 missing critic verdict as agreement.
+Every planner also receives the exact immutable input manifest through virtual
+`/workspace/...` artifact references. Deterministic plan lint rejects file-like
+input names absent from that manifest and absent from declared upstream outputs;
+generic terms such as “uploaded dataset” remain valid when no exact name is needed.
 Per-role request timeouts are wall-time and cancellation bounds, not reasoning
 budgets. The default is 7,200 seconds so an uncapped model can finish a long
 reasoning pass near a 150K context window; users can still cancel immediately.

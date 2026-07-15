@@ -238,6 +238,10 @@ then passes them through Qwen synthesis and a separate Gemma audit. Schema-only
 graph nodes call the local servers' native strict JSON-schema interface because a
 live ADK 2.3 test found that the graph's third-party LLM wrapper could surface
 Gemma output as raw `Content` instead of its validated schema.
+The normalized task includes virtual `/workspace/...` names and hashes from the
+immutable input manifest. Plan linting blocks any file-like input name that is
+neither in that manifest nor declared as a plan output, so an invented dataset
+filename cannot survive merely because a model critic overlooks it.
 
 Research is deliberately two-stage. An unconstrained-output ADK agent uses
 `McpToolset` and the typed analysis tools under deterministic callbacks to gather

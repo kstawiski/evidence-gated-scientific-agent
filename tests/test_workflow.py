@@ -4,6 +4,7 @@ import threading
 from pathlib import Path
 
 import pytest
+from PIL import Image
 
 import scientific_agent.orchestrator as orchestrator_module
 from scientific_agent.config import Settings
@@ -51,6 +52,8 @@ from scientific_agent.schemas import (
     SourceRecord,
     TaskSpec,
     VerificationReport,
+    VisualEvidenceObservation,
+    VisualEvidenceReport,
 )
 from scientific_agent.workflow import (
     PLAN_CRITIC_UNAVAILABLE,
@@ -73,6 +76,48 @@ def _task():
         deliverables=["scientific report"],
         acceptance_tests=["validated"],
     )
+
+
+def test_visible_tool_activity_exposes_useful_fields_without_code_or_url_secrets():
+    code = "print('sensitive input')"
+    message = orchestrator_module._visible_tool_call(
+        "run_python_analysis",
+        {"code": code, "timeout_seconds": 120, "api_key": "never-show"},
+    )
+    assert "run_python_analysis" in message
+    assert "timeout_seconds=120" in message
+    assert "code=" in message and "sha256" in message
+    assert code not in message
+    assert "never-show" not in message
+
+    browser = orchestrator_module._visible_tool_call(
+        "navigate_page",
+        {"url": "https://example.org/article?token=never-show"},
+    )
+    assert "url_origin='https://example.org'" in browser
+    assert "/article" not in browser
+    assert "token" not in browser
+
+
+def test_visible_tool_result_links_execution_source_without_output_content():
+    message, artifact = orchestrator_module._visible_tool_result(
+        "run_python_analysis",
+        {
+            "status": "succeeded",
+            "execution_id": "exec-001",
+            "duration_seconds": 1.25,
+            "stdout": "sensitive output",
+            "artifacts": [
+                {
+                    "path": "/run/exec-001/analysis.py",
+                    "description": "python analysis source",
+                }
+            ],
+        },
+    )
+    assert "succeeded" in message and "exec-001" in message
+    assert "sensitive output" not in message
+    assert artifact == "/run/exec-001/analysis.py"
 
 
 def test_load_ancestor_protocol_artifacts_preserves_full_revision_lineage(tmp_path):
@@ -604,6 +649,29 @@ def test_article_and_display_reviews_merge_to_strictest_verdict():
     assert merged.unsupported_claims == ["article caveat", "display mismatch"]
 
 
+def test_review_merge_preserves_findings_from_multiple_full_batches():
+    def findings(prefix):
+        return [
+            Finding(
+                finding_id=f"{prefix}-{index}",
+                location=f"Figure {index}",
+                problem="Concrete display defect",
+                why_it_matters="It changes interpretation.",
+                evidence="Visible mismatch",
+                falsification_test_or_correction="Correct and rerender.",
+            )
+            for index in range(8)
+        ]
+
+    merged = _merge_reviews(
+        VerificationReport(verdict="fail", blocking_findings=findings("a")),
+        VerificationReport(verdict="fail", blocking_findings=findings("b")),
+    )
+
+    assert len(merged.blocking_findings) == 16
+    assert merged.blocking_findings[-1].finding_id == "b-7"
+
+
 def test_noop_typography_correction_cannot_block_a_report():
     display = VerificationReport(
         verdict="fail",
@@ -627,7 +695,7 @@ def test_noop_typography_correction_cannot_block_a_report():
 
 
 @pytest.mark.anyio
-async def test_gemma_text_only_display_audit_uses_ocr_and_failure_blocks(
+async def test_gemma_multimodal_display_audit_uses_raster_and_failure_blocks(
     tmp_path, monkeypatch
 ):
     planning, report = _display_audit_fixture()
@@ -705,8 +773,8 @@ async def test_gemma_text_only_display_audit_uses_ocr_and_failure_blocks(
     assert calls[0][0] is settings.gemma
     assert calls[0][1].get("image_paths", ()) == ()
     assert calls[1][0] is settings.gemma
-    assert calls[1][1].get("image_paths", ()) == ()
-    assert "no raster bytes are supplied" in calls[1][1]["system_prompt"]
+    assert calls[1][1]["image_paths"] == (image,)
+    assert "sole visual critic" in calls[1][1]["system_prompt"]
     blinded_payload = json.dumps(calls[1][1]["payload"]).casefold()
     assert "qwen" not in blinded_payload
     assert "gemma" not in blinded_payload
@@ -714,7 +782,10 @@ async def test_gemma_text_only_display_audit_uses_ocr_and_failure_blocks(
     assert not (tmp_path / "qwen_visual_audit.json").exists()
     display_audit = json.loads((tmp_path / "gemma_display_audit.json").read_text())
     assert display_audit["critic_model"] == settings.gemma.model
-    assert display_audit["review_mode"] == "ocr_text_and_geometry"
+    assert display_audit["review_source"] == "gemma_multimodal_critic"
+    assert display_audit["review_mode"] == "raster_with_ocr_geometry_and_table_previews"
+    assert display_audit["visual_critic"] == "Gemma"
+    assert display_audit["qwen_image_inputs"] == 0
     assert display_audit["verdict"] == "fail"
     assert display_audit["figure_text_inputs"][0]["ocr_available"] is True
     assert display_audit["figure_text_inputs"][0]["geometry_available"] is True
@@ -728,7 +799,7 @@ async def test_gemma_text_only_display_audit_uses_ocr_and_failure_blocks(
 
 
 @pytest.mark.anyio
-async def test_missing_figure_ocr_is_inconclusive_without_display_model_call(
+async def test_missing_figure_ocr_still_runs_gemma_multimodal_review(
     tmp_path, monkeypatch
 ):
     planning, report = _display_audit_fixture()
@@ -771,18 +842,16 @@ async def test_missing_figure_ocr_is_inconclusive_without_display_model_call(
         live_dir=tmp_path / "live",
     )
 
-    assert review.verdict == "inconclusive"
+    assert review.verdict == "pass"
     assert review.blocking_findings == []
-    assert len(calls) == 1
+    assert len(calls) == 2
     assert calls[0][0] is settings.gemma
     assert calls[0][1].get("image_paths", ()) == ()
-    assert any(
-        "controller OCR is missing or empty" in item
-        for item in review.unsupported_claims
-    )
+    assert calls[1][0] is settings.gemma
+    assert calls[1][1]["image_paths"] == (image,)
     display_audit = json.loads((tmp_path / "gemma_display_audit.json").read_text())
-    assert display_audit["critic_model"] is None
-    assert display_audit["review_source"] == "controller_gate"
+    assert display_audit["critic_model"] == settings.gemma.model
+    assert display_audit["review_source"] == "gemma_multimodal_critic"
     assert display_audit["figures_missing_ocr"] == ["effect-figure"]
 
 
@@ -791,10 +860,12 @@ async def test_display_audit_failure_preserves_completed_report_review(
     tmp_path, monkeypatch
 ):
     planning, report = _display_audit_fixture()
+    image = tmp_path / "effect.png"
+    image.write_bytes(b"test image bytes")
     monkeypatch.setattr(
         "scientific_agent.orchestrator.prepare_display_audit",
         lambda *_args: (
-            [],
+            [image],
             [
                 {
                     "display_id": "effect-figure",
@@ -847,7 +918,349 @@ async def test_display_audit_failure_preserves_completed_report_review(
         (tmp_path / "live" / "gemma_display_review.json").read_text()
     )
     assert display_review["verdict"] == "inconclusive"
-    assert "display review unavailable" in display_review["unsupported_claims"][0]
+    assert (
+        "display review batch 1/1 unavailable"
+        in display_review["unsupported_claims"][0]
+    )
+    display_audit = json.loads((tmp_path / "gemma_display_audit.json").read_text())
+    assert display_audit["critic_model"] is None
+    assert display_audit["review_source"] == "controller_gate"
+    assert display_audit["review_mode"] == "multimodal_unavailable"
+    assert display_audit["batches_attempted"] == 1
+    assert display_audit["batches_succeeded"] == 0
+
+
+@pytest.mark.anyio
+async def test_invalid_display_preparation_preserves_completed_article_audit(
+    tmp_path, monkeypatch
+):
+    planning, report = _display_audit_fixture()
+
+    def invalid_display(*_args):
+        raise ValueError("TIFF is not an inline report format")
+
+    monkeypatch.setattr(
+        "scientific_agent.orchestrator.prepare_display_audit", invalid_display
+    )
+    calls = 0
+
+    async def fake_request(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return VerificationReport(verdict="pass")
+
+    monkeypatch.setattr(
+        "scientific_agent.orchestrator.request_structured", fake_request
+    )
+    review = await _audit_report_resilient(
+        Settings(),
+        planning,
+        report,
+        DeterministicValidation(passed=False),
+        RetrievalEvidence(),
+        ComputationEvidence(),
+        EventLedger(tmp_path / "events.jsonl"),
+        live_dir=tmp_path / "live",
+    )
+
+    assert calls == 1
+    assert review.verdict == "inconclusive"
+    assert (
+        json.loads((tmp_path / "live" / "gemma_report_review.json").read_text())[
+            "verdict"
+        ]
+        == "pass"
+    )
+    display_audit = json.loads((tmp_path / "gemma_display_audit.json").read_text())
+    assert display_audit["critic_model"] is None
+    assert display_audit["review_source"] == "controller_gate"
+    assert display_audit["review_mode"] == "invalid_display_inputs"
+
+
+@pytest.mark.anyio
+async def test_gemma_only_visual_review_batches_more_than_five_images(
+    tmp_path, monkeypatch
+):
+    planning, report = _display_audit_fixture()
+    images = []
+    inputs = []
+    for index in range(6):
+        image = tmp_path / f"figure-{index}.png"
+        image.write_bytes(f"image {index}".encode())
+        images.append(image)
+        inputs.append(
+            {
+                "display_id": f"figure-{index}",
+                "kind": "figure",
+                "sha256": f"{index:x}" * 64,
+                "media_type": "image/png",
+                "width": 800,
+                "height": 600,
+                "ocr": {"available": False, "text": "", "words": []},
+            }
+        )
+    report = report.model_copy(
+        update={
+            "displays": [
+                ReportDisplay(
+                    display_id=f"figure-{index}",
+                    kind="figure",
+                    title=f"Figure {index}",
+                    caption="Current batch figure.",
+                    artifact_path=f"/run/output/figures/figure-{index}.png",
+                    alt_text="A test figure.",
+                )
+                for index in range(6)
+            ]
+        }
+    )
+    monkeypatch.setattr(
+        "scientific_agent.orchestrator.prepare_display_audit",
+        lambda *_args: (images, inputs),
+    )
+    settings = Settings()
+    calls = []
+
+    async def fake_request(endpoint, **kwargs):
+        calls.append((endpoint, kwargs))
+        return VerificationReport(verdict="pass")
+
+    monkeypatch.setattr(
+        "scientific_agent.orchestrator.request_structured", fake_request
+    )
+    review = await _audit_report_resilient(
+        settings,
+        planning,
+        report,
+        DeterministicValidation(passed=True),
+        RetrievalEvidence(),
+        ComputationEvidence(),
+        EventLedger(tmp_path / "events.jsonl"),
+    )
+
+    assert review.verdict == "pass"
+    assert len(calls) == 3
+    assert all(endpoint is settings.gemma for endpoint, _kwargs in calls)
+    assert calls[0][1].get("image_paths", ()) == ()
+    assert calls[1][1]["image_paths"] == tuple(images[:5])
+    assert calls[2][1]["image_paths"] == tuple(images[5:])
+    assert calls[1][1]["payload"]["visual_input_order"] == [
+        f"figure-{index}" for index in range(5)
+    ]
+    assert calls[2][1]["payload"]["visual_input_order"] == ["figure-5"]
+    assert {item["display_id"] for item in calls[1][1]["payload"]["displays"]} == {
+        f"figure-{index}" for index in range(5)
+    }
+    assert [item["display_id"] for item in calls[2][1]["payload"]["displays"]] == [
+        "figure-5"
+    ]
+    assert "judge only the current batch" in calls[1][1]["system_prompt"]
+
+
+def test_visual_batching_respects_total_bytes_not_only_image_count(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(orchestrator_module, "MAX_TOTAL_IMAGE_BYTES", 10)
+    images = []
+    inputs = []
+    for index in range(3):
+        image = tmp_path / f"bytes-{index}.png"
+        image.write_bytes(b"123456")
+        images.append(image)
+        inputs.append({"display_id": f"figure-{index}"})
+
+    batches, rejected = orchestrator_module._bounded_visual_batches(images, inputs)
+
+    assert rejected == []
+    assert [batch_images for batch_images, _ in batches] == [
+        [images[0]],
+        [images[1]],
+        [images[2]],
+    ]
+
+
+def test_extreme_pixel_count_input_is_rejected_without_aborting_run(
+    tmp_path, monkeypatch
+):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    image = workspace / "compressed-large-pixel-count.png"
+    Image.new("L", (32, 32), color=0).save(image)
+    destination = tmp_path / "converted"
+    destination.mkdir()
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 100)
+
+    assert orchestrator_module._valid_model_raster(image) is False
+    converted, failures = orchestrator_module._convert_image_frames(
+        image, destination, "uploaded image", 1
+    )
+    assert converted == []
+    assert failures == [
+        "uploaded image could not be converted (DecompressionBombError)"
+    ]
+    images, _inputs, omitted = orchestrator_module._collect_input_visuals(
+        workspace,
+        ComputationEvidence(),
+        TaskSpec(
+            task_id="nonvisual",
+            objective="Summarize the tabular dataset trends",
+            deliverables=["scientific report"],
+            acceptance_tests=["The report is evidence grounded"],
+        ),
+    )
+    assert images == []
+    assert any("invalid or oversized" in item for item in omitted)
+
+
+@pytest.mark.anyio
+async def test_source_images_are_reviewed_only_by_gemma_and_cached_by_hash(
+    tmp_path, monkeypatch
+):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    image = workspace / "source.png"
+    Image.new("RGB", (32, 24), color=(120, 80, 20)).save(image)
+    Image.new("RGB", (32, 24), color=(20, 80, 120)).save(
+        workspace / "source-figure.tiff"
+    )
+    (workspace / "visual-proof.pdf").write_bytes(b"%PDF-1.4\n")
+    planning, _report = _display_audit_fixture()
+    planning = planning.model_copy(
+        update={
+            "master_plan": planning.master_plan.model_copy(
+                update={
+                    "task": planning.master_plan.task.model_copy(
+                        update={
+                            "objective": "Inspect the attached figure and proof PDF",
+                            "deliverables": ["visual evidence report"],
+                        }
+                    )
+                }
+            )
+        }
+    )
+    settings = Settings(workspace=workspace)
+    calls = []
+
+    async def fake_request(endpoint, **kwargs):
+        calls.append((endpoint, kwargs))
+        return VisualEvidenceReport(
+            observations=[
+                VisualEvidenceObservation(
+                    artifact_path=artifact_path,
+                    observed_content="A two-panel scientific chart is visible.",
+                    scientific_interpretation=(
+                        "The chart can inform the requested visual-fidelity review."
+                    ),
+                )
+                for artifact_path in kwargs["payload"]["visual_input_order"]
+            ]
+        )
+
+    monkeypatch.setattr(
+        "scientific_agent.orchestrator.request_structured", fake_request
+    )
+    run_dir = tmp_path / "run"
+    live_dir = run_dir / "live"
+    first = await orchestrator_module._review_input_visual_evidence(
+        settings,
+        planning,
+        ComputationEvidence(),
+        "bounded research context",
+        run_dir,
+        live_dir=live_dir,
+    )
+    second = await orchestrator_module._review_input_visual_evidence(
+        settings,
+        planning,
+        ComputationEvidence(),
+        "bounded research context",
+        run_dir,
+        live_dir=live_dir,
+    )
+
+    assert first == second
+    assert len(calls) == 1
+    assert calls[0][0] is settings.gemma
+    assert image in calls[0][1]["image_paths"]
+    assert len(calls[0][1]["image_paths"]) == 2
+    assert "sole image-understanding scientist" in calls[0][1]["system_prompt"]
+    assert any("visual-proof.pdf" in item for item in first.unreviewed_requests)
+    audit = json.loads((run_dir / "gemma_input_visual_review.json").read_text())
+    assert audit["critic_model"] == settings.gemma.model
+    assert audit["qwen_image_inputs"] == 0
+    assert audit["batches_attempted"] == 1
+    assert audit["batches_succeeded"] == 1
+
+
+@pytest.mark.anyio
+async def test_failed_input_visual_review_is_retried_instead_of_cached(
+    tmp_path, monkeypatch
+):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    image = workspace / "source.png"
+    Image.new("RGB", (32, 24), color=(120, 80, 20)).save(image)
+    planning, _report = _display_audit_fixture()
+    planning = planning.model_copy(
+        update={
+            "master_plan": planning.master_plan.model_copy(
+                update={
+                    "task": planning.master_plan.task.model_copy(
+                        update={
+                            "objective": "Inspect the attached source figure",
+                            "deliverables": ["visual evidence report"],
+                        }
+                    )
+                }
+            )
+        }
+    )
+    calls = 0
+
+    async def fake_request(_endpoint, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("transient critic outage")
+        return VisualEvidenceReport(
+            observations=[
+                VisualEvidenceObservation(
+                    artifact_path=kwargs["payload"]["visual_input_order"][0],
+                    observed_content="A source chart is visible.",
+                    scientific_interpretation=(
+                        "The chart can support a bounded visual description."
+                    ),
+                )
+            ]
+        )
+
+    monkeypatch.setattr(
+        "scientific_agent.orchestrator.request_structured", fake_request
+    )
+    settings = Settings(workspace=workspace)
+    run_dir = tmp_path / "run"
+
+    first = await orchestrator_module._review_input_visual_evidence(
+        settings,
+        planning,
+        ComputationEvidence(),
+        "bounded research context",
+        run_dir,
+    )
+    second = await orchestrator_module._review_input_visual_evidence(
+        settings,
+        planning,
+        ComputationEvidence(),
+        "bounded research context",
+        run_dir,
+    )
+
+    assert calls == 2
+    assert first.observations == []
+    assert len(second.observations) == 1
+    audit = json.loads((run_dir / "gemma_input_visual_review.json").read_text())
+    assert audit["batches_succeeded"] == 1
 
 
 def test_repair_evidence_is_cumulative_and_attempts_are_persisted(tmp_path):
@@ -1157,7 +1570,7 @@ async def test_schema_invalid_repair_preserves_audited_report_and_escalates(
         nonlocal produce_calls
         produce_calls += 1
         if produce_calls == 1:
-            return report, RetrievalEvidence(), ComputationEvidence()
+            return report, RetrievalEvidence(), ComputationEvidence(), ()
         raise RuntimeError("schema-invalid repair")
 
     async def fake_audit(*_args, **_kwargs):

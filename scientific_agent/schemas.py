@@ -163,14 +163,14 @@ class VerificationReport(BaseModel):
             "insufficient."
         )
     )
-    blocking_findings: list[Finding] = Field(default_factory=list, max_length=8)
-    nonblocking_findings: list[Finding] = Field(default_factory=list, max_length=8)
-    protocol_deviations: list[str] = Field(default_factory=list, max_length=12)
-    unsupported_claims: list[str] = Field(default_factory=list, max_length=12)
+    blocking_findings: list[Finding] = Field(default_factory=list, max_length=200)
+    nonblocking_findings: list[Finding] = Field(default_factory=list, max_length=200)
+    protocol_deviations: list[str] = Field(default_factory=list, max_length=100)
+    unsupported_claims: list[str] = Field(default_factory=list, max_length=100)
     proposed_falsification_tests: list[CheckSpec] = Field(
-        default_factory=list, max_length=8
+        default_factory=list, max_length=200
     )
-    evidence_refs: list[str] = Field(default_factory=list, max_length=16)
+    evidence_refs: list[str] = Field(default_factory=list, max_length=100)
 
     @model_validator(mode="after")
     def failed_verdict_has_finding(self) -> "VerificationReport":
@@ -407,6 +407,23 @@ class ReportDiscussionResponse(BaseModel):
     evidence_refs: list[str] = Field(default_factory=list, max_length=24)
     unresolved_uncertainties: list[str] = Field(default_factory=list, max_length=12)
     suggested_revision_prompt: str | None = Field(default=None, max_length=12_000)
+
+
+class VisualEvidenceObservation(BaseModel):
+    artifact_path: str = Field(min_length=1, max_length=4096)
+    observed_content: str = Field(min_length=3, max_length=4000)
+    scientific_interpretation: str = Field(min_length=3, max_length=4000)
+    concerns: list[str] = Field(default_factory=list, max_length=12)
+    limitations: list[str] = Field(default_factory=list, max_length=12)
+
+
+class VisualEvidenceReport(BaseModel):
+    observations: list[VisualEvidenceObservation] = Field(
+        default_factory=list, max_length=100
+    )
+    cross_artifact_findings: list[str] = Field(default_factory=list, max_length=100)
+    limitations: list[str] = Field(default_factory=list, max_length=100)
+    unreviewed_requests: list[str] = Field(default_factory=list, max_length=100)
 
 
 class RetrievalEvidence(BaseModel):

@@ -403,10 +403,13 @@ def score(
                 if "gemma_display_audit.json" in manifest_paths
                 else {}
             )
-            checks["gemma_ocr_display_audit"] = bool(
-                display_audit.get("review_mode") == "ocr_text_and_geometry"
-                and display_audit.get("review_source") == "gemma_text_critic"
+            checks["gemma_multimodal_display_audit"] = bool(
+                display_audit.get("review_mode")
+                == "raster_with_ocr_geometry_and_table_previews"
+                and display_audit.get("review_source") == "gemma_multimodal_critic"
                 and display_audit.get("critic_model")
+                and display_audit.get("visual_critic") == "Gemma"
+                and display_audit.get("qwen_image_inputs") == 0
                 and display_audit.get("figure_text_inputs")
                 and all(
                     item.get("ocr_available") is True

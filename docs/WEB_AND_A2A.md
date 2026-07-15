@@ -49,12 +49,22 @@ Per-role request timeouts are wall-time and cancellation bounds, not reasoning
 budgets. The default is 7,200 seconds so an uncapped model can finish a long
 reasoning pass near a 150K context window; users can still cancel immediately.
 
-The released display audit is text based. The confined sandbox worker extracts
-bounded OCR text, word boxes, and image dimensions, deterministic validators
-compare rendered labels with machine-readable results, and Gemma reviews that
-OCR/geometry record plus bounded table previews. The critic receives no raster
-bytes. Missing OCR produces an inconclusive display audit, and neither the UI nor
-provenance claims multimodal or pixel-level review.
+Gemma is the sole image-understanding model. The controller sends generated PNG,
+JPEG, and WebP figures only to Gemma in bounded batches; Qwen never receives
+raster images or makes visual-quality judgments. The confined sandbox worker
+also extracts bounded OCR text, word boxes, and dimensions, and deterministic
+validators compare rendered labels with machine-readable results. Gemma reviews
+the actual rasters with this supplementary evidence and bounded table previews.
+Missing OCR is recorded but does not skip the multimodal review.
+
+Source-image tasks use the same asymmetric boundary. The trusted controller
+converts bounded TIFF frames, PDF pages, and supported image members from
+ZIP/DOCX/PPTX/XLSX inputs to model-compatible PNG; Qwen may render additional selected
+pages under `/output/visual-review` but never interprets or receives raster
+bytes. Only Gemma receives those images. Its structured observations and explicit
+coverage gaps are recorded in `gemma_input_visual_review.json`, streamed as a
+live artifact, and passed to Qwen as text evidence. Exact input hashes prevent
+unchanged visuals from being re-audited in every repair round.
 
 Local model restarts are handled with a small, explicit retry budget. Transport
 errors and HTTP 429, 500, 502, 503, and 504 responses receive at most three total
@@ -91,20 +101,23 @@ locked.
 log for a run (id, event type, run status/phase at that point, actor —
 `Controller`, `Qwen`, `Gemma`, or `User` for a cancellation request — a short
 message, and an optional relative artifact path), ordered by id, capped at
-500 rows per call. Poll with the
-last-seen `id` as `after_id` to stream new events without duplicates. Events
-report phase transitions, tool-call outcomes (`tool_name: status`, never the
-call's arguments), and when Qwen or Gemma begins updating a visible-output
-artifact or a controller artifact becomes available. The UI polls those bounded
+500 rows per call. `GET /api/runs/{run_id}/events/stream?after_id=<id>` provides
+the same records as Server-Sent Events with keep-alives and a terminal
+`stream_end`; cursor polling remains the fallback. Events report phase
+transitions, safe tool-request summaries, outcomes, and when Qwen or Gemma begins
+updating a visible-output artifact or a controller artifact becomes available.
+PubMed identifiers and safe numeric limits may be shown. Search terms, workspace
+paths, filenames, and package lists are represented only by byte/count and hash
+summaries; URLs are reduced to their public origin. Raw code, arbitrary argument
+objects, URL paths/query strings/userinfo/fragments, and credentials are never
+emitted. The UI polls those bounded
 text artifacts while the model is producing research, article, or audit output,
 so the observable-output panel updates before the complete response exists.
 Its **Open console** control expands the selected sanitized model stream to a
 near-full-screen, 14 px monospace view and keeps it current while the file
 grows. The compact tail remains available in the provenance rail.
-Events never carry model chain-of-thought/reasoning
-traces, system prompts, or tool-call arguments, and never carry MCP or worker
-credentials — only the same phase/status vocabulary and artifact paths the
-run's own provenance record uses.
+Events never carry model chain-of-thought/reasoning traces, system prompts, raw
+code, or MCP/worker credentials.
 
 ### Live artifact access
 
@@ -129,6 +142,14 @@ article into a binary-file error. NUL-containing or otherwise non-UTF-8 binary f
 remain available through the download endpoint. The UI links common
 scientific text, source-code, notebook, configuration, log, and
 extensionless-text artifacts to this preview, both during and after a run.
+Raw `tool_call_log.jsonl` and the private `evidence/` tool-response tree remain
+outside the Web explorer; their complete audit representation is retained in the
+downloadable provenance bundle.
+
+`GET /api/workspaces/{workspace_id}/file-preview?filename=<name>` applies the
+same bounded UTF-8 rules to an immutable workspace input. The Web UI's workspace
+explorer shows both inputs and the selected run's live/final artifact tree;
+preview and download controls remain available while mutation is locked.
 
 Once a report is registered, its figures and tables are also addressable
 individually and by kind:

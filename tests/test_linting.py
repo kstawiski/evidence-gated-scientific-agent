@@ -171,6 +171,137 @@ def test_report_validator_requires_claim_for_method_recommendation():
     }
 
 
+def test_report_validator_rejects_unscoped_web_only_method_recommendation():
+    source = SourceRecord(
+        source_id="s1",
+        title="Secondary method summary",
+        url="https://example.com/method-summary",
+        source_type="web_page",
+        retrieved_at="2026-07-15T00:00:00Z",
+        supporting_passage="The page recommends one test over another.",
+    )
+    report = article_report(
+        conclusions="Welch's test should be used as the default method.",
+        claims=[
+            ClaimRecord(
+                claim_id="c1",
+                text="Welch's test should be used as the default method.",
+                claim_type="literature_supported",
+                evidence_refs=["s1"],
+                status=EvidenceStatus.SUPPORTED,
+            )
+        ],
+        sources=[source],
+    )
+    evidence = RetrievalEvidence(
+        successful_calls=1,
+        tools=["brave_web_search"],
+        urls=[str(source.url)],
+        retrieval_dates=["2026-07-15"],
+    )
+
+    validation = validate_report(report, evidence)
+
+    codes = {finding.code for finding in validation.findings}
+    assert "methodological_recommendation_unscoped" in codes
+    assert "methodological_recommendation_not_locally_grounded" in codes
+
+
+def test_method_recommendation_scope_rejects_universal_and_accepts_bounded_conditions():
+    local_source = SourceRecord(
+        source_id="s1",
+        title="Local method study",
+        source_type="web_page",
+        retrieved_at="2026-07-15T00:00:00Z",
+        supporting_passage="The simulation evaluates bounded conditions.",
+        artifact_path="/run/references/method.md",
+    )
+
+    def recommendation(text):
+        return article_report(
+            conclusions=text,
+            claims=[
+                ClaimRecord(
+                    claim_id="c1",
+                    text=text,
+                    claim_type="literature_supported",
+                    evidence_refs=["s1"],
+                    status=EvidenceStatus.SUPPORTED,
+                )
+            ],
+            sources=[local_source],
+        )
+
+    universal = recommendation(
+        "Welch's test should be preferred for all distributions."
+    )
+    bounded = recommendation(
+        "Within the simulated conditions at sample sizes 20 to 200, Welch's "
+        "test should be preferred."
+    )
+    local_analysis = recommendation(
+        "Bonferroni correction should be used for the six pairwise comparisons "
+        "in this analysis."
+    )
+    bounded_quantifier = recommendation(
+        "For all evaluated conditions in this simulation, Welch's test should "
+        "be preferred."
+    )
+    newly_covered_wordings = [
+        recommendation("We recommend Welch's t-test as the default."),
+        recommendation("Welch's t-test is preferable in practice."),
+        recommendation("Student's t-test should be replaced by Welch's t-test."),
+    ]
+
+    assert "methodological_recommendation_unscoped" in {
+        finding.code for finding in validate_report(universal).findings
+    }
+    for report in (bounded, local_analysis, bounded_quantifier):
+        assert "methodological_recommendation_unscoped" not in {
+            finding.code for finding in validate_report(report).findings
+        }
+    for report in newly_covered_wordings:
+        assert "methodological_recommendation_unscoped" in {
+            finding.code for finding in validate_report(report).findings
+        }
+
+
+def test_report_validator_requires_local_verification_for_test_equivalence():
+    source = SourceRecord(
+        source_id="s1",
+        title="Secondary comparison summary",
+        url="https://example.com/comparison",
+        source_type="web_page",
+        retrieved_at="2026-07-15T00:00:00Z",
+        supporting_passage="The page compares two tests.",
+    )
+    report = article_report(
+        results="The two tests produce statistically equivalent p-values.",
+        claims=[
+            ClaimRecord(
+                claim_id="c1",
+                text="The two tests produce statistically equivalent p-values.",
+                claim_type="literature_supported",
+                evidence_refs=["s1"],
+                status=EvidenceStatus.SUPPORTED,
+            )
+        ],
+        sources=[source],
+    )
+    evidence = RetrievalEvidence(
+        successful_calls=1,
+        tools=["brave_web_search"],
+        urls=[str(source.url)],
+        retrieval_dates=["2026-07-15"],
+    )
+
+    validation = validate_report(report, evidence)
+
+    assert "procedure_equivalence_not_verified" in {
+        finding.code for finding in validation.findings
+    }
+
+
 def test_report_validator_rejects_paper_citation_without_local_article_record():
     report = article_report(
         claims=[

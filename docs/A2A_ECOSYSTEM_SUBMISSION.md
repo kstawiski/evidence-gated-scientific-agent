@@ -18,11 +18,11 @@ first public Evidence Bench release.
 
 Evidence Bench demonstrates an A2A computational-science agent whose outputs are
 evidence gated. A Qwen model performs planning and analysis, a separately served
-deployment-configured Gemma model provides independent text-based methodological
-review, and deterministic code controls policy, scientific validation, and
-provenance. Figure review uses OCR text and word geometry extracted by a confined
-sandbox worker; the dossier does not claim that Gemma inspected pixels or
-performed a multimodal review. Tasks can use isolated
+deployment-configured Gemma model provides independent methodological and
+multimodal display review, and deterministic code controls policy, scientific
+validation, and provenance. Generated figure rasters are sent only to Gemma in
+bounded batches; Qwen receives no image bytes. OCR text and word geometry from a
+confined sandbox worker provide supplementary evidence. Tasks can use isolated
 workspace files, offline Python/R execution, per-workspace PyPI/CRAN/Bioconductor
 environments, and selected MCP research tools.
 

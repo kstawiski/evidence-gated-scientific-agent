@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
+import json
 import logging
 import mimetypes
 import secrets
@@ -20,9 +22,9 @@ from a2a.server.routes import (
     create_jsonrpc_routes,
 )
 from a2a.server.tasks import InMemoryTaskStore
-from fastapi import FastAPI, File, Query, UploadFile
+from fastapi import FastAPI, File, Query, Request, UploadFile
 from fastapi.background import BackgroundTasks
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -34,7 +36,7 @@ from ..orchestrator import run_scientific_task
 from ..provenance import sha256_file
 from ..reporting import FIGURE_MEDIA_TYPES
 from .a2a import ALLOWED_MCP_SERVERS, EvidenceBenchExecutor, build_agent_card
-from .service import Runner, TaskService
+from .service import Runner, TaskService, web_visible_artifact
 from .settings import WebSettings
 from .store import ACTIVE_RUN_STATES, WorkspaceStore
 
@@ -59,6 +61,42 @@ def _decode_truncated_utf8(head: bytes, tail: bytes) -> str:
         tail_start += 1
     tail_text = tail[tail_start:].decode("utf-8")
     return head_text + PREVIEW_TRUNCATION_MARKER + tail_text
+
+
+def _text_preview(path: Path, display_path: str) -> dict:
+    """Return a bounded UTF-8 preview for a path already confined by the store."""
+
+    size = path.stat().st_size
+    with path.open("rb") as handle:
+        if size <= MAX_TEXT_PREVIEW_BYTES:
+            data = handle.read(MAX_TEXT_PREVIEW_BYTES + 1)
+            truncated = False
+            head = tail = b""
+        else:
+            head_bytes = MAX_TEXT_PREVIEW_BYTES * 3 // 4
+            tail_bytes = MAX_TEXT_PREVIEW_BYTES - head_bytes
+            head = handle.read(head_bytes)
+            handle.seek(-tail_bytes, 2)
+            tail = handle.read(tail_bytes)
+            data = head + PREVIEW_TRUNCATION_MARKER.encode("utf-8") + tail
+            truncated = True
+    if b"\x00" in data:
+        raise ValueError("file is not UTF-8 text")
+    try:
+        content = (
+            _decode_truncated_utf8(head, tail)
+            if truncated
+            else data.decode("utf-8-sig")
+        )
+    except UnicodeDecodeError as exc:
+        raise ValueError("file is not UTF-8 text") from exc
+    return {
+        "path": display_path,
+        "content": content,
+        "bytes": size,
+        "preview_bytes": len(data),
+        "truncated": truncated,
+    }
 
 
 class WorkspaceCreate(BaseModel):
@@ -294,6 +332,13 @@ def create_app(
         path = store.file_path(workspace_id, filename)
         return FileResponse(path, filename=path.name)
 
+    @app.get("/api/workspaces/{workspace_id}/file-preview")
+    async def preview_workspace_file(
+        workspace_id: str, filename: str = Query(...)
+    ) -> dict:
+        path = store.file_path(workspace_id, filename)
+        return _text_preview(path, filename)
+
     @app.delete("/api/workspaces/{workspace_id}/files/{filename}", status_code=204)
     async def delete_file(workspace_id: str, filename: str) -> Response:
         store.delete_file(workspace_id, filename)
@@ -323,6 +368,53 @@ def create_app(
         after_id: int = Query(default=0, ge=0),
     ) -> list[dict]:
         return store.list_events(run_id, after_id)
+
+    @app.get("/api/runs/{run_id}/events/stream")
+    async def stream_run_events(
+        request: Request,
+        run_id: str,
+        after_id: int = Query(default=0, ge=0),
+    ) -> StreamingResponse:
+        store.get_run(run_id)
+
+        async def event_stream():
+            cursor = after_id
+            heartbeat_ticks = 0
+            while True:
+                if await request.is_disconnected():
+                    return
+                events = store.list_events(run_id, cursor)
+                for event in events:
+                    cursor = max(cursor, int(event["id"]))
+                    yield (
+                        f"id: {event['id']}\n"
+                        "event: run_event\n"
+                        f"data: {json.dumps(event, ensure_ascii=False, separators=(',', ':'))}\n\n"
+                    )
+                if len(events) >= 500:
+                    continue
+                run = store.get_run(run_id)
+                if run["status"] not in ACTIVE_RUN_STATES:
+                    yield (
+                        "event: stream_end\n"
+                        f"data: {json.dumps({'status': run['status']}, separators=(',', ':'))}\n\n"
+                    )
+                    return
+                heartbeat_ticks += 1
+                if heartbeat_ticks >= 30:
+                    heartbeat_ticks = 0
+                    yield ": keep-alive\n\n"
+                await asyncio.sleep(0.5)
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache, no-transform",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @app.post("/api/runs/{run_id}/cancel", status_code=202)
     async def cancel_run(run_id: str) -> dict:
@@ -372,44 +464,18 @@ def create_app(
 
     @app.get("/api/runs/{run_id}/artifacts")
     async def download_artifact(run_id: str, path: str = Query(...)) -> FileResponse:
+        if not web_visible_artifact(path):
+            raise KeyError("artifact not available in the Web explorer")
         artifact = store.run_artifact(run_id, path)
         media_type = mimetypes.guess_type(artifact.name)[0]
         return FileResponse(artifact, filename=artifact.name, media_type=media_type)
 
     @app.get("/api/runs/{run_id}/artifact-preview")
     async def preview_text_artifact(run_id: str, path: str = Query(...)) -> dict:
+        if not web_visible_artifact(path):
+            raise KeyError("artifact not available in the Web explorer")
         artifact = store.run_artifact(run_id, path)
-        size = artifact.stat().st_size
-        with artifact.open("rb") as handle:
-            if size <= MAX_TEXT_PREVIEW_BYTES:
-                data = handle.read(MAX_TEXT_PREVIEW_BYTES + 1)
-                truncated = False
-            else:
-                head_bytes = MAX_TEXT_PREVIEW_BYTES * 3 // 4
-                tail_bytes = MAX_TEXT_PREVIEW_BYTES - head_bytes
-                head = handle.read(head_bytes)
-                handle.seek(-tail_bytes, 2)
-                tail = handle.read(tail_bytes)
-                marker = PREVIEW_TRUNCATION_MARKER.encode("utf-8")
-                data = head + marker + tail
-                truncated = True
-        if b"\x00" in data:
-            raise ValueError("artifact is not UTF-8 text")
-        try:
-            content = (
-                _decode_truncated_utf8(head, tail)
-                if truncated
-                else data.decode("utf-8-sig")
-            )
-        except UnicodeDecodeError as exc:
-            raise ValueError("artifact is not UTF-8 text") from exc
-        return {
-            "path": path,
-            "content": content,
-            "bytes": size,
-            "preview_bytes": len(data),
-            "truncated": truncated,
-        }
+        return _text_preview(artifact, path)
 
     def registered_reference(run_id: str, source_id: str, kind: str) -> Path:
         root = store.run_root(run_id)

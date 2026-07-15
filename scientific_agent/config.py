@@ -212,6 +212,11 @@ class LiteratureSettings:
             "SCIENTIFIC_AGENT_PDFTOTEXT", "pdftotext", "/usr/bin/pdftotext"
         )
     )
+    pdftoppm: Path = field(
+        default_factory=lambda: _executable(
+            "SCIENTIFIC_AGENT_PDFTOPPM", "pdftoppm", "/usr/bin/pdftoppm"
+        )
+    )
     max_pdf_bytes: int = int(
         os.environ.get("SCIENTIFIC_AGENT_MAX_ARTICLE_PDF_BYTES", str(64 * 1024**2))
     )

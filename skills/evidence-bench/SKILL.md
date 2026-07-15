@@ -7,6 +7,10 @@ description: Run evidence-gated scientific analyses on the lab Evidence Bench se
 
 Use the bundled stdlib-only client to submit work to the internal lab service. The service creates an isolated persistent workspace, lets Qwen retrieve evidence and run sandboxed Python/R, applies deterministic validation, then asks Gemma to audit the report. It returns an IMRaD-style scientific report plus sources, code, figures, tables, logs, and hashes.
 
+For source-image tasks, Qwen receives no raster bytes. The controller converts a
+bounded set of TIFF/PDF/Office/archive visuals and sends them only to Gemma; Qwen
+receives Gemma's structured observations and explicit unreviewed-page list.
+
 ## Run a task
 
 Write a precise objective. State endpoints, populations, contrasts, assumptions, required sensitivity analyses, and deliverables when known. Never invent missing scientific requirements.

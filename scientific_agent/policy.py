@@ -56,6 +56,9 @@ LITERATURE_TOOLS = {
 EXECUTION_TOOLS = {"run_python_analysis", "run_r_analysis"}
 INSTALLATION_TOOLS = {"install_python_packages", "install_r_packages"}
 _URL = re.compile(r"https?://[^\s<>\"']+")
+_SECRET_ARGUMENT_KEY = re.compile(
+    r"(?:authorization|cookie|credential|password|secret|token|api[_-]?key)", re.I
+)
 
 
 def _extract_urls(value: Any) -> set[str]:
@@ -221,7 +224,11 @@ class ToolPolicy:
         remaining = max(
             0, MAX_MODEL_TOOL_RESULTS_TOTAL_BYTES - self._model_observation_bytes
         )
-        if len(encoded) <= MAX_MODEL_TOOL_RESULT_BYTES and len(encoded) <= remaining:
+        if (
+            tool_name != "take_screenshot"
+            and len(encoded) <= MAX_MODEL_TOOL_RESULT_BYTES
+            and len(encoded) <= remaining
+        ):
             self._model_observation_bytes += len(encoded)
             return None
 
@@ -259,15 +266,32 @@ class ToolPolicy:
 
     @staticmethod
     def _logged_arguments(arguments: dict[str, Any]) -> dict[str, Any]:
-        logged = dict(arguments)
-        code = logged.get("code")
-        if isinstance(code, str):
-            encoded = code.encode("utf-8")
-            logged["code"] = {
-                "sha256": hashlib.sha256(encoded).hexdigest(),
-                "bytes": len(encoded),
-            }
-        return logged
+        def sanitize(key: str, value: Any) -> Any:
+            if _SECRET_ARGUMENT_KEY.search(key):
+                return "[REDACTED]"
+            if key == "code" and isinstance(value, str):
+                encoded = value.encode("utf-8")
+                return {
+                    "sha256": hashlib.sha256(encoded).hexdigest(),
+                    "bytes": len(encoded),
+                }
+            if isinstance(value, dict):
+                return {str(k): sanitize(str(k), v) for k, v in value.items()}
+            if isinstance(value, list):
+                return [sanitize(key, item) for item in value]
+            if isinstance(value, str) and (
+                key.lower() in URL_ARGUMENT_NAMES or key.lower().endswith("url")
+            ):
+                parsed = urlparse(value)
+                if parsed.scheme in {"http", "https"} and parsed.hostname:
+                    try:
+                        port = f":{parsed.port}" if parsed.port else ""
+                    except ValueError:
+                        port = ""
+                    return f"{parsed.scheme}://{parsed.hostname}{port}{parsed.path}"
+            return value
+
+        return {str(key): sanitize(str(key), value) for key, value in arguments.items()}
 
     def before_tool(
         self, tool, args: dict[str, Any], tool_context
@@ -360,7 +384,8 @@ class ToolPolicy:
                 self.retrieval_artifacts.append(str(artifact))
             self.retrieval_artifacts.extend(returned_artifacts)
         elif not reported_error and (
-            len(encoded) > MAX_MODEL_TOOL_RESULT_BYTES
+            name == "take_screenshot"
+            or len(encoded) > MAX_MODEL_TOOL_RESULT_BYTES
             or self._model_observation_bytes + len(encoded)
             > MAX_MODEL_TOOL_RESULTS_TOTAL_BYTES
         ):

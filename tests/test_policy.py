@@ -173,6 +173,45 @@ def test_screenshot_binary_is_never_injected_as_text_preview(tmp_path, monkeypat
     assert Path(observed["full_result_artifact"]).is_file()
 
 
+def test_tiny_screenshot_is_also_preserved_and_never_injected(tmp_path):
+    gate = policy(tmp_path, preserve_evidence=True)
+
+    class Tool:
+        name = "take_screenshot"
+
+    observed = gate.after_tool(Tool(), {}, None, {"image_base64": "aGVsbG8="})
+
+    assert observed["result_compacted"] is True
+    assert "result_preview" not in observed
+    assert Path(observed["full_result_artifact"]).is_file()
+
+
+def test_tool_ledger_redacts_secret_keys_and_url_credentials(tmp_path):
+    ledger_path = tmp_path / "secret-events.jsonl"
+    gate = ToolPolicy(
+        EventLedger(ledger_path),
+        default_allowed_tools(include_chrome=True),
+    )
+
+    class Tool:
+        name = "new_page"
+
+    arguments = {
+        "url": "https://user:pass@1.1.1.1/article?token=hidden#fragment",
+        "metadata": {"api_key": "hidden-key", "label": "safe"},
+    }
+    assert gate.before_tool(Tool(), arguments, None) is None
+    logged = ledger_path.read_text(encoding="utf-8")
+
+    assert "user:pass" not in logged
+    assert "?token" not in logged
+    assert "#fragment" not in logged
+    assert "hidden-key" not in logged
+    event = json.loads(logged.splitlines()[0])
+    assert event["arguments"]["url"] == "https://1.1.1.1/article"
+    assert event["arguments"]["metadata"]["api_key"] == "[REDACTED]"
+
+
 def test_cumulative_model_observation_budget_compacts_later_results(
     tmp_path, monkeypatch
 ):

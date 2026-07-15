@@ -1,11 +1,13 @@
 from pathlib import Path
 
+import pytest
 from PIL import Image
 
 from scientific_agent.linting import validate_report
 from scientific_agent.provenance import sha256_file
 from scientific_agent.reporting import (
     _parse_tesseract_tsv,
+    inspect_figure,
     materialize_displays,
     prepare_display_audit,
     render_report_markdown,
@@ -124,6 +126,15 @@ def test_tesseract_tsv_parser_returns_bounded_text_and_geometry():
         "width": 80,
         "height": 20,
     }
+
+
+def test_decompression_bomb_is_reported_as_invalid_figure(tmp_path, monkeypatch):
+    image = tmp_path / "compressed-large-pixel-count.png"
+    Image.new("L", (32, 32), color=0).save(image)
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 100)
+
+    with pytest.raises(ValueError, match="not a readable raster image"):
+        inspect_figure(image)
 
 
 def test_unregistered_final_display_artifact_is_blocking(tmp_path: Path):

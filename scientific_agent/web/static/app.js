@@ -13,6 +13,8 @@ const state = {
   pollTimer: null,
   pollBackoff: 1500,
   pollErrorShown: false,
+  eventSource: null,
+  eventSourceRunId: null,
   cancelPending: false,
   workspaceToken: 0,
   modelOutputRequest: 0,
@@ -163,6 +165,7 @@ async function loadWorkspaces(selectId = null) {
     await selectWorkspace(state.workspaces[0].id, false);
   } else if (!state.workspaces.length) {
     clearPoll();
+    clearEventStream();
     state.workspace = null;
     state.selectedRun = null;
     state.activeRun = null;
@@ -199,6 +202,7 @@ function renderWorkspaces() {
 
 async function selectWorkspace(workspaceId, closeSidebar = true) {
   clearPoll();
+  clearEventStream();
   const token = ++state.workspaceToken;
   const workspace = await api(`/api/workspaces/${workspaceId}`);
   if (token !== state.workspaceToken) return;
@@ -208,6 +212,7 @@ async function selectWorkspace(workspaceId, closeSidebar = true) {
   const latest = active || workspace.runs[0] || null;
   state.selectedRun = latest ? (active ? state.activeRun : await api(`/api/runs/${latest.id}`)) : null;
   await resetEvents(state.activeRun?.id || state.selectedRun?.id || null);
+  if (state.activeRun) startEventStream(state.activeRun.id);
   state.tab = "article";
   state.discussion = [];
   state.discussionRunId = null;
@@ -223,9 +228,7 @@ async function resetEvents(runId) {
   state.eventCursor = 0;
   state.runEvents = [];
   if (!runId) return;
-  const events = await api(`/api/runs/${runId}/events?after_id=0`);
-  state.runEvents = events;
-  state.eventCursor = events.at(-1)?.id || 0;
+  await appendEvents(runId);
 }
 
 async function appendEvents(runId) {
@@ -233,11 +236,50 @@ async function appendEvents(runId) {
     await resetEvents(runId);
     return;
   }
-  const events = await api(`/api/runs/${runId}/events?after_id=${state.eventCursor}`);
-  if (events.length) {
-    state.runEvents.push(...events);
-    state.eventCursor = events.at(-1).id;
+  for (let page = 0; page < 40; page += 1) {
+    const events = await api(`/api/runs/${runId}/events?after_id=${state.eventCursor}`);
+    const fresh = events.filter((event) => event.id > state.eventCursor);
+    if (fresh.length) {
+      state.runEvents.push(...fresh);
+      state.eventCursor = fresh.at(-1).id;
+    }
+    if (events.length < 500) break;
   }
+}
+
+function clearEventStream() {
+  state.eventSource?.close();
+  state.eventSource = null;
+  state.eventSourceRunId = null;
+  if (el("activity-stream-state")) el("activity-stream-state").textContent = "POLL";
+}
+
+function startEventStream(runId) {
+  if (!window.EventSource || state.eventSourceRunId === runId) return;
+  clearEventStream();
+  const source = new EventSource(`/api/runs/${encodeURIComponent(runId)}/events/stream?after_id=${state.eventCursor}`);
+  state.eventSource = source;
+  state.eventSourceRunId = runId;
+  el("activity-stream-state").textContent = "CONNECTING";
+  source.onopen = () => { if (state.eventSourceRunId === runId) el("activity-stream-state").textContent = "LIVE"; };
+  source.onerror = () => { if (state.eventSourceRunId === runId) el("activity-stream-state").textContent = "RECONNECTING"; };
+  source.addEventListener("run_event", (message) => {
+    if (state.eventSourceRunId !== runId) return;
+    let event;
+    try { event = JSON.parse(message.data); } catch (_) { return; }
+    if (!Number.isInteger(event.id) || event.id <= state.eventCursor) return;
+    state.runEvents.push(event);
+    state.eventCursor = event.id;
+    renderActiveRun();
+    renderRail();
+    renderActivityLog();
+    schedulePoll(150);
+  });
+  source.addEventListener("stream_end", () => {
+    if (state.eventSourceRunId !== runId) return;
+    clearEventStream();
+    schedulePoll(0);
+  });
 }
 
 function renderWorkspace() {
@@ -306,20 +348,29 @@ function setWorkspaceLocked(locked) {
 function renderFiles() {
   const list = el("file-list");
   list.replaceChildren();
+  const inputHeading = document.createElement("h3");
+  inputHeading.className = "workspace-files-heading";
+  inputHeading.textContent = `Inputs (${state.workspace.files.length})`;
+  list.append(inputHeading);
   if (!state.workspace.files.length) {
     const empty = document.createElement("div");
     empty.className = "file-empty";
     empty.textContent = "No inputs uploaded.";
     list.append(empty);
-    return;
   }
   const locked = workspaceLocked();
   for (const file of state.workspace.files) {
     const row = document.createElement("div");
     row.className = "file-row";
     const info = document.createElement("div");
-    const name = document.createElement("strong");
+    const name = document.createElement(isTextArtifact(file.name) ? "button" : "strong");
     name.textContent = file.name;
+    if (isTextArtifact(file.name)) {
+      name.type = "button";
+      name.className = "workspace-file-preview";
+      name.title = "Preview in browser";
+      name.addEventListener("click", () => openWorkspaceFilePreview(file.name, state.workspace.id));
+    }
     const size = document.createElement("small");
     size.textContent = formatBytes(file.bytes);
     info.append(name, size);
@@ -335,6 +386,28 @@ function renderFiles() {
     remove.addEventListener("click", () => deleteFile(file.name));
     row.append(info, download, remove);
     list.append(row);
+  }
+  const run = state.selectedRun;
+  const artifacts = run?.artifacts || [];
+  const outputHeading = document.createElement("h3");
+  outputHeading.className = "workspace-files-heading produced";
+  outputHeading.textContent = `Selected run files (${artifacts.length})`;
+  list.append(outputHeading);
+  if (!run) {
+    const empty = document.createElement("div");
+    empty.className = "file-empty";
+    empty.textContent = "Select or start a run to browse its files.";
+    list.append(empty);
+  } else if (!artifacts.length) {
+    const empty = document.createElement("div");
+    empty.className = "file-empty";
+    empty.textContent = "Run files will appear here as they are created.";
+    list.append(empty);
+  } else {
+    const files = document.createElement("div");
+    files.className = "workspace-run-files";
+    for (const artifact of artifacts) files.append(artifactRow(artifact, run.id));
+    list.append(files);
   }
 }
 
@@ -376,6 +449,7 @@ async function selectRun(runId) {
   state.discussionLoading = false;
   if (!state.activeRun) await resetEvents(runId);
   renderHistory();
+  renderFiles();
   renderRun();
   renderRail();
   renderActivityLog();
@@ -536,13 +610,35 @@ function isTextArtifact(path) {
 
 async function openArtifactPreview(path, runId) {
   const dialog = el("artifact-preview-dialog");
-  state.previewArtifact = { path, runId };
+  state.previewArtifact = { kind: "run", path, runId };
   el("artifact-preview-title").textContent = path;
   el("artifact-preview-meta").textContent = "Loading bounded UTF-8 preview…";
   el("artifact-preview-text").textContent = "";
   el("artifact-preview-download").href = artifactUrl(path, runId);
   if (!dialog.open) dialog.showModal();
   await refreshArtifactPreview(path, runId, true);
+}
+
+async function openWorkspaceFilePreview(filename, workspaceId) {
+  const dialog = el("artifact-preview-dialog");
+  state.previewArtifact = { kind: "workspace", path: filename, workspaceId };
+  el("artifact-preview-title").textContent = filename;
+  el("artifact-preview-meta").textContent = "Loading bounded UTF-8 preview…";
+  el("artifact-preview-text").textContent = "";
+  el("artifact-preview-download").href = `/api/workspaces/${encodeURIComponent(workspaceId)}/files/${encodeURIComponent(filename)}`;
+  if (!dialog.open) dialog.showModal();
+  const requestId = ++state.previewRequest;
+  try {
+    const preview = await api(`/api/workspaces/${encodeURIComponent(workspaceId)}/file-preview?filename=${encodeURIComponent(filename)}`);
+    if (requestId !== state.previewRequest || !dialog.open || state.previewArtifact?.kind !== "workspace" || state.previewArtifact?.path !== filename || state.previewArtifact?.workspaceId !== workspaceId) return;
+    el("artifact-preview-text").textContent = preview.content;
+    el("artifact-preview-meta").textContent = `${formatBytes(preview.bytes)} · ${preview.truncated ? "head + tail preview; middle omitted" : "complete UTF-8 preview"}`;
+    el("artifact-preview-text").focus();
+  } catch (error) {
+    if (requestId !== state.previewRequest) return;
+    el("artifact-preview-meta").textContent = "Preview unavailable";
+    el("artifact-preview-text").textContent = error.message;
+  }
 }
 
 async function refreshArtifactPreview(path, runId, showErrors) {
@@ -1034,6 +1130,7 @@ async function startRun(event) {
   state.selectedRun = state.activeRun;
   state.workspace = await api(`/api/workspaces/${state.workspace.id}`);
   await resetEvents(run.id);
+  startEventStream(run.id);
   renderWorkspace();
   schedulePoll();
   toast("Audited run queued.");
@@ -1050,6 +1147,7 @@ async function submitFollowUp(event) {
   state.selectedRun = state.activeRun;
   state.workspace = await api(`/api/workspaces/${state.workspace.id}`);
   await resetEvents(run.id);
+  startEventStream(run.id);
   renderWorkspace();
   schedulePoll();
   toast("Audited child revision queued.");
@@ -1096,6 +1194,8 @@ async function pollActiveRun() {
     if (state.workspace?.id !== workspaceId) return;
     state.workspace = workspace;
     state.activeRun = activeStates.has(run.status) ? run : null;
+    if (state.activeRun) startEventStream(runId);
+    else clearEventStream();
     if (state.selectedRun?.id === runId) state.selectedRun = run;
     state.pollBackoff = 1500;
     state.pollErrorShown = false;

@@ -96,6 +96,23 @@ individually — see
 [`docs/WEB_AND_A2A.md`](WEB_AND_A2A.md#live-artifact-access) — and
 `render_report_markdown()` embeds the same manifest paths into `report.md`.
 
+## Source images and visual documents
+
+Uploaded/source visuals are distinct from report displays. Qwen has no image
+understanding and receives no raster bytes. For a visual task, trusted controller
+code deterministically converts a bounded set of TIFF frames, PDF pages, and
+supported image members from ZIP/DOCX/PPTX/XLSX inputs to PNG under `input-visuals/`;
+Qwen may create additional conversion-only rasters under
+`/output/visual-review`. Only Gemma receives those images.
+
+`gemma_input_visual_review.json` records exact SHA-256 inputs, batch attempts,
+the effective critic model, `qwen_image_inputs: 0`, structured visible
+observations, scientific interpretations, limitations, and every unreviewed
+request. The controller caches an unchanged audit by exact image hashes. A visual
+claim must be typed `observed` and cite that controller audit artifact; a missing
+page, failed conversion, unreadable label, or truncated coverage remains explicit
+and cannot be replaced with Qwen inference.
+
 ## Evidence gating
 
 Claims are typed as `observed`, `computed`, `literature_supported`,
@@ -129,6 +146,11 @@ available data or authorized methods, is stated explicitly, and every claim is
 constrained accordingly. If the automatic budget ends with a blocking finding,
 the run writes `repair_exhausted.json` and returns
 `requires_human_decision`; it is never labeled validated.
+
+An invalid display artifact cannot erase a completed article audit. The
+controller preserves the Gemma report review, records the display-preparation
+failure separately as `invalid_display_inputs`, and keeps the combined result
+inconclusive until the artifact is converted or removed honestly.
 
 After completion, users may open a separate Gemma discussion thread to ask what
 a result means, challenge its support, or request a proposed revision brief. That

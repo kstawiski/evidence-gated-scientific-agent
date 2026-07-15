@@ -220,9 +220,11 @@ def test_known_effect_score_reads_nested_run_result_and_checks_fixture():
             },
             "gemma_display_audit.json": {
                 "verdict": "pass",
-                "review_mode": "ocr_text_and_geometry",
-                "review_source": "gemma_text_critic",
+                "review_mode": "raster_with_ocr_geometry_and_table_previews",
+                "review_source": "gemma_multimodal_critic",
                 "critic_model": "gemma-test",
+                "visual_critic": "Gemma",
+                "qwen_image_inputs": 0,
                 "figure_text_inputs": [
                     {
                         "display_id": "primary",

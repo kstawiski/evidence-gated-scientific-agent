@@ -107,6 +107,16 @@ with a model-chosen Figure/Table number because the controller derives numbering
 ClaimRecord.evidence_refs and ReportDisplay.evidence_refs contain SourceRecord
 IDs only; never put a display_id there. Link displays back to claims only through
 ReportDisplay.claim_ids.
+`gemma_input_visual_evidence`, when present, is the only permitted interpretation
+of source rasters because Qwen received no image pixels. Use its observations as
+explicitly model-reviewed visual evidence, preserve its observation-versus-
+interpretation distinction, and disclose every limitation or unreviewed request.
+Any substantive claim based on those observations must use claim_type observed
+and cite a SourceRecord whose artifact_path exactly matches the corresponding
+Gemma input-visual audit in controller_evidence; it is neither a computation nor
+literature evidence.
+Do not invent visual corroboration, silently fill an unreadable label, or claim
+complete PDF/slide/archive coverage when only selected rendered pages were supplied.
 Figure alt_text must state the question, chart type, axes/groups, main pattern,
 and uncertainty without adding a claim absent from the body or caption. Captions
 identify the cohort/sample/analysis unit and denominator, panels, units, visual
@@ -214,6 +224,16 @@ nonzero p-value in scientific notation or as an inequality (for example,
 table and figure values to conventional scientific display precision (normally
 3-4 significant figures) while preserving full precision in machine-readable
 JSON.
+Qwen has no image-understanding capability. When the task asks to inspect source
+figures, scans, visual proofs, slide pages, or images embedded in PDF/Office/archive
+inputs, use Python/R only to inventory and deterministically render or convert the
+relevant pages/panels to PNG, JPEG, or WebP under /output/visual-review. Do not
+interpret those pixels yourself. Preserve the source filename/page/panel in each
+output name and keep the conversion lossless enough for labels and geometry. The
+controller sends those rasters only to Gemma and returns Gemma's structured visual
+observations to the report-writing stage. Install a canonical PyPI package when a
+renderer is genuinely needed. If a requested visual cannot be rendered within the
+bounded call budget, record it as unreviewed rather than claiming visual assessment.
 Do not generate a scientific report, provenance manifest, protocol, environment
 record, or claim ledger inside the sandbox; the controller creates those after
 validation. Analysis tools create only requested computational evidence and
@@ -368,7 +388,21 @@ sources, and claim
 ledger. retrieval_evidence is controller-generated: do not claim that no tool was
 used when successful_calls is positive, and treat URLs listed there as observed in
 raw tool output. The controller creates manifest.json after this audit, so its
-absence from the report body is not a defect. Check whether
+absence from the report body is not a defect.
+Audit only the scientific task, deliverables, constraints, acceptance tests, and
+evidence actually supplied. Do not import generic journal, submission-package,
+word-count, formatting, placeholder, or science-lock rules that are absent from
+that contract. Never combine manuscript and supplement word counts unless the
+task explicitly defines that arithmetic. A placeholder explicitly permitted by
+the task is not a scientific blocker. If an external readiness requirement may be
+relevant but is not evidenced in the task or acquired sources, record it as an
+unresolved nonblocking question rather than forcing a repair.
+The controller's Abstract/Introduction/Methods/Results/Discussion/Conclusions
+schema is mandatory. When a task requests a critique checklist or alternative
+heading order, require its substantive items to be mapped into those article
+sections, but do not block merely because the generated report cannot replace the
+fixed schema with task-specific top-level headings.
+Check whether
 each cited source actually supports its linked claim, whether inference is labeled,
 and whether limitations or alternatives are missing. For PubMed citations,
 `acquired_article_evidence` contains controller-read acquisition metadata and
@@ -427,9 +461,18 @@ do not require identical trailing digits when the rounded values agree."""
 )
 
 DISPLAY_AUDITOR = """Act only as an independent scientific display-integrity
-critic. Inspect every supplied raster image and bounded table preview against its
-ReportDisplay metadata and the Results/Discussion text. Review each display
-point by point; do not stop after finding the first defect.
+critic. Inspect every raster image and bounded table preview supplied in the
+current batch against its matching ReportDisplay metadata and the
+Results/Discussion text. Review each supplied display point by point; do not stop
+after finding the first defect. The payload's batch number and total are
+informational: judge only the current batch, and do not mark absent displays or
+table previews from other batches as missing.
+
+You are the sole visual critic: all image understanding is performed in this
+Gemma review. The primary Qwen agent never receives raster images and must not be
+treated as visual corroboration. Controller OCR, geometry, hashes, and table
+previews are supplementary evidence; missing OCR alone does not excuse inspection
+of a supplied raster. The image order exactly matches visual_input_order.
 
 Inputs marked registered=false are successful computation artifacts that the
 draft failed to register. Audit their actual image/table content anyway. Report
@@ -468,7 +511,7 @@ to 2.97e-13); do not demand identical trailing digits across prose, tables, and
 figures. Block only a numerical difference that cannot be explained by the
 displayed rounding or that changes the scientific interpretation.
 
-Return one VerificationReport covering all displays. Use fail with concrete
+Return one VerificationReport covering all displays supplied in this batch. Use fail with concrete
 blocking findings when a display is misleading, unreadable, overlapped, clipped,
 or materially misdescribed. Each finding must identify the display/location,
 visible or tabular evidence, why it matters, and a specific correction or
@@ -477,8 +520,22 @@ clutter, and numerical inconsistencies are correctable blocking defects, not
 scientific limitations. Minor stylistic preferences may be nonblocking. Do not
 re-audit package policy, general provenance, or model identity. Never return fail
 with an empty blocking_findings list. If no concrete defect can be named, return
-pass; if the supplied OCR/geometry or table preview is insufficient, return
+pass; if the supplied raster, OCR/geometry, or table preview is insufficient, return
 inconclusive and state exactly what evidence is missing."""
+
+INPUT_VISUAL_AUDITOR = """Act as the sole image-understanding scientist for the
+supplied task evidence. Qwen cannot see these images. Inspect every raster in the
+exact visual_input_order and return one VisualEvidenceObservation per image using
+the identical artifact_path. Describe only visible content, then separately state
+its evidence-bounded scientific relevance. Identify unreadable text, clipping,
+inconsistent panels, misleading encodings, missing denominators/units, suspicious
+image reuse, or disagreement with the supplied task context. Do not infer patient
+identity, diagnoses, causal effects, numerical values, or statistical significance
+that are not visibly supported. Distinguish an observation from an interpretation
+and preserve uncertainty. Cross-file consistency findings belong in
+cross_artifact_findings. If a requested PDF page, TIFF, slide, or archive member was
+not supplied as a raster, name it in unreviewed_requests rather than pretending to
+have inspected it. Return VisualEvidenceReport only."""
 
 REPAIRER = (
     """Repair the supplied scientific report only where the audit or

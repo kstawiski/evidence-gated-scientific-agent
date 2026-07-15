@@ -193,11 +193,18 @@ legend { padding: 0 7px; color: var(--muted); font-size: 10px; font-weight: 700;
 .drop-zone.locked { opacity: .55; cursor: not-allowed; background: #f0f1ed; }
 .drop-zone input { position: absolute; width: 1px; height: 1px; opacity: 0; }
 .drop-zone strong { font-size: 12px; }.drop-zone small { color: var(--muted); margin-top: 4px; font-size: 10px; }.drop-icon { color: var(--teal-2); font-size: 23px; line-height: 1; margin-bottom: 5px; }
-.file-list { border-top: 1px solid var(--line); }
+.file-list { max-height: 720px; overflow: auto; border-top: 1px solid var(--line); }
+.workspace-files-heading { position: sticky; top: 0; z-index: 1; margin: 0; padding: 8px 15px; border-bottom: 1px solid var(--line); background: #edf5f2; color: var(--teal); font: 750 9px/1.4 "DejaVu Sans Mono", monospace; text-transform: uppercase; letter-spacing: .07em; }
+.workspace-files-heading.produced { margin-top: 4px; }
 .file-row { padding: 11px 15px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center; border-bottom: 1px solid #e4e8e4; }
-.file-row:last-child { border-bottom: 0; }.file-row div { min-width: 0; }.file-row strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11px "DejaVu Sans Mono", monospace; }.file-row small { color: var(--muted); font-size: 9px; }
+.file-row:last-child { border-bottom: 0; }.file-row div { min-width: 0; }.file-row strong, .file-row .workspace-file-preview { display: block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 11px "DejaVu Sans Mono", monospace; }.file-row small { display: block; color: var(--muted); font-size: 9px; }
 .file-row a, .file-row button { border: 0; background: transparent; color: var(--teal-2); font-size: 13px; text-decoration: none; cursor: pointer; padding: 4px; }
 .file-row button { color: var(--red); }
+.file-row .workspace-file-preview { padding: 0; color: var(--teal-2); text-align: left; }
+.file-row .workspace-file-preview:hover { text-decoration: underline; }
+.workspace-run-files { padding: 0 12px; }
+.workspace-run-files .artifact-row { grid-template-columns: 28px minmax(0, 1fr) auto; }
+.workspace-run-files .artifact-row-actions > span { display: none; }
 .file-empty { padding: 4px 16px 17px; color: var(--muted); text-align: center; font-size: 11px; }
 
 .provenance-rail { list-style: none; padding: 10px 16px 17px 24px; margin: 0; }
@@ -213,6 +220,7 @@ legend { padding: 0 7px; color: var(--muted); font-size: 10px; font-weight: 700;
 .activity-details { border-top: 1px solid var(--line); }
 .activity-details summary { display: flex; justify-content: space-between; gap: 12px; padding: 12px 16px; color: var(--teal); font-size: 11px; font-weight: 700; cursor: pointer; }
 .activity-details summary span { color: var(--muted); font: 9px "DejaVu Sans Mono", monospace; }
+.activity-details summary b { color: var(--cyan); font: inherit; }
 .activity-log { list-style: none; max-height: 380px; overflow: auto; margin: 0; padding: 0 14px 14px; }
 .model-output-monitor { margin: 0 14px 12px; border: 1px solid #9fc2bf; border-radius: 13px; overflow: hidden; background: #082f34; color: #e7f4f1; box-shadow: 0 12px 30px rgba(5, 40, 43, .16); }
 .model-output-monitor > div { display: flex; justify-content: space-between; gap: 10px; padding: 9px 11px; border-bottom: 1px solid #315556; }

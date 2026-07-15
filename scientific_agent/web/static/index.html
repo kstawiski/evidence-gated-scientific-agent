@@ -119,7 +119,7 @@
                 </form>
                 <details class="workflow-explainer">
                   <summary>How the evidence gate works</summary>
-                  <p><strong>Qwen plans, retrieves, computes, and drafts.</strong> The controller locks the method, confines Python/R and package installation, records artifacts, and runs deterministic checks. <strong>Gemma then independently audits</strong> methods, claims, tables, and actual raster figures. Tests and source records outrank model agreement.</p>
+                  <p><strong>Qwen plans, retrieves, computes, and drafts.</strong> The controller locks the method, confines Python/R and package installation, records artifacts, and runs deterministic checks. <strong>Gemma then independently audits</strong> methods, claims, tables, and actual raster figures. Gemma is the only model that receives images; Qwen never performs visual interpretation. Tests and source records outrank model agreement.</p>
                   <p>Biomedical and health-science analyses must search PubMed and acquire locally previewable article Markdown, with a verified PDF when legitimately available. Context7, Brave Search, and Chrome DevTools are enabled by default and Qwen is instructed to use the connection relevant to the task; users can uncheck any connection before starting. Every substantive claim remains linked to a retrieved source, successful computation, or explicit uncertainty. Cancellation preserves partial work as incomplete; a follow-up creates a new audited child revision and never overwrites its parent.</p>
                   <p>Outputs are standards-derived exploratory scientific reports—not peer review, science lock, manuscript readiness, or clinical authority.</p>
                 </details>
@@ -177,7 +177,7 @@
             <aside class="bench-side">
               <section class="panel files-panel">
                 <header class="panel-heading compact">
-                  <div><span class="panel-index">IN</span><div><h2>Inputs</h2><p>Immutable during an active run.</p></div></div>
+                  <div><span class="panel-index">FS</span><div><h2>Workspace files</h2><p>Preview inputs and selected-run outputs.</p></div></div>
                 </header>
                 <label class="drop-zone" id="drop-zone" for="file-input" data-run-mutable>
                   <input id="file-input" type="file" multiple data-run-mutable>
@@ -194,16 +194,16 @@
                   <li data-phase="planning"><i></i><div><strong>Independent planning</strong><small>Qwen + blinded Gemma plan</small></div><span>—</span></li>
                   <li data-phase="research"><i></i><div><strong>Evidence & computation</strong><small>MCP retrieval + sandbox tools</small></div><span>—</span></li>
                   <li data-phase="validation"><i></i><div><strong>Deterministic validation</strong><small>Tests outrank model agreement</small></div><span>—</span></li>
-                  <li data-phase="scientific-review"><i></i><div><strong>Independent critique</strong><small>Gemma audits claims and method</small></div><span>—</span></li>
+                  <li data-phase="scientific-review"><i></i><div><strong>Independent critique</strong><small>Gemma audits claims, method, and images</small></div><span>—</span></li>
                   <li data-phase="repair"><i></i><div><strong>Falsification & repair</strong><small>Bounded evidence-driven loop</small></div><span>—</span></li>
                   <li data-phase="finalizing"><i></i><div><strong>Provenance bundle</strong><small>Hashes, artifacts, final status</small></div><span>—</span></li>
                 </ol>
                 <details id="activity-details" class="activity-details" open>
-                  <summary>Live activity <span id="activity-count">0 events</span></summary>
+                  <summary>Live activity <span><b id="activity-stream-state">POLL</b> · <span id="activity-count">0 events</span></span></summary>
                   <section id="model-output-monitor" class="model-output-monitor hidden" aria-labelledby="model-output-heading">
                     <div class="model-output-heading"><h3 id="model-output-heading">Observable model output</h3><div><span id="model-output-actor">Qwen</span><button id="model-output-expand" type="button">Open console</button></div></div>
                     <pre id="model-output-text" aria-live="polite"></pre>
-                    <p>Visible non-thought output only. Hidden reasoning, prompts, secrets, and raw tool arguments are never shown.</p>
+                    <p>Visible non-thought output only. Safe tool names, queries, paths, package names, code hashes, outcomes, and artifact links appear below; hidden reasoning, prompts, secrets, and raw code are never shown.</p>
                   </section>
                   <ol id="activity-log" class="activity-log" aria-label="Run activity"></ol>
                 </details>

@@ -46,9 +46,37 @@ _METHODOLOGICAL_GENERALIZATION = re.compile(
 )
 _METHODOLOGICAL_RECOMMENDATION = re.compile(
     r"\b(?:default (?:choice|strategy|method|procedure)|"
+    r"(?:recommend(?:ed|ing)?|recommendation).{0,80}(?:as (?:the )?default|"
+    r"prefer|use|adopt|replac(?:e|ed|ing))|"
     r"should be (?:prioritized|preferred|used)|"
+    r"should be replaced(?: by| with)?|"
+    r"(?:method|test|procedure).{0,60}\bpreferable\b|"
     r"(?:method|test|procedure).{0,40}\bsuperior\b|"
     r"abandon\b.{0,80}\bin favou?r of)\b",
+    re.IGNORECASE,
+)
+_METHOD_RECOMMENDATION_SCOPE = re.compile(
+    r"\b(?:within|in|under|for|across|among)\b.{0,120}\b(?:simulat(?:ed|ion|ions)|"
+    r"evaluated|studied|conditions?|sample sizes?|distributions?|variance ratios?|"
+    r"regimes?|comparisons?|analyses?|datasets?|cohorts?|tasks?)\b",
+    re.IGNORECASE,
+)
+_UNIVERSAL_METHOD_RECOMMENDATION = re.compile(
+    r"\b(?:(?:for|across|under|in|regardless of)\s+(?:all|any|every)\b|"
+    r"universally\b|always\b|irrespective of\b)",
+    re.IGNORECASE,
+)
+_BOUNDED_UNIVERSAL_METHOD_SCOPE = re.compile(
+    r"\b(?:(?:all|any|every)\s+(?:evaluated|studied|simulated|prespecified)\b|"
+    r"(?:evaluated|studied|simulated|prespecified)\b.{0,80}\b(?:conditions?|"
+    r"sample sizes?|distributions?|variance ratios?|regimes?|comparisons?|"
+    r"analyses?|datasets?|cohorts?|tasks?))\b",
+    re.IGNORECASE,
+)
+_PROCEDURE_EQUIVALENCE = re.compile(
+    r"(?:\b(?:tests?|methods?|procedures?|results?|p-?values?)\b.{0,80}"
+    r"\b(?:equivalent|identical|the same)\b|\b(?:equivalent|identical|the same)\b"
+    r".{0,80}\b(?:tests?|methods?|procedures?|results?|p-?values?)\b)",
     re.IGNORECASE,
 )
 _GROUNDING_STOPWORDS = {
@@ -1160,6 +1188,54 @@ def validate_report(
                 for source_id in claim.evidence_refs
                 if source_id in sources_by_id
             ]
+            if _METHODOLOGICAL_RECOMMENDATION.search(claim.text):
+                scoped = _METHOD_RECOMMENDATION_SCOPE.search(claim.text)
+                universal = _UNIVERSAL_METHOD_RECOMMENDATION.search(claim.text)
+                bounded_universal = _BOUNDED_UNIVERSAL_METHOD_SCOPE.search(claim.text)
+                if not scoped or (universal and not bounded_universal):
+                    findings.append(
+                        LintFinding(
+                            code="methodological_recommendation_unscoped",
+                            location=location,
+                            message=(
+                                "A method-selection recommendation must name the "
+                                "studied simulation regime, distributions, sample-size "
+                                "range, or variance-ratio conditions; do not convert "
+                                "bounded evidence into a universal default."
+                            ),
+                        )
+                    )
+                if not any(
+                    source.artifact_path or source.local_markdown_path
+                    for source in referenced_sources
+                ):
+                    findings.append(
+                        LintFinding(
+                            code="methodological_recommendation_not_locally_grounded",
+                            location=location,
+                            message=(
+                                "A method-selection recommendation cannot rely only "
+                                "on unacquired web summaries; link a local computation "
+                                "or acquired source passage, or narrow/remove it."
+                            ),
+                        )
+                    )
+            if _PROCEDURE_EQUIVALENCE.search(claim.text) and not any(
+                source.artifact_path or source.local_markdown_path
+                for source in referenced_sources
+            ):
+                findings.append(
+                    LintFinding(
+                        code="procedure_equivalence_not_verified",
+                        location=location,
+                        message=(
+                            "A claim that complete tests, p-values, or results are "
+                            "equivalent needs a reproducible calculation or an exact "
+                            "locally acquired supporting passage; equality of an "
+                            "assumption alone is insufficient."
+                        ),
+                    )
+                )
             if any(source.retracted is True for source in referenced_sources):
                 findings.append(
                     LintFinding(

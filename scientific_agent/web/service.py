@@ -30,6 +30,19 @@ ACTORS = {
     "complete": "Controller",
     "stopped": "Controller",
 }
+WEB_HIDDEN_ROOT_FILES = {"tool_call_log.jsonl"}
+WEB_HIDDEN_DIRECTORIES = {"evidence"}
+
+
+def web_visible_artifact(relative_path: str) -> bool:
+    """Expose produced artifacts except raw tool arguments and response evidence."""
+
+    path = Path(relative_path)
+    if path.is_absolute() or ".." in path.parts or not path.parts:
+        return False
+    if len(path.parts) == 1 and path.name in WEB_HIDDEN_ROOT_FILES:
+        return False
+    return path.parts[0] not in WEB_HIDDEN_DIRECTORIES
 
 
 class TaskService:
@@ -386,7 +399,13 @@ class TaskService:
         )
         if manifest_path.is_file() and run["status"] not in ACTIVE_RUN_STATES:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            artifacts = manifest.get("files", [])
+            artifacts = [
+                artifact
+                for artifact in manifest.get("files", [])
+                if isinstance(artifact, dict)
+                and isinstance(artifact.get("path"), str)
+                and web_visible_artifact(artifact["path"])
+            ]
         else:
             artifacts = self._live_artifacts(root)
         return {
@@ -406,9 +425,12 @@ class TaskService:
         for path in sorted(root.rglob("*")):
             if not path.is_file() or path.is_symlink():
                 continue
+            relative = path.relative_to(root).as_posix()
+            if not web_visible_artifact(relative):
+                continue
             artifacts.append(
                 {
-                    "path": path.relative_to(root).as_posix(),
+                    "path": relative,
                     "bytes": path.stat().st_size,
                     "sha256": None,
                     "live": True,

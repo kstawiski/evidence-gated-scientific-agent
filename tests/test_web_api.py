@@ -53,6 +53,12 @@ async def fake_runner(objective, settings, *, progress, **kwargs):
         "extensionless UTF-8 artifact\n", encoding="utf-8"
     )
     (root / "binary.dat").write_bytes(b"\x00\xff\x00")
+    (root / "tool_call_log.jsonl").write_text(
+        '{"arguments":{"token":"private"}}\n', encoding="utf-8"
+    )
+    raw_evidence = root / "evidence" / "raw-tool-result.json"
+    raw_evidence.parent.mkdir(parents=True, exist_ok=True)
+    raw_evidence.write_text('{"private":"result"}\n', encoding="utf-8")
     large_utf8 = root / "large-utf8.md"
     size = web_app_module.MAX_TEXT_PREVIEW_BYTES + 1_000
     head_end = web_app_module.MAX_TEXT_PREVIEW_BYTES * 3 // 4
@@ -104,6 +110,16 @@ async def fake_runner(objective, settings, *, progress, **kwargs):
                     {"path": "report.md", "bytes": 24, "sha256": "a" * 64},
                     {"path": "analysis_notes", "bytes": 28, "sha256": "b" * 64},
                     {"path": "binary.dat", "bytes": 3, "sha256": "c" * 64},
+                    {
+                        "path": "tool_call_log.jsonl",
+                        "bytes": (root / "tool_call_log.jsonl").stat().st_size,
+                        "sha256": sha256_file(root / "tool_call_log.jsonl"),
+                    },
+                    {
+                        "path": "evidence/raw-tool-result.json",
+                        "bytes": raw_evidence.stat().st_size,
+                        "sha256": sha256_file(raw_evidence),
+                    },
                     {
                         "path": "large-utf8.md",
                         "bytes": large_utf8.stat().st_size,
@@ -205,6 +221,19 @@ def test_ui_api_auth_workspace_upload_and_run(tmp_path):
             files={"upload": ("values.csv", b"x,y\n1,2\n", "text/csv")},
         )
         assert uploaded.status_code == 201
+        input_preview = client.get(
+            f"/api/workspaces/{workspace_id}/file-preview",
+            params={"filename": "values.csv"},
+            auth=("researcher", "correct horse"),
+        )
+        assert input_preview.status_code == 200
+        assert input_preview.json()["content"] == "x,y\n1,2\n"
+        escaped_preview = client.get(
+            f"/api/workspaces/{workspace_id}/file-preview",
+            params={"filename": "../values.csv"},
+            auth=("researcher", "correct horse"),
+        )
+        assert escaped_preview.status_code == 400
 
         queued = client.post(
             f"/api/workspaces/{workspace_id}/runs",
@@ -220,6 +249,18 @@ def test_ui_api_auth_workspace_upload_and_run(tmp_path):
         assert result["status"] == "supported"
         assert result["report"]["title"] == "Validated test report"
         assert result["reference_manifest"]["references"][0]["pmid"] == "123"
+        visible_paths = {artifact["path"] for artifact in result["artifacts"]}
+        assert "tool_call_log.jsonl" not in visible_paths
+        assert "evidence/raw-tool-result.json" not in visible_paths
+        event_stream = client.get(
+            f"/api/runs/{result['id']}/events/stream",
+            auth=("researcher", "correct horse"),
+        )
+        assert event_stream.status_code == 200
+        assert event_stream.headers["content-type"].startswith("text/event-stream")
+        assert "event: run_event" in event_stream.text
+        assert "event: stream_end" in event_stream.text
+        assert '"status":"supported"' in event_stream.text
         paper = client.get(
             f"/api/runs/{result['id']}/references/S1/pdf",
             auth=("researcher", "correct horse"),
@@ -248,6 +289,19 @@ def test_ui_api_auth_workspace_upload_and_run(tmp_path):
             "preview_bytes": 24,
             "truncated": False,
         }
+        for hidden_path in ("tool_call_log.jsonl", "evidence/raw-tool-result.json"):
+            hidden_preview = client.get(
+                f"/api/runs/{result['id']}/artifact-preview",
+                params={"path": hidden_path},
+                auth=("researcher", "correct horse"),
+            )
+            hidden_download = client.get(
+                f"/api/runs/{result['id']}/artifacts",
+                params={"path": hidden_path},
+                auth=("researcher", "correct horse"),
+            )
+            assert hidden_preview.status_code == 404
+            assert hidden_download.status_code == 404
         extensionless_preview = client.get(
             f"/api/runs/{result['id']}/artifact-preview",
             params={"path": "analysis_notes"},
@@ -280,6 +334,39 @@ def test_ui_api_auth_workspace_upload_and_run(tmp_path):
         with zipfile.ZipFile(BytesIO(bundle.content)) as archive:
             assert "report.md" in archive.namelist()
             assert archive.read("report.md").startswith(b"# Validated")
+
+
+def test_terminal_sse_stream_drains_more_than_one_event_page(tmp_path):
+    with _client(tmp_path) as client:
+        auth = ("researcher", "correct horse")
+        workspace = client.post(
+            "/api/workspaces", auth=auth, json={"name": "Long event history"}
+        ).json()
+        queued = client.post(
+            f"/api/workspaces/{workspace['id']}/runs",
+            auth=auth,
+            json={"objective": "Produce a long event history", "mcp_servers": []},
+        ).json()
+        run = _wait_for_run(client, queued["id"])
+        store = client.app.state.store
+        for index in range(520):
+            store.append_event(
+                run["id"],
+                "test_event",
+                "Controller",
+                "complete",
+                f"event-{index}",
+            )
+
+        streamed = client.get(
+            f"/api/runs/{run['id']}/events/stream",
+            auth=auth,
+        )
+
+        assert streamed.status_code == 200
+        assert streamed.text.count("event: run_event") >= 520
+        assert "event-519" in streamed.text
+        assert "event: stream_end" in streamed.text
 
 
 def test_completed_report_supports_persistent_gemma_discussion_and_revision_prompt(
@@ -381,6 +468,9 @@ def test_browser_ui_uses_structured_dom_without_inner_html():
     assert 'id="model-output-monitor"' in page
     assert 'id="artifact-preview-dialog"' in page
     assert 'id="model-output-expand"' in page
+    assert 'id="activity-stream-state"' in page
+    assert "new EventSource" in script
+    assert "openWorkspaceFilePreview" in script
     assert 'data-tab="discussion"' in page
     assert "/discussion" in script
     assert 'id="active-run-capabilities"' in page

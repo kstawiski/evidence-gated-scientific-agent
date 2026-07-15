@@ -1,0 +1,36 @@
+{
+  "case": "manuscript-package-stress-pre-fix",
+  "release_candidate": "v0.4.0",
+  "started_at": "2026-07-15T17:06:30.390986+00:00",
+  "finished_at": "2026-07-15T17:59:22.993729+00:00",
+  "deployment_image_digest": "sha256:5d78bfe52c6c4ade0ce313b6e4cef94aa50327d354f78bf621095898592f669e",
+  "workspace_id": "b69c990a-69fc-47a8-a0ee-1a3921eb711e",
+  "run_id": "18b7b94f-6d3a-4c0c-941c-cc6b96ce0aeb",
+  "terminal_status": "requires_human_decision",
+  "repair_rounds": 4,
+  "merit_gate": "failed",
+  "productive_behavior": [
+    "A failed bounded Python extraction was retried successfully inside the same audited run.",
+    "The first critic finding correctly detected that formatting-only output did not satisfy the requested scientific critique.",
+    "Later research acquired PubMed articles and added domain context."
+  ],
+  "avoidable_behavior": [
+    "The critic combined main-manuscript and supplement word counts without an evidenced task rule.",
+    "The critic treated explicitly permitted title-page placeholders as scientific blockers.",
+    "The critic demanded task-specific top-level headings that conflict with the controller-owned article schema.",
+    "TIFF source figures were registered as inline report figures instead of being converted for Gemma-only visual review.",
+    "Invalid display preparation prevented the completed article audit from being retained in repair rounds 3 and 4."
+  ],
+  "final_deterministic_findings": [
+    "invalid_display_artifact"
+  ],
+  "final_review_verdict": "inconclusive",
+  "disposition": "Retained as a failed scientific-quality gate; not counted as a passing release evaluation.",
+  "implemented_repairs": [
+    "Task-scoped critic instructions reject invented word-count, journal, placeholder, and readiness rules.",
+    "The fixed IMRaD-style ScientificReport schema outranks alternative requested top-level headings while preserving requested content.",
+    "Controller conversion supports bounded TIFF, PDF, ZIP, DOCX, and PPTX source visuals.",
+    "Only Gemma receives source/display rasters; Qwen receives structured observations and explicit coverage gaps.",
+    "Article-review results survive invalid display preparation and remain separately auditable."
+  ]
+}

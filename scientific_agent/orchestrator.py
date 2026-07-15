@@ -7,13 +7,18 @@ import hashlib
 import json
 import os
 import re
+import subprocess
 import threading
 import uuid
+import zipfile
 from dataclasses import dataclass, replace
+from io import BytesIO
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlsplit
 
 from google.adk import Agent
+from PIL import Image, UnidentifiedImageError
 
 from . import __version__
 from .config import Settings
@@ -31,6 +36,7 @@ from .models import qwen_model
 from .policy import ToolPolicy, default_allowed_tools
 from .prompts import (
     DISPLAY_AUDITOR,
+    INPUT_VISUAL_AUDITOR,
     PLAN_REPAIRER,
     REPAIRER,
     REPORT_AUDITOR,
@@ -67,6 +73,7 @@ from .schemas import (
     ScientificReport,
     TaskSpec,
     VerificationReport,
+    VisualEvidenceReport,
 )
 from .workflow import (
     audit_master_plan,
@@ -76,7 +83,12 @@ from .workflow import (
     planning_status,
 )
 from .workspace_tools import build_workspace_tools
-from .structured_client import request_structured
+from .structured_client import (
+    MAX_IMAGE_BYTES,
+    MAX_IMAGE_COUNT,
+    MAX_TOTAL_IMAGE_BYTES,
+    request_structured,
+)
 
 
 ActivityCallback = Callable[[str, str, str, str, str | None], None]
@@ -95,11 +107,139 @@ PRESENTATION_ONLY_FINDINGS = {
     "unknown_evidence_ref",
     "unregistered_report_artifact",
 }
+INPUT_VISUAL_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp"}
+POTENTIALLY_VISUAL_DOCUMENT_SUFFIXES = {
+    ".pdf",
+    ".tif",
+    ".tiff",
+    ".ppt",
+    ".pptx",
+    ".doc",
+    ".docx",
+    ".xlsx",
+    ".zip",
+}
+MAX_INPUT_VISUALS = 20
+MAX_INPUT_VISUAL_SOURCE_BYTES = 64 * 1024 * 1024
+MAX_INPUT_ARCHIVE_BYTES = 128 * 1024 * 1024
+MAX_INPUT_VISUAL_PIXELS = 100_000_000
 
 
 def _cancel_checkpoint(cancel_event: threading.Event | None) -> None:
     if cancel_event is not None and cancel_event.is_set():
         raise asyncio.CancelledError
+
+
+def _visible_tool_call(tool_name: str, arguments: dict) -> str:
+    """Describe an allowed tool request without exposing code, tokens, or secrets."""
+
+    parts: list[str] = []
+    for key in ("pmid", "repository", "max_results", "max_matches", "timeout_seconds"):
+        value = arguments.get(key)
+        if key == "pmid" and isinstance(value, str) and value.isdigit():
+            parts.append(f"pmid={value}")
+        elif key == "repository" and value in {"cran", "bioconductor"}:
+            parts.append(f"repository={value}")
+        elif isinstance(value, int | float | bool):
+            parts.append(f"{key}={value}")
+    for key in (
+        "query",
+        "pattern",
+        "path",
+        "filename",
+        "citekey",
+        "libraryName",
+        "libraryId",
+    ):
+        value = arguments.get(key)
+        if isinstance(value, str) and value:
+            encoded = value.encode("utf-8")
+            suffix = Path(value).suffix.lower() if key in {"path", "filename"} else ""
+            parts.append(
+                f"{key}={len(encoded)} bytes, sha256 "
+                f"{hashlib.sha256(encoded).hexdigest()[:12]}…"
+                + (f", type {suffix}" if suffix else "")
+            )
+    packages = arguments.get("packages")
+    if isinstance(packages, list) and all(isinstance(item, str) for item in packages):
+        encoded = json.dumps(packages, sort_keys=True).encode("utf-8")
+        parts.append(
+            f"packages={len(packages)}, sha256 {hashlib.sha256(encoded).hexdigest()[:12]}…"
+        )
+    url = arguments.get("url")
+    if isinstance(url, str) and url:
+        parsed = urlsplit(url)
+        try:
+            port = f":{parsed.port}" if parsed.port else ""
+        except ValueError:
+            port = ""
+        origin = (
+            f"{parsed.scheme}://{parsed.hostname}" + port
+            if parsed.scheme in {"http", "https"} and parsed.hostname
+            else "unclassified"
+        )
+        parts.append(f"url_origin={origin!r}")
+    code = arguments.get("code")
+    if isinstance(code, str):
+        encoded = code.encode("utf-8")
+        parts.append(
+            f"code={len(encoded)} bytes, sha256 {hashlib.sha256(encoded).hexdigest()[:12]}…"
+        )
+    suffix = "; ".join(parts)
+    return f"Requested {tool_name}" + (f" — {suffix}" if suffix else "")
+
+
+def _visible_tool_result(tool_name: str, result) -> tuple[str, str | None]:
+    """Summarize an observable result and select one safe supporting artifact."""
+
+    if not isinstance(result, dict):
+        return f"{tool_name} returned {type(result).__name__}", None
+    status = str(
+        result.get("status") or ("failed" if result.get("error") else "completed")
+    )
+    details: list[str] = []
+    for key in (
+        "execution_id",
+        "duration_seconds",
+        "calls_remaining",
+        "full_text_status",
+        "result_count",
+    ):
+        value = result.get(key)
+        if isinstance(value, str | int | float | bool):
+            details.append(f"{key}={value}")
+    for key in ("articles", "matches", "results"):
+        value = result.get(key)
+        if isinstance(value, list):
+            details.append(f"{key}={len(value)}")
+    artifact_path: str | None = None
+    artifacts = result.get("artifacts")
+    if isinstance(artifacts, list):
+        candidates = [item for item in artifacts if isinstance(item, dict)]
+        preferred = next(
+            (
+                item
+                for item in candidates
+                if item.get("description") == "captured standard error"
+                and status != "succeeded"
+            ),
+            None,
+        ) or next(
+            (
+                item
+                for item in candidates
+                if str(item.get("description", "")).endswith("analysis source")
+            ),
+            None,
+        )
+        if isinstance(preferred, dict) and isinstance(preferred.get("path"), str):
+            artifact_path = preferred["path"]
+        details.append(f"artifacts={len(artifacts)}")
+    suffix = "; ".join(details)
+    return (
+        f"{tool_name}: {status}" + (f" — {suffix}" if suffix else ""),
+        artifact_path,
+    )
 
 
 class ResearchBudgetExceeded(RuntimeError):
@@ -282,6 +422,639 @@ def _merge_reviews(
             dict.fromkeys([*report_review.evidence_refs, *display_review.evidence_refs])
         ),
     )
+
+
+def _bounded_visual_batches(
+    images: list[Path], figure_inputs: list[dict]
+) -> tuple[list[tuple[list[Path], list[dict]]], list[str]]:
+    """Pair images with metadata and respect both request count and byte limits."""
+
+    if len(images) != len(figure_inputs):
+        raise ValueError("visual image and metadata counts differ")
+    batches: list[tuple[list[Path], list[dict]]] = []
+    rejected: list[str] = []
+    current_images: list[Path] = []
+    current_inputs: list[dict] = []
+    current_bytes = 0
+    for path, item in zip(images, figure_inputs, strict=True):
+        size = path.stat().st_size if path.is_file() else 0
+        if size < 1 or size > MAX_IMAGE_BYTES:
+            rejected.append(str(item["display_id"]))
+            continue
+        if current_images and (
+            len(current_images) >= MAX_IMAGE_COUNT
+            or current_bytes + size > MAX_TOTAL_IMAGE_BYTES
+        ):
+            batches.append((current_images, current_inputs))
+            current_images, current_inputs, current_bytes = [], [], 0
+        current_images.append(path)
+        current_inputs.append(item)
+        current_bytes += size
+    if current_images:
+        batches.append((current_images, current_inputs))
+    return batches, rejected
+
+
+def _input_visual_output_key(path: Path) -> str | None:
+    parts = list(path.parts)
+    lowered = [part.casefold() for part in parts]
+    for index in range(len(parts) - 2, -1, -1):
+        if lowered[index : index + 2] == ["output", "visual-review"]:
+            return "/".join(["visual-review", *parts[index + 2 :]])
+    return None
+
+
+def _task_requests_visual_evidence(task: TaskSpec) -> bool:
+    text = " ".join([task.objective, *task.deliverables, *task.constraints]).casefold()
+    return any(
+        marker in text
+        for marker in (
+            "figure",
+            "image",
+            "visual",
+            "scan",
+            "slide",
+            "tiff",
+            "manuscript",
+            "proof pdf",
+            "layout",
+        )
+    )
+
+
+def _visual_output_stem(value: str) -> str:
+    label = re.sub(r"[^A-Za-z0-9._-]+", "-", Path(value).stem).strip("-._")
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:10]
+    return f"{label[:48] or 'visual'}-{digest}"
+
+
+def _valid_model_raster(path: Path) -> bool:
+    try:
+        if path.stat().st_size < 1 or path.stat().st_size > MAX_IMAGE_BYTES:
+            return False
+        with Image.open(path) as image:
+            return (
+                image.format in {"PNG", "JPEG", "WEBP"}
+                and image.width * image.height <= MAX_INPUT_VISUAL_PIXELS
+            )
+    except (
+        OSError,
+        ValueError,
+        UnidentifiedImageError,
+        Image.DecompressionBombError,
+    ):
+        return False
+
+
+def _convert_image_frames(
+    source: Path | BytesIO,
+    destination: Path,
+    label: str,
+    remaining: int,
+) -> tuple[list[Path], list[str]]:
+    outputs: list[Path] = []
+    failures: list[str] = []
+    try:
+        with Image.open(source) as opened:
+            frame_count = min(int(getattr(opened, "n_frames", 1)), remaining)
+            for frame_index in range(frame_count):
+                opened.seek(frame_index)
+                if opened.width * opened.height > MAX_INPUT_VISUAL_PIXELS:
+                    failures.append(
+                        f"{label} frame {frame_index + 1} exceeds the pixel limit"
+                    )
+                    continue
+                frame = opened.convert("RGBA")
+                background = Image.new("RGBA", frame.size, "white")
+                background.alpha_composite(frame)
+                output = destination / (
+                    f"{_visual_output_stem(label)}-frame-{frame_index + 1}.png"
+                )
+                background.convert("RGB").save(output, format="PNG", dpi=(150, 150))
+                output.chmod(0o600)
+                outputs.append(output)
+    except (
+        OSError,
+        ValueError,
+        UnidentifiedImageError,
+        Image.DecompressionBombError,
+    ) as exc:
+        failures.append(f"{label} could not be converted ({type(exc).__name__})")
+    return outputs, failures
+
+
+def _render_pdf_pages(
+    source: Path,
+    destination: Path,
+    label: str,
+    remaining: int,
+    pdftoppm: Path,
+) -> tuple[list[Path], list[str]]:
+    if remaining < 1:
+        return [], []
+    if not pdftoppm.is_file() or not os.access(pdftoppm, os.X_OK):
+        return [], [f"{label} could not be rendered (pdftoppm unavailable)"]
+    prefix = destination / _visual_output_stem(label)
+    try:
+        completed = subprocess.run(
+            [
+                str(pdftoppm),
+                "-png",
+                "-r",
+                "150",
+                "-f",
+                "1",
+                "-l",
+                str(remaining),
+                str(source),
+                str(prefix),
+            ],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=180,
+            check=False,
+            env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"},
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return [], [f"{label} could not be rendered ({type(exc).__name__})"]
+    outputs = sorted(destination.glob(f"{prefix.name}-*.png"))[:remaining]
+    for output in outputs:
+        output.chmod(0o600)
+    if completed.returncode != 0 or not outputs:
+        for output in outputs:
+            output.unlink(missing_ok=True)
+        return [], [f"{label} could not be rendered (pdftoppm failed)"]
+    return outputs, []
+
+
+def _prepare_workspace_visual_rasters(
+    settings: Settings,
+    task: TaskSpec,
+    run_dir: Path,
+) -> tuple[Path | None, list[str]]:
+    """Deterministically convert bounded TIFF/PDF/archive inputs for Gemma."""
+
+    if not _task_requests_visual_evidence(task):
+        return None, []
+    destination = run_dir / "input-visuals"
+    destination.mkdir(parents=True, mode=0o700, exist_ok=True)
+    manifest_path = run_dir / "input_visual_render.json"
+    if manifest_path.is_file():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            failures = manifest.get("failures", [])
+            if isinstance(failures, list) and all(
+                isinstance(item, str) for item in failures
+            ):
+                return destination, failures
+        except (OSError, ValueError, TypeError):
+            pass
+    failures: list[str] = []
+    produced: list[Path] = []
+    workspace = settings.workspace.resolve()
+    sources = [
+        path
+        for path in sorted(workspace.rglob("*"))
+        if path.is_file()
+        and not path.is_symlink()
+        and path.resolve().is_relative_to(workspace)
+    ]
+    priority = {
+        ".tif": 0,
+        ".tiff": 0,
+        ".zip": 1,
+        ".docx": 1,
+        ".pptx": 1,
+        ".xlsx": 1,
+        ".pdf": 2,
+    }
+    sources.sort(key=lambda path: (priority.get(path.suffix.casefold(), 3), str(path)))
+
+    def remaining() -> int:
+        return max(0, MAX_INPUT_VISUALS - len(produced))
+
+    for source in sources:
+        if remaining() < 1:
+            failures.append(
+                "Additional visual inputs were not rendered because the input-visual limit was reached"
+            )
+            break
+        suffix = source.suffix.casefold()
+        relative = source.relative_to(workspace).as_posix()
+        if suffix in {".tif", ".tiff"}:
+            if source.stat().st_size > MAX_INPUT_VISUAL_SOURCE_BYTES:
+                failures.append(
+                    f"/workspace/{relative} exceeds the conversion size limit"
+                )
+                continue
+            converted, errors = _convert_image_frames(
+                source, destination, f"workspace-{relative}", remaining()
+            )
+            produced.extend(converted)
+            failures.extend(errors)
+        elif suffix == ".pdf":
+            if source.stat().st_size > MAX_INPUT_VISUAL_SOURCE_BYTES:
+                failures.append(f"/workspace/{relative} exceeds the PDF size limit")
+                continue
+            converted, errors = _render_pdf_pages(
+                source,
+                destination,
+                f"workspace-{relative}",
+                remaining(),
+                settings.literature.pdftoppm,
+            )
+            produced.extend(converted)
+            failures.extend(errors)
+        elif suffix in {".zip", ".docx", ".pptx", ".xlsx"}:
+            if source.stat().st_size > MAX_INPUT_ARCHIVE_BYTES:
+                failures.append(f"/workspace/{relative} exceeds the archive size limit")
+                continue
+            try:
+                with zipfile.ZipFile(source) as archive:
+                    total_uncompressed = 0
+                    for member in sorted(
+                        archive.infolist(), key=lambda item: item.filename
+                    ):
+                        if remaining() < 1:
+                            break
+                        member_suffix = Path(member.filename).suffix.casefold()
+                        if member_suffix not in INPUT_VISUAL_SUFFIXES | {
+                            ".tif",
+                            ".tiff",
+                            ".pdf",
+                        }:
+                            continue
+                        if (
+                            member.is_dir()
+                            or member.file_size < 1
+                            or member.file_size > MAX_INPUT_VISUAL_SOURCE_BYTES
+                        ):
+                            failures.append(
+                                f"{relative}:{member.filename} is outside member size limits"
+                            )
+                            continue
+                        total_uncompressed += member.file_size
+                        if total_uncompressed > MAX_INPUT_ARCHIVE_BYTES:
+                            failures.append(
+                                f"/workspace/{relative} exceeds the uncompressed archive limit"
+                            )
+                            break
+                        if (
+                            member.compress_size
+                            and member.file_size / member.compress_size > 200
+                        ):
+                            failures.append(
+                                f"{relative}:{member.filename} exceeds the compression-ratio limit"
+                            )
+                            continue
+                        data = archive.read(member)
+                        label = f"archive-{relative}-{member.filename}"
+                        if member_suffix == ".pdf":
+                            temporary = (
+                                destination / f"{_visual_output_stem(label)}.pdf"
+                            )
+                            temporary.write_bytes(data)
+                            converted, errors = _render_pdf_pages(
+                                temporary,
+                                destination,
+                                label,
+                                remaining(),
+                                settings.literature.pdftoppm,
+                            )
+                            temporary.unlink(missing_ok=True)
+                        else:
+                            converted, errors = _convert_image_frames(
+                                BytesIO(data), destination, label, remaining()
+                            )
+                        produced.extend(converted)
+                        failures.extend(errors)
+            except (OSError, ValueError, zipfile.BadZipFile) as exc:
+                failures.append(
+                    f"/workspace/{relative} could not be inspected ({type(exc).__name__})"
+                )
+    failures = list(dict.fromkeys(failures))
+    write_json(
+        manifest_path,
+        {
+            "rendered_at": utc_now(),
+            "renderer": "deterministic_controller",
+            "qwen_image_inputs": 0,
+            "outputs": [
+                {
+                    "path": str(path.resolve()),
+                    "sha256": sha256_file(path),
+                    "bytes": path.stat().st_size,
+                }
+                for path in produced
+                if path.is_file()
+            ],
+            "failures": failures,
+        },
+    )
+    return destination, failures
+
+
+def _collect_input_visuals(
+    workspace: Path,
+    computation: ComputationEvidence,
+    task: TaskSpec,
+    rendered_dir: Path | None = None,
+) -> tuple[list[Path], list[dict], list[str]]:
+    """Collect direct inputs and latest Qwen-rendered rasters without interpreting them."""
+
+    candidates: dict[str, tuple[Path, dict]] = {}
+    pre_omitted: list[str] = []
+    workspace = workspace.resolve()
+    visual_documents: list[Path] = []
+    for path in sorted(workspace.rglob("*")):
+        if not path.is_file() or path.is_symlink():
+            continue
+        resolved = path.resolve()
+        if not resolved.is_relative_to(workspace):
+            continue
+        suffix = resolved.suffix.casefold()
+        relative = resolved.relative_to(workspace).as_posix()
+        if suffix in INPUT_VISUAL_SUFFIXES:
+            if not _valid_model_raster(resolved):
+                pre_omitted.append(
+                    f"/workspace/{relative} (invalid or oversized model raster)"
+                )
+                continue
+            key = f"workspace/{relative}"
+            candidates[key] = (
+                resolved,
+                {
+                    "display_id": key,
+                    "artifact_path": f"/workspace/{relative}",
+                    "sha256": sha256_file(resolved),
+                    "source": "immutable_workspace_input",
+                    "bytes": resolved.stat().st_size,
+                },
+            )
+        elif suffix in POTENTIALLY_VISUAL_DOCUMENT_SUFFIXES:
+            visual_documents.append(resolved)
+
+    for artifact in computation.artifacts:
+        path = Path(artifact.path)
+        key = _input_visual_output_key(path)
+        if key is None or path.suffix.casefold() not in INPUT_VISUAL_SUFFIXES:
+            continue
+        resolved = path.resolve()
+        if (
+            not resolved.is_file()
+            or resolved.is_symlink()
+            or sha256_file(resolved) != artifact.sha256
+            or not _valid_model_raster(resolved)
+        ):
+            pre_omitted.append(
+                f"{artifact.path} (invalid, oversized, or hash-mismatched raster)"
+            )
+            continue
+        candidates[key] = (
+            resolved,
+            {
+                "display_id": key,
+                "artifact_path": artifact.path,
+                "sha256": artifact.sha256,
+                "source": "qwen_deterministic_render_for_gemma",
+                "bytes": resolved.stat().st_size,
+            },
+        )
+
+    if rendered_dir is not None and rendered_dir.is_dir():
+        for path in sorted(rendered_dir.glob("*.png")):
+            if not path.is_file() or path.is_symlink():
+                continue
+            resolved = path.resolve()
+            if not _valid_model_raster(resolved):
+                pre_omitted.append(
+                    f"{resolved} (controller render is not a valid model raster)"
+                )
+                continue
+            key = f"controller/{path.name}"
+            candidates[key] = (
+                resolved,
+                {
+                    "display_id": key,
+                    "artifact_path": str(resolved),
+                    "sha256": sha256_file(resolved),
+                    "source": "controller_deterministic_input_render",
+                    "bytes": resolved.stat().st_size,
+                },
+            )
+
+    ordered = [candidates[key] for key in sorted(candidates)]
+    omitted = [*pre_omitted]
+    omitted.extend(
+        f"{item[1]['artifact_path']} (input-visual limit reached)"
+        for item in ordered[MAX_INPUT_VISUALS:]
+    )
+    ordered = ordered[:MAX_INPUT_VISUALS]
+
+    if _task_requests_visual_evidence(task):
+        rendered_names = " ".join(candidates).casefold()
+        for document in visual_documents:
+            relative = document.relative_to(workspace).as_posix()
+            stem = document.stem.casefold()
+            if stem and stem in rendered_names:
+                omitted.append(
+                    f"/workspace/{relative} (only explicitly rendered pages/panels "
+                    "were visually reviewed; complete-document coverage is unverified)"
+                )
+            else:
+                omitted.append(
+                    f"/workspace/{relative} (no Gemma-compatible page/panel raster "
+                    "was produced)"
+                )
+
+    return (
+        [item[0] for item in ordered],
+        [item[1] for item in ordered],
+        omitted,
+    )
+
+
+async def _review_input_visual_evidence(
+    settings: Settings,
+    planning: PlanningResult,
+    computation: ComputationEvidence,
+    research_packet: str,
+    run_dir: Path,
+    *,
+    live_dir: Path | None = None,
+    activity: ActivityCallback | None = None,
+    cancel_event: threading.Event | None = None,
+) -> VisualEvidenceReport | None:
+    """Route source rasters only to Gemma and cache observations by exact hashes."""
+
+    rendered_dir, render_failures = _prepare_workspace_visual_rasters(
+        settings, planning.master_plan.task, run_dir
+    )
+    images, inputs, unreviewed = _collect_input_visuals(
+        settings.workspace,
+        computation,
+        planning.master_plan.task,
+        rendered_dir,
+    )
+    unreviewed = [*render_failures, *unreviewed]
+    if not images and not unreviewed:
+        return None
+    cache_path = run_dir / "gemma_input_visual_review.json"
+    fingerprint = [
+        {"artifact_path": item["artifact_path"], "sha256": item["sha256"]}
+        for item in inputs
+    ]
+    if cache_path.is_file():
+        try:
+            cached = json.loads(cache_path.read_text(encoding="utf-8"))
+            attempted = cached.get("batches_attempted")
+            succeeded = cached.get("batches_succeeded")
+            if (
+                cached.get("visual_inputs") == fingerprint
+                and isinstance(attempted, int)
+                and isinstance(succeeded, int)
+                and attempted == succeeded
+            ):
+                report = VisualEvidenceReport.model_validate(cached.get("report"))
+                if activity is not None:
+                    activity(
+                        "artifact_ready",
+                        "Controller",
+                        "research",
+                        "Unchanged Gemma input-visual evidence was reused",
+                        str(cache_path),
+                    )
+                return report
+        except (OSError, ValueError, TypeError):
+            pass
+
+    visible_path: Path | None = None
+    visible_bytes = 0
+    visible_announced = False
+    if live_dir is not None:
+        live_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
+        visible_path = live_dir / "gemma_input_visual_visible_output.txt"
+        visible_path.write_text("", encoding="utf-8")
+        visible_path.chmod(0o600)
+
+    def record_visible_text(text: str) -> None:
+        nonlocal visible_bytes, visible_announced
+        if visible_path is None or visible_bytes >= 120_000:
+            return
+        encoded = text.encode("utf-8")
+        chunk = encoded[: 120_000 - visible_bytes].decode("utf-8", errors="ignore")
+        with visible_path.open("a", encoding="utf-8") as handle:
+            handle.write(chunk)
+        visible_bytes += len(chunk.encode("utf-8"))
+        if activity is not None and not visible_announced:
+            visible_announced = True
+            activity(
+                "model_output_stream",
+                "Gemma",
+                "research",
+                "Gemma source-image observations are updating",
+                str(visible_path),
+            )
+
+    batches, rejected = _bounded_visual_batches(images, inputs)
+    all_observations = []
+    cross_findings: list[str] = []
+    limitations: list[str] = []
+    missing = [
+        *unreviewed,
+        *[f"{item} (image size outside model limits)" for item in rejected],
+    ]
+    attempted = len(batches)
+    succeeded = 0
+    for batch_number, (batch_images, batch_inputs) in enumerate(batches, start=1):
+        _cancel_checkpoint(cancel_event)
+        allowed_paths = {str(item["artifact_path"]) for item in batch_inputs}
+        try:
+            result = await request_structured(
+                settings.gemma,
+                system_prompt=INPUT_VISUAL_AUDITOR,
+                payload={
+                    "task": planning.master_plan.task.model_dump(mode="json"),
+                    "research_context": research_packet[:20_000],
+                    "visual_inputs": [
+                        {
+                            key: value
+                            for key, value in item.items()
+                            if key != "display_id"
+                        }
+                        for item in batch_inputs
+                    ],
+                    "visual_input_order": [
+                        item["artifact_path"] for item in batch_inputs
+                    ],
+                    "batch": {"number": batch_number, "total": len(batches)},
+                },
+                output_type=VisualEvidenceReport,
+                temperature=settings.gemma.temperature,
+                timeout=240,
+                image_paths=tuple(batch_images),
+                on_visible_text=record_visible_text,
+                cancel_event=cancel_event,
+            )
+            succeeded += 1
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            missing.extend(
+                f"{item['artifact_path']} (Gemma review unavailable: {type(exc).__name__})"
+                for item in batch_inputs
+            )
+            continue
+        observed_paths: set[str] = set()
+        for observation in result.observations:
+            if observation.artifact_path not in allowed_paths:
+                limitations.append(
+                    "Gemma returned an observation for an unsupplied artifact path; "
+                    "the observation was discarded."
+                )
+                continue
+            observed_paths.add(observation.artifact_path)
+            all_observations.append(observation)
+        missing.extend(
+            f"{path} (Gemma returned no structured observation)"
+            for path in sorted(allowed_paths - observed_paths)
+        )
+        cross_findings.extend(result.cross_artifact_findings)
+        limitations.extend(result.limitations)
+        missing.extend(result.unreviewed_requests)
+
+    report = VisualEvidenceReport(
+        observations=all_observations,
+        cross_artifact_findings=list(dict.fromkeys(cross_findings)),
+        limitations=list(dict.fromkeys(limitations)),
+        unreviewed_requests=list(dict.fromkeys(missing)),
+    )
+    write_json(
+        cache_path,
+        {
+            "audited_at": utc_now(),
+            "critic_model": settings.gemma.model if succeeded else None,
+            "review_source": (
+                "gemma_multimodal_input_critic" if succeeded else "controller_gate"
+            ),
+            "batches_attempted": attempted,
+            "batches_succeeded": succeeded,
+            "visual_critic": "Gemma",
+            "qwen_image_inputs": 0,
+            "visual_inputs": fingerprint,
+            "report": report.model_dump(mode="json"),
+        },
+    )
+    if activity is not None:
+        activity(
+            "artifact_ready",
+            "Controller",
+            "research",
+            "Gemma-only source-image evidence is available",
+            str(cache_path),
+        )
+    return report
 
 
 def _figures_missing_ocr(display_inputs: list[dict]) -> list[str]:
@@ -603,6 +1376,14 @@ def _merge_computation_evidence(
     )
 
 
+def _merge_controller_artifacts(
+    current: tuple[ArtifactRef, ...], updates: tuple[ArtifactRef, ...]
+) -> tuple[ArtifactRef, ...]:
+    by_path = {artifact.path: artifact for artifact in current}
+    by_path.update({artifact.path: artifact for artifact in updates})
+    return tuple(by_path[path] for path in sorted(by_path))
+
+
 def _compact_computation_summary(computation: ComputationEvidence) -> dict:
     """Keep audit evidence complete without replaying non-evidence file records."""
 
@@ -718,7 +1499,12 @@ async def _produce_report(
     activity: ActivityCallback | None = None,
     phase_progress: Callable[[str, str], None] | None = None,
     cancel_event: threading.Event | None = None,
-) -> tuple[ScientificReport, RetrievalEvidence, ComputationEvidence]:
+) -> tuple[
+    ScientificReport,
+    RetrievalEvidence,
+    ComputationEvidence,
+    tuple[ArtifactRef, ...],
+]:
     _cancel_checkpoint(cancel_event)
     toolsets = build_mcp_toolsets(settings, mcp_names) if mcp_names else []
     workspace_tools = build_workspace_tools(settings.workspace)
@@ -788,7 +1574,7 @@ async def _produce_report(
                     f"{tool_name}: {status}",
                     None,
                 )
-                if activity is not None
+                if activity is not None and event_type == "tool_policy"
                 else None
             )
         ),
@@ -798,6 +1584,14 @@ async def _produce_report(
         name = getattr(tool, "name", type(tool).__name__)
         research_budget.record_tool_call(name, args, cancel_event)
         policy_response = policy.before_tool(tool, args, tool_context)
+        if activity is not None and policy_response is None:
+            activity(
+                "tool_call",
+                "Qwen",
+                "research",
+                _visible_tool_call(name, args),
+                None,
+            )
         if policy_response is not None:
             research_budget.record_tool_result(
                 name, args, policy_response, cancel_event
@@ -807,12 +1601,24 @@ async def _produce_report(
     def after_research_tool(tool, args: dict, tool_context, tool_response):
         name = getattr(tool, "name", type(tool).__name__)
         policy_response = policy.after_tool(tool, args, tool_context, tool_response)
+        observed_result = (
+            policy_response if policy_response is not None else tool_response
+        )
         research_budget.record_tool_result(
             name,
             args,
-            policy_response if policy_response is not None else tool_response,
+            observed_result,
             cancel_event,
         )
+        if activity is not None:
+            message, artifact_path = _visible_tool_result(name, observed_result)
+            activity(
+                "tool_result",
+                "Qwen",
+                "research",
+                message,
+                artifact_path,
+            )
         return policy_response
 
     repairing = prior_report is not None
@@ -1024,14 +1830,54 @@ async def _produce_report(
     effective_computation = _merge_computation_evidence(
         existing_computation, computation
     )
+    input_visual_evidence: VisualEvidenceReport | None = None
+    input_visual_artifacts: tuple[ArtifactRef, ...] = ()
+    if live_dir is not None:
+        if phase_progress is not None and _task_requests_visual_evidence(
+            planning.master_plan.task
+        ):
+            phase_progress(
+                "research",
+                "Gemma is inspecting source images rendered without Qwen vision",
+            )
+        input_visual_evidence = await _review_input_visual_evidence(
+            settings,
+            planning,
+            effective_computation,
+            research_packet,
+            live_dir.parent,
+            live_dir=live_dir,
+            activity=activity,
+            cancel_event=cancel_event,
+        )
+        input_visual_path = live_dir.parent / "gemma_input_visual_review.json"
+        if input_visual_evidence is not None and input_visual_path.is_file():
+            input_visual_artifacts = (
+                ArtifactRef(
+                    path=str(input_visual_path.resolve()),
+                    sha256=sha256_file(input_visual_path),
+                    description=(
+                        "controller-recorded Gemma-only input visual evidence"
+                    ),
+                ),
+            )
+    effective_controller_artifacts = _merge_controller_artifacts(
+        controller_artifacts, input_visual_artifacts
+    )
     report_payload = {
         **payload,
         "research_packet": research_packet,
         "retrieval_evidence": effective_retrieval.model_dump(mode="json"),
         "computation_evidence": _compact_computation_summary(effective_computation),
+        "gemma_input_visual_evidence": (
+            input_visual_evidence.model_dump(mode="json")
+            if input_visual_evidence is not None
+            else None
+        ),
         "controller_evidence": {
             "artifacts": [
-                artifact.model_dump(mode="json") for artifact in controller_artifacts
+                artifact.model_dump(mode="json")
+                for artifact in effective_controller_artifacts
             ],
             "recorded_dates": list(controller_dates),
         },
@@ -1120,7 +1966,7 @@ async def _produce_report(
                 "Structured article draft is available",
                 str(draft_path),
             )
-    return report, retrieval, computation
+    return report, retrieval, computation, input_visual_artifacts
 
 
 async def _audit_report(
@@ -1136,9 +1982,9 @@ async def _audit_report(
     cancel_event: threading.Event | None = None,
     on_visible_text: Callable[[str], None] | None = None,
     audit_outputs: dict[str, VerificationReport] | None = None,
+    audit_metadata: dict[str, int] | None = None,
 ) -> VerificationReport:
     _cancel_checkpoint(cancel_event)
-    _, display_inputs = prepare_display_audit(report, computation)
     acquired_article_evidence = build_acquired_article_audit(report, retrieval)
     payload = {
         "task": planning.master_plan.task.model_dump(mode="json"),
@@ -1158,10 +2004,8 @@ async def _audit_report(
             "After this audit, the deterministic controller writes run artifacts "
             "and generates manifest.json with SHA-256 hashes."
         ),
-        "display_inputs": display_inputs,
-        "visual_input_order": [
-            item["display_id"] for item in display_inputs if item["kind"] == "figure"
-        ],
+        "display_inputs": [],
+        "visual_input_order": [],
     }
     report_result = await request_structured(
         settings.gemma,
@@ -1176,68 +2020,120 @@ async def _audit_report(
     if audit_outputs is not None:
         audit_outputs["gemma_report"] = report_result
     _cancel_checkpoint(cancel_event)
-    if not display_inputs:
-        return report_result
-
-    display_payload = {
-        "task_objective": planning.master_plan.task.objective,
-        "deterministic_validation": validation.model_dump(mode="json"),
-        "displays": [display.model_dump(mode="json") for display in report.displays],
-        "article_context": {
-            "results": report.results,
-            "discussion": report.discussion,
-            "conclusions": report.conclusions,
-        },
-        "display_inputs": display_inputs,
-        "visual_input_order": [
-            item["display_id"] for item in display_inputs if item["kind"] == "figure"
-        ],
-    }
-    missing_ocr = _figures_missing_ocr(display_inputs)
-    if missing_ocr:
+    try:
+        display_images, display_inputs = prepare_display_audit(report, computation)
+    except (OSError, ValueError, Image.DecompressionBombError) as exc:
+        if audit_metadata is not None:
+            audit_metadata["display_inputs_invalid"] = 1
         display_result = VerificationReport(
             verdict="inconclusive",
             unsupported_claims=[
-                "Pixel-level review is unavailable and controller OCR is missing "
-                "or empty for figure display(s): "
-                f"{', '.join(missing_ocr)}. No display approval is inferred."
+                "Registered display inputs failed deterministic preparation "
+                f"({type(exc).__name__}); the completed article audit is preserved, "
+                "but no display approval is inferred."
+            ],
+        )
+        if audit_outputs is not None:
+            audit_outputs["gemma_display"] = display_result
+        return _merge_reviews(report_result, display_result)
+    if not display_inputs:
+        return report_result
+
+    figure_inputs = [item for item in display_inputs if item["kind"] == "figure"]
+    table_inputs = [item for item in display_inputs if item["kind"] == "table"]
+    if len(display_images) != len(figure_inputs):
+        display_result = VerificationReport(
+            verdict="inconclusive",
+            unsupported_claims=[
+                "Gemma-only visual review could not map every registered figure "
+                "record to one raster input. No display approval is inferred."
             ],
         )
     else:
         if on_visible_text is not None:
-            on_visible_text("\n\n--- independent OCR/geometry display audit ---\n\n")
-        try:
-            display_result = await request_structured(
-                settings.gemma,
-                system_prompt=(
-                    DISPLAY_AUDITOR
-                    + """
-
-Invocation mode (overrides any instruction above to inspect supplied rasters or
-visible pixels): no raster bytes are supplied. The producer identity is withheld.
-Judge figures only from controller-extracted `ocr` text and geometry metadata in
-display_inputs, and judge tables only from their bounded previews. Never claim to
-have viewed an image or infer a visual feature absent from those records. Return
-inconclusive if the supplied OCR/geometry is insufficient for a requested check."""
-                ),
-                payload=display_payload,
-                output_type=VerificationReport,
-                temperature=settings.gemma.temperature,
-                timeout=120 if simple_mode else 240,
-                on_visible_text=on_visible_text,
-                cancel_event=cancel_event,
+            on_visible_text(
+                "\n\n--- independent Gemma multimodal display audit ---\n\n"
             )
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            display_result = VerificationReport(
-                verdict="inconclusive",
-                unsupported_claims=[
-                    "Independent display review unavailable "
-                    f"({type(exc).__name__}); article review is preserved but no "
-                    "display approval is inferred."
+        display_results: list[VerificationReport] = []
+        image_batches, rejected_figures = _bounded_visual_batches(
+            display_images, figure_inputs
+        )
+        if not image_batches and table_inputs:
+            image_batches = [([], [])]
+        if audit_metadata is not None:
+            audit_metadata["display_batches_attempted"] = len(image_batches)
+            audit_metadata["display_batches_succeeded"] = 0
+        if rejected_figures:
+            display_results.append(
+                VerificationReport(
+                    verdict="inconclusive",
+                    unsupported_claims=[
+                        "Gemma visual review could not receive figure(s) outside "
+                        "the bounded per-image request size: "
+                        + ", ".join(rejected_figures)
+                    ],
+                )
+            )
+        for batch_number, (batch_images, batch_figures) in enumerate(
+            image_batches, start=1
+        ):
+            _cancel_checkpoint(cancel_event)
+            batch_inputs = [*batch_figures]
+            if batch_number == 1:
+                batch_inputs.extend(table_inputs)
+            batch_display_ids = {str(item["display_id"]) for item in batch_inputs}
+            display_payload = {
+                "task_objective": planning.master_plan.task.objective,
+                "deterministic_validation": validation.model_dump(mode="json"),
+                "displays": [
+                    display.model_dump(mode="json")
+                    for display in report.displays
+                    if display.display_id in batch_display_ids
                 ],
-            )
+                "article_context": {
+                    "results": report.results,
+                    "discussion": report.discussion,
+                    "conclusions": report.conclusions,
+                },
+                "display_inputs": batch_inputs,
+                "visual_input_order": [item["display_id"] for item in batch_figures],
+                "batch": {
+                    "number": batch_number,
+                    "total": len(image_batches),
+                },
+            }
+            try:
+                model_result = await request_structured(
+                    settings.gemma,
+                    system_prompt=DISPLAY_AUDITOR,
+                    payload=display_payload,
+                    output_type=VerificationReport,
+                    temperature=settings.gemma.temperature,
+                    timeout=120 if simple_mode else 240,
+                    image_paths=tuple(batch_images),
+                    on_visible_text=on_visible_text,
+                    cancel_event=cancel_event,
+                )
+                display_results.append(model_result)
+                if audit_metadata is not None:
+                    audit_metadata["display_batches_succeeded"] += 1
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                display_results.append(
+                    VerificationReport(
+                        verdict="inconclusive",
+                        unsupported_claims=[
+                            "Independent Gemma display review batch "
+                            f"{batch_number}/{len(image_batches)} unavailable "
+                            f"({type(exc).__name__}); article review is preserved "
+                            "but no display approval is inferred."
+                        ],
+                    )
+                )
+        display_result = display_results[0]
+        for subsequent_result in display_results[1:]:
+            display_result = _merge_reviews(display_result, subsequent_result)
     if audit_outputs is not None:
         audit_outputs["gemma_display"] = display_result
     _cancel_checkpoint(cancel_event)
@@ -1289,6 +2185,11 @@ async def _audit_report_resilient(
 
     try:
         audit_outputs: dict[str, VerificationReport] = {}
+        audit_metadata: dict[str, int] = {
+            "display_batches_attempted": 0,
+            "display_batches_succeeded": 0,
+            "display_inputs_invalid": 0,
+        }
         result = await _audit_report(
             settings,
             planning,
@@ -1302,6 +2203,7 @@ async def _audit_report_resilient(
             cancel_event=cancel_event,
             on_visible_text=record_visible_text,
             audit_outputs=audit_outputs,
+            audit_metadata=audit_metadata,
         )
         if live_dir is not None:
             live_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
@@ -1314,7 +2216,10 @@ async def _audit_report_resilient(
                 write_json(display_review_path, display_review)
             review_path = live_dir / "gemma_scientific_review.json"
             write_json(review_path, result)
-            _, display_inputs = prepare_display_audit(report, computation)
+            try:
+                _, display_inputs = prepare_display_audit(report, computation)
+            except (OSError, ValueError, Image.DecompressionBombError):
+                display_inputs = []
             figure_text_inputs = []
             for item in display_inputs:
                 if item["kind"] != "figure":
@@ -1351,19 +2256,49 @@ async def _audit_report_resilient(
             ]
             display_audit_path: Path | None = None
             if display_review is not None:
-                missing_ocr = _figures_missing_ocr(display_inputs)
                 display_audit_path = live_dir.parent / "gemma_display_audit.json"
+                attempted = audit_metadata["display_batches_attempted"]
+                succeeded = audit_metadata["display_batches_succeeded"]
+                multimodal = bool(figure_text_inputs)
+                if succeeded == 0:
+                    critic_model = None
+                    review_source = "controller_gate"
+                    if audit_metadata["display_inputs_invalid"]:
+                        review_mode = "invalid_display_inputs"
+                    else:
+                        review_mode = (
+                            "multimodal_unavailable"
+                            if multimodal
+                            else "table_review_unavailable"
+                        )
+                else:
+                    critic_model = settings.gemma.model
+                    if multimodal:
+                        review_source = (
+                            "gemma_multimodal_critic"
+                            if succeeded == attempted
+                            else "gemma_multimodal_critic_partial"
+                        )
+                    else:
+                        review_source = "gemma_table_critic"
+                    review_mode = (
+                        "raster_with_ocr_geometry_and_table_previews"
+                        if multimodal
+                        else "table_previews"
+                    )
                 write_json(
                     display_audit_path,
                     {
                         "audited_at": utc_now(),
-                        "critic_model": (None if missing_ocr else settings.gemma.model),
-                        "review_source": (
-                            "controller_gate" if missing_ocr else "gemma_text_critic"
-                        ),
-                        "review_mode": "ocr_text_and_geometry",
+                        "critic_model": critic_model,
+                        "review_source": review_source,
+                        "review_mode": review_mode,
+                        "batches_attempted": attempted,
+                        "batches_succeeded": succeeded,
+                        "visual_critic": "Gemma",
+                        "qwen_image_inputs": 0,
                         "verdict": display_review.verdict,
-                        "figures_missing_ocr": missing_ocr,
+                        "figures_missing_ocr": _figures_missing_ocr(display_inputs),
                         "figure_text_inputs": figure_text_inputs,
                         "table_previews": table_previews,
                     },
@@ -1381,7 +2316,7 @@ async def _audit_report_resilient(
                         "artifact_ready",
                         "Controller",
                         "scientific-review",
-                        "Gemma OCR/geometry and table audit inputs were recorded",
+                        "Gemma multimodal display audit inputs were recorded",
                         str(display_audit_path),
                     )
         return result
@@ -1700,6 +2635,7 @@ async def run_scientific_task(
     parent_retrieval: RetrievalEvidence | None = None
     parent_computation: ComputationEvidence | None = None
     lineage_artifact: ArtifactRef | None = None
+    parent_visual_artifact: ArtifactRef | None = None
     ancestor_protocol_artifacts: tuple[ArtifactRef, ...] = ()
     parent_controller_dates: tuple[str, ...] = ()
     if (parent_provenance_dir is None) != (revision_request is None):
@@ -1756,6 +2692,13 @@ async def run_scientific_task(
         parent_computation = ComputationEvidence.model_validate_json(
             (parent_root / "computation_evidence.json").read_text(encoding="utf-8")
         )
+        parent_visual_path = parent_root / "gemma_input_visual_review.json"
+        if parent_visual_path.is_file():
+            parent_visual_artifact = ArtifactRef(
+                path=str(parent_visual_path.resolve()),
+                sha256=sha256_file(parent_visual_path),
+                description="inherited Gemma-only input visual evidence",
+            )
         lineage_path = run_dir / "parent_lineage.json"
         lineage_names = [
             "planning_result.json",
@@ -1881,6 +2824,7 @@ async def run_scientific_task(
         for artifact in (
             protocol_artifact,
             *ancestor_protocol_artifacts,
+            parent_visual_artifact,
             lineage_artifact,
         )
         if artifact is not None
@@ -1906,7 +2850,7 @@ async def run_scientific_task(
         return result
 
     report_progress("research", "Executing the locked method and collecting evidence")
-    report, retrieval, computation = await _produce_report(
+    report, retrieval, computation, visual_controller_artifacts = await _produce_report(
         settings,
         planning,
         ledger,
@@ -1929,6 +2873,9 @@ async def run_scientific_task(
         activity=activity,
         phase_progress=report_progress,
         cancel_event=cancel_event,
+    )
+    controller_artifacts = _merge_controller_artifacts(
+        controller_artifacts, visual_controller_artifacts
     )
     retrieval = _merge_retrieval_evidence(parent_retrieval, retrieval)
     computation = _merge_computation_evidence(parent_computation, computation)
@@ -1988,7 +2935,12 @@ async def run_scientific_task(
             },
         )
         try:
-            report, repair_retrieval, repair_computation = await _produce_report(
+            (
+                report,
+                repair_retrieval,
+                repair_computation,
+                visual_controller_artifacts,
+            ) = await _produce_report(
                 settings,
                 planning,
                 ledger,
@@ -2010,6 +2962,9 @@ async def run_scientific_task(
                 activity=activity,
                 phase_progress=report_progress,
                 cancel_event=cancel_event,
+            )
+            controller_artifacts = _merge_controller_artifacts(
+                controller_artifacts, visual_controller_artifacts
             )
         except Exception as exc:
             # Preserve the last independently audited report. A model failure or

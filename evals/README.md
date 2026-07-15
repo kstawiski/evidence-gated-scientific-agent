@@ -57,19 +57,22 @@ repository does not embed them.
 
 | Case or boundary | Result | What the gate established |
 | --- | ---: | --- |
-| PubMed/full-text | **17/17** | A biomedical run performed typed PubMed search and acquisition, imported a browser-obtained open-access PDF, verified and stored local Markdown/PDF copies, reported the exact PMID/PMCID/DOI, cohort count and survival estimates, constrained the prognostic interpretation, repaired a missing search artifact and DOI after independent review, and finished with deterministic and deployment-configured Gemma text-review passes. |
+| PubMed/full-text | **17/17** | A biomedical run performed typed PubMed search and acquisition, imported a browser-obtained open-access PDF, verified and stored local Markdown/PDF copies, reported the exact PMID/PMCID/DOI, cohort count and survival estimates, constrained the prognostic interpretation, repaired a missing search artifact and DOI after independent review, and finished with deterministic and deployment-configured Gemma review passes. |
 | Known planted effect | **18/18** | On 2026-07-15, workspace `187c0fe5-2967-4bbd-a297-f7a9423274be` used image `sha256:4f055eb3a5515b49257fad69e701dd3d46ec07fdf28c430b09293e66c4a2021c`. Parent run `5428105d-8979-4bf1-8dd1-76f9fedccee2` independently recovered the planted +5 effect in Python and R and reconciled the results; Qwen and Gemma streamed and live artifacts were accessed. Accepted code-disabled revision `b5bbf30c-15bd-42f2-bb65-b06519a94a9c` passed the evaluator, deterministic validation, Gemma report review, and OCR/geometry/table display review; it preserved the parent immutably, generated no result outputs, and passed final manual caption/prose inspection. An earlier nominally supported revision with inverted provenance was rejected and excluded from the score. |
 | A2A 1.0 live interoperability | **PASS** | On 2026-07-15, functional image `sha256:e95760b378f4923142e499899ebb481687c0a71012aee480556458a6d2a6f726` served task `44702ea7-72d8-4545-853e-82fd926e0831` backed by run `0c69fa4f-459b-419f-81a8-47737f732ce6`. Streaming emitted submitted, working, and completed states plus `report.md` and `run-summary.json`; `GetTask` returned the completed artifacts and the scientific status was `supported`. MCP probe run `fa5e58b9-92b4-4bfb-82f3-fd0e14dd279d` in workspace `6e08b205-4d2b-49fb-a0ec-5bbbea735c4a` observed Brave Search, Context7, `resolve-library-id`, `query-docs`, `brave_web_search`, `brave_llm_context`, `search_pubmed`, and `acquire_pubmed_article`; it repaired a blocking canonical PubMed-title mismatch before Gemma passed. |
 | Package lifecycle | **PASS** | The isolated package worker installed and the offline analysis sandbox loaded PyPI `emoji` 2.15.0, CRAN `moments` 0.14.1, and Bioconductor `BiocGenerics` 0.44.0. Deleting the workspace removed its immutable environment generations. |
 | Cancellation | **PASS** | A live in-flight analysis was cooperatively cancelled and durably remained `cancelled`; its partial state was not presented as a report. |
 | Managed browser boundary | **PASS** | The service-owned Chromium CDP session and passwordless trusted-network noVNC view were reachable through their intended gateways; CDP stayed unpublished, direct Internet and private proxy targets were denied, downloads/profile data survived restart, and the application saw downloads read-only. |
+| Manuscript-package stress run (pre-fix) | **FAILED MERIT GATE** | Run `18b7b94f-6d3a-4c0c-941c-cc6b96ce0aeb` correctly stopped at `requires_human_decision`, but consumed all four repairs. It recovered bounded Python failures and improved scientific scope/PubMed anchoring; however, the critic invented manuscript-plus-supplement word-count arithmetic, treated permitted placeholders as blockers, and later lost article review to invalid TIFF display preparation. This retained failure directly motivated task-scope critic constraints, controller TIFF/PDF/archive rendering, Gemma-only source-image review, and preservation of article audits when display preparation fails. |
 
 The PubMed gate's scored JSON and full provenance bundle are retained with the
 deployment evaluation artifacts. The local paper copies are hash verified and
 report citations link to the portable Markdown/PDF artifacts, not to an
-unverified filename. The display critic receives sandbox-extracted OCR text and
-geometry rather than image pixels; this is a text-review gate, not a multimodal
-or pixel-level claim.
+unverified filename. The current display critic receives registered raster images
+only on the Gemma endpoint, together with sandbox-extracted OCR text/geometry and
+deterministic table previews. Qwen receives zero image inputs. The earlier
+release-candidate records predate this multimodal boundary and must not be
+reinterpreted as proof that their figures received pixel-level review.
 
 Public compact records for the exact scores, run identifiers, timestamps, and
 selected artifact hashes are retained as
@@ -77,6 +80,8 @@ selected artifact hashes are retained as
 [`results/v0.4.0-known-effect.json`](results/v0.4.0-known-effect.json). The
 PubMed evaluator did not record its image digest, and the public record states
 that gap instead of inferring one retrospectively.
+The retained manuscript stress failure is summarized in
+[`results/v0.4.0-manuscript-stress-pre-fix.json`](results/v0.4.0-manuscript-stress-pre-fix.json).
 
 The A2A evidence is retained as
 [`results/v0.4.0-a2a-live.json`](results/v0.4.0-a2a-live.json). The server uses

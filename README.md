@@ -15,12 +15,22 @@ as the explicit `umed-task` backend for a delegation skill. The historical
   claim–source validation, repair limits, and provenance.
 - Agreement between models never overrides a failed deterministic check.
 
-Gemma is a text critic in the released workflow. For figures, a confined
-sandbox worker extracts bounded OCR text and word geometry, and deterministic
-code checks rendered labels against machine-readable results before Gemma
-reviews those records. No raster bytes are supplied to the display critic and
-the system does not claim pixel-level or multimodal review; missing or
-insufficient OCR makes display approval inconclusive.
+Gemma is the sole image-understanding model. Generated PNG, JPEG, and WebP figures
+are supplied only to Gemma in bounded batches; Qwen never receives raster images
+or makes visual-quality judgments. A confined sandbox worker also extracts OCR
+text and word geometry, while deterministic code compares rendered labels with
+machine-readable results. Gemma audits the actual rasters together with those
+records and bounded table previews; missing OCR is recorded but does not skip the
+multimodal review.
+
+When a task asks about uploaded figures, scans, TIFFs, visual-proof PDFs, Office
+documents, or archive members, deterministic controller code converts a bounded
+set of pages/frames to PNG without interpreting them. Qwen may also create
+lossless review rasters under `/output/visual-review`, but it never receives the
+pixels. Gemma's structured observations, limitations, and unreviewed-page list
+are stored in `gemma_input_visual_review.json`, shown in the workspace explorer,
+and supplied to Qwen as evidence for the article. The audit is cached by exact
+image hashes across repair rounds.
 
 Each browser or A2A workspace keeps its inputs, run history, generated tables and
 figures, claim ledger, source records, model review, logs, and SHA-256 manifest
@@ -31,13 +41,15 @@ protocol stay locked — and immutable — for the duration of that run.
 
 While a run is active, visible non-thought output from Qwen and Gemma,
 controller artifacts, and registered figures/tables become available as soon
-as they are written,
-and a polled event log reports phase changes and tool-call outcomes in real
-time. The provenance rail includes a readable live tail plus a near-full-screen
-console, and generated UTF-8 text artifacts can be previewed in the browser
-while they are still growing; complete-file downloads remain available.
+as they are written. A Server-Sent Events stream reports phase changes, bounded
+tool-request summaries, outcomes, and artifact links with polling as fallback.
+The provenance rail includes a readable live tail plus a near-full-screen
+console. The workspace explorer previews input files and every generated UTF-8
+text artifact in the browser while runs are active; complete-file downloads
+remain available.
 Events and live artifacts never expose model reasoning/chain-of-thought,
-prompts, tool-call arguments, or credentials. A run can be cancelled
+prompts, raw code, raw tool-response evidence, unapproved arguments, or
+credentials. A run can be cancelled
 cooperatively at any time, which preserves partial artifacts as explicitly
 incomplete rather than reporting a false result. Once a run has a completed,
 audited report, a follow-up request starts a new Qwen→Gemma audited child
@@ -115,8 +127,10 @@ The service exposes:
 - `GET /.well-known/agent-card.json` — public A2A 1.0 Agent Card;
 - `POST /a2a` — JSON-RPC A2A endpoint using `Authorization: Bearer <A2A_TOKEN>`;
 - `POST /api/workspaces/{id}/runs`, `GET /api/runs/{run_id}` — start and poll a run;
-- `GET /api/runs/{run_id}/events` — polled live event log for the active or
-  finished run;
+- `GET /api/runs/{run_id}/events`, `.../events/stream` — cursor-based event log
+  plus an SSE live stream with polling fallback;
+- `GET /api/workspaces/{id}/file-preview?filename=...` — bounded UTF-8 preview
+  for a path-confined workspace input;
 - `GET /api/runs/{run_id}/artifact-preview?path=...` — bounded UTF-8 preview
   for live or final text artifacts (up to 512 KiB, with explicit head/tail
   truncation for larger files);

@@ -104,7 +104,7 @@ def inspect_figure(path: Path) -> dict[str, Any]:
             width, height = image.size
             detected_format = (image.format or "").upper()
             reported_dpi = image.info.get("dpi")
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, Image.DecompressionBombError) as exc:
         raise ValueError("figure is not a readable raster image") from exc
     if width < 240 or height < 160 or width > 20_000 or height > 20_000:
         raise ValueError(

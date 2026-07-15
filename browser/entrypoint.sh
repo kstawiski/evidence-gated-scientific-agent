@@ -26,7 +26,7 @@ rm -f "$profile"/SingletonCookie "$profile"/SingletonLock "$profile"/SingletonSo
 
 children=()
 # Invoked indirectly by the signal/exit trap below.
-# shellcheck disable=SC2329
+# shellcheck disable=SC2317,SC2329
 cleanup() {
   trap - TERM INT EXIT
   if ((${#children[@]})); then

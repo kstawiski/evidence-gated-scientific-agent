@@ -1,0 +1,52 @@
+{
+  "date": "2026-07-15",
+  "image_digest": "sha256:e95760b378f4923142e499899ebb481687c0a71012aee480556458a6d2a6f726",
+  "agent_card_version": "0.4.0",
+  "protocol_version": "1.0",
+  "transport_gate": {
+    "workspace_id": "b971c2ec-a5b8-46bd-9c03-4efd66ecdb6e",
+    "run_id": "0c69fa4f-459b-419f-81a8-47737f732ce6",
+    "task_id": "44702ea7-72d8-4545-853e-82fd926e0831",
+    "states": [
+      "TASK_STATE_SUBMITTED",
+      "TASK_STATE_WORKING",
+      "TASK_STATE_COMPLETED"
+    ],
+    "streamed_artifacts": [
+      "report.md",
+      "run-summary.json"
+    ],
+    "get_task_artifacts": [
+      "report.md",
+      "run-summary.json"
+    ],
+    "scientific_status": "supported",
+    "checks": {
+      "agent_card_a2a_1_0": true,
+      "streaming_advertised": true,
+      "submitted_working_completed": true,
+      "artifacts_streamed": true,
+      "get_task_completed": true,
+      "imrad_report_returned": true
+    }
+  },
+  "scientific_mcp_probe": {
+    "workspace_id": "6e08b205-4d2b-49fb-a0ec-5bbbea735c4a",
+    "run_id": "fa5e58b9-92b4-4bfb-82f3-fd0e14dd279d",
+    "scientific_status": "supported",
+    "mcp_servers": [
+      "brave-search",
+      "context7"
+    ],
+    "typed_tools_observed": [
+      "resolve-library-id",
+      "query-docs",
+      "brave_web_search",
+      "brave_llm_context",
+      "search_pubmed",
+      "acquire_pubmed_article"
+    ],
+    "initial_blocking_finding": "A PubMed SourceRecord title did not match the acquired canonical metadata.",
+    "repair_outcome": "Qwen corrected the citation against stored acquisition evidence and Gemma passed the repaired report."
+  }
+}

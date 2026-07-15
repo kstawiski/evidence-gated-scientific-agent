@@ -6,9 +6,7 @@ from scientific_agent.config import SandboxSettings
 from scientific_agent.execution import RemoteAnalysisExecutor
 
 
-workspace = Path(
-    "/data/workspaces/00000000-0000-4000-8000-000000000001/files"
-)
+workspace = Path("/data/workspaces/00000000-0000-4000-8000-000000000001/files")
 root = Path(
     "/data/workspaces/00000000-0000-4000-8000-000000000001/"
     "runs/run-1/computations/attempt-0"

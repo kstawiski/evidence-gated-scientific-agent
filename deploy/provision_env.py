@@ -14,20 +14,42 @@ from pathlib import Path
 
 PUBLIC_KEYS = (
     "WEB_USERNAME",
+    "WEB_AUTH_ENABLED",
     "WEB_BIND_ADDRESS",
     "WEB_PUBLISHED_PORT",
     "SCIENTIFIC_AGENT_PUBLIC_URL",
     "EVIDENCE_BENCH_DATA_PATH",
     "EVIDENCE_BENCH_ENVIRONMENTS_PATH",
+    "EVIDENCE_BENCH_BROWSER_PATH",
+    "BROWSER_BIND_ADDRESS",
+    "BROWSER_NOVNC_PORT",
+    "BROWSER_PUBLIC_URL",
+    "BROWSER_GEOMETRY",
+    "BROWSER_RUNTIME_USER",
+    "BROWSER_DOWNLOADS_MODE",
     "QWEN_BASE_URL",
     "QWEN_MODEL",
     "QWEN_API_KEY",
+    "QWEN_MAX_TOKENS",
+    "QWEN_ENABLE_THINKING",
+    "QWEN_NATIVE_JSON_SCHEMA",
+    "QWEN_REQUEST_TIMEOUT_SECONDS",
     "GEMMA_BASE_URL",
     "GEMMA_MODEL",
     "GEMMA_API_KEY",
+    "GEMMA_MAX_TOKENS",
+    "GEMMA_ENABLE_THINKING",
+    "GEMMA_NATIVE_JSON_SCHEMA",
+    "GEMMA_REQUEST_TIMEOUT_SECONDS",
     "CHROME_DEVTOOLS_BROWSER_URL",
+    "SCIENTIFIC_AGENT_NCBI_EMAIL",
+    "SCIENTIFIC_AGENT_NCBI_TOOL",
+    "SCIENTIFIC_AGENT_NCBI_API_KEY",
     "WEB_MAX_WORKERS",
     "MAX_REPAIR_ROUNDS",
+    "SCIENTIFIC_AGENT_MAX_RESEARCH_MODEL_TURNS",
+    "SCIENTIFIC_AGENT_MAX_RESEARCH_TOOL_CALLS",
+    "SCIENTIFIC_AGENT_MAX_REPEATED_TOOL_RESULTS",
     "SCIENTIFIC_AGENT_MAX_WALL_SECONDS",
     "SCIENTIFIC_AGENT_MAX_MEMORY_BYTES",
     "SCIENTIFIC_AGENT_MAX_PROCESSES",
@@ -38,6 +60,11 @@ PUBLIC_KEYS = (
     "SCIENTIFIC_AGENT_MAX_PACKAGES_PER_CALL",
     "SCIENTIFIC_AGENT_PACKAGE_TIMEOUT_SECONDS",
     "SCIENTIFIC_AGENT_MAX_ENVIRONMENT_BYTES",
+    "SCIENTIFIC_AGENT_MAX_WORKSPACE_ENVIRONMENT_BYTES",
+    "SCIENTIFIC_AGENT_MAX_TOTAL_ENVIRONMENT_BYTES",
+    "SCIENTIFIC_AGENT_MAX_ENVIRONMENT_ENTRIES",
+    "SCIENTIFIC_AGENT_MAX_WORKSPACE_ENVIRONMENT_ENTRIES",
+    "SCIENTIFIC_AGENT_MAX_TOTAL_ENVIRONMENT_ENTRIES",
 )
 SECRET_KEYS = (
     "WEB_PASSWORD",
@@ -78,18 +105,33 @@ def main() -> None:
     args = parser.parse_args()
     output = args.output.expanduser().resolve()
     existing = parse_env(output)
-    mcp = parse_env(args.mcp_env_file.expanduser().resolve()) if args.mcp_env_file else {}
+    mcp = (
+        parse_env(args.mcp_env_file.expanduser().resolve()) if args.mcp_env_file else {}
+    )
 
     required = ("SCIENTIFIC_AGENT_PUBLIC_URL", "QWEN_BASE_URL", "GEMMA_BASE_URL")
     missing = [name for name in required if not os.environ.get(name)]
     if missing:
         raise SystemExit(f"missing deployment setting(s): {', '.join(missing)}")
 
+    auth_enabled = os.environ.get(
+        "WEB_AUTH_ENABLED", existing.get("WEB_AUTH_ENABLED", "true")
+    ).lower() not in {"0", "false", "no", "off"}
     values = {
-        "WEB_USERNAME": os.environ.get("WEB_USERNAME", existing.get("WEB_USERNAME", "scientist")),
         "A2A_ENABLED": "true",
-        **{name: existing.get(name) or secrets.token_urlsafe(36) for name in SECRET_KEYS},
+        **{
+            name: existing.get(name) or secrets.token_urlsafe(36)
+            for name in SECRET_KEYS
+            if name != "WEB_PASSWORD"
+        },
     }
+    if auth_enabled:
+        values["WEB_USERNAME"] = os.environ.get(
+            "WEB_USERNAME", existing.get("WEB_USERNAME", "scientist")
+        )
+        values["WEB_PASSWORD"] = existing.get("WEB_PASSWORD") or secrets.token_urlsafe(
+            36
+        )
     for name in PUBLIC_KEYS:
         if os.environ.get(name):
             values[name] = os.environ[name]

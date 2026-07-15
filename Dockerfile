@@ -53,12 +53,14 @@ RUN apt-get update \
         libudunits2-0 \
         libxml2 \
         passwd \
+        poppler-utils \
         r-base \
         r-cran-data.table \
         r-cran-dplyr \
         r-cran-ggplot2 \
         r-cran-jsonlite \
         r-cran-survival \
+        tesseract-ocr \
         tini \
         util-linux \
     && rm -rf /var/lib/apt/lists/* \

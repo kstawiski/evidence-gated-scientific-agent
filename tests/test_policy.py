@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 
+import scientific_agent.policy as policy_module
 from scientific_agent.policy import ToolPolicy, default_allowed_tools
 from scientific_agent.provenance import EventLedger
 
@@ -31,7 +32,9 @@ def test_public_literal_ip_is_allowed(tmp_path):
 
 
 def test_chrome_tools_are_opt_in(tmp_path):
-    gate = ToolPolicy(EventLedger(tmp_path / "events.jsonl"), default_allowed_tools(False))
+    gate = ToolPolicy(
+        EventLedger(tmp_path / "events.jsonl"), default_allowed_tools(False)
+    )
     assert not gate.evaluate("new_page", {"url": "https://1.1.1.1/"})[0]
 
 
@@ -106,7 +109,84 @@ def test_package_installation_tools_are_separately_opt_in(tmp_path):
         ),
     )
     allowed, reason = gate.evaluate(
-        "install_r_packages", {"packages": ["BiocGenerics"], "repository": "bioconductor"}
+        "install_r_packages",
+        {"packages": ["BiocGenerics"], "repository": "bioconductor"},
     )
     assert allowed
     assert "canonical package registry" in reason
+
+
+def test_cancelled_tool_result_is_observed_as_failed(tmp_path):
+    observed = []
+    gate = ToolPolicy(
+        EventLedger(tmp_path / "events.jsonl"),
+        default_allowed_tools(
+            include_chrome=False,
+            enable_code=True,
+            enable_packages=True,
+        ),
+        observer=lambda *event: observed.append(event),
+    )
+
+    class Tool:
+        name = "install_python_packages"
+
+    gate.after_tool(
+        Tool(),
+        {"packages": ["polars"]},
+        None,
+        {"status": "cancelled", "installed": []},
+    )
+
+    assert observed == [("tool_result", "install_python_packages", "failed")]
+
+
+def test_oversized_snapshot_is_preserved_and_compacted_for_model(tmp_path, monkeypatch):
+    monkeypatch.setattr(policy_module, "MAX_MODEL_TOOL_RESULT_BYTES", 4_096)
+    monkeypatch.setattr(policy_module, "MAX_MODEL_TOOL_RESULTS_TOTAL_BYTES", 8_192)
+    gate = policy(tmp_path, preserve_evidence=True)
+
+    class Tool:
+        name = "take_snapshot"
+
+    original = {"content": "scientific page text " * 1_000}
+    observed = gate.after_tool(Tool(), {}, None, original)
+
+    assert observed["result_compacted"] is True
+    assert "scientific page text" in observed["result_preview"]
+    artifact = Path(observed["full_result_artifact"])
+    assert json.loads(artifact.read_text(encoding="utf-8")) == original
+    assert len(json.dumps(observed).encode("utf-8")) <= 4_096
+
+
+def test_screenshot_binary_is_never_injected_as_text_preview(tmp_path, monkeypatch):
+    monkeypatch.setattr(policy_module, "MAX_MODEL_TOOL_RESULT_BYTES", 1_024)
+    gate = policy(tmp_path, preserve_evidence=True)
+
+    class Tool:
+        name = "take_screenshot"
+
+    observed = gate.after_tool(Tool(), {}, None, {"image_base64": "aGVsbG8=" * 500})
+
+    assert observed["result_compacted"] is True
+    assert "result_preview" not in observed
+    assert Path(observed["full_result_artifact"]).is_file()
+
+
+def test_cumulative_model_observation_budget_compacts_later_results(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(policy_module, "MAX_MODEL_TOOL_RESULT_BYTES", 4_096)
+    monkeypatch.setattr(policy_module, "MAX_MODEL_TOOL_RESULTS_TOTAL_BYTES", 1_000)
+    gate = policy(tmp_path, preserve_evidence=True)
+
+    class Tool:
+        name = "take_snapshot"
+
+    first = gate.after_tool(Tool(), {}, None, {"content": "x" * 700})
+    second = gate.after_tool(Tool(), {}, None, {"content": "y" * 700})
+
+    assert first is None
+    assert second["result_compacted"] is True
+    assert "result_preview" not in second
+    assert Path(second["full_result_artifact"]).is_file()

@@ -6,7 +6,9 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import http.client
 import json
+import math
 import shlex
 import time
 import urllib.error
@@ -28,10 +30,17 @@ def parse_env(path: Path) -> dict[str, str]:
 
 
 class Client:
-    def __init__(self, base_url: str, username: str, password: str):
+    def __init__(
+        self,
+        base_url: str,
+        username: str | None = None,
+        password: str | None = None,
+    ):
         self.base_url = base_url.rstrip("/")
-        token = base64.b64encode(f"{username}:{password}".encode()).decode()
-        self.headers = {"Authorization": f"Basic {token}"}
+        self.headers = {}
+        if username and password:
+            token = base64.b64encode(f"{username}:{password}".encode()).decode()
+            self.headers = {"Authorization": f"Basic {token}"}
 
     def request(self, method: str, path: str, *, payload=None, body=None, headers=None):
         request_headers = {**self.headers, **(headers or {})}
@@ -49,7 +58,9 @@ class Client:
                 data = response.read()
                 return json.loads(data) if data else None
         except urllib.error.HTTPError as exc:
-            raise RuntimeError(f"HTTP {exc.code}: {exc.read().decode(errors='replace')}") from exc
+            raise RuntimeError(
+                f"HTTP {exc.code}: {exc.read().decode(errors='replace')}"
+            ) from exc
 
     def download_artifact(self, run_id: str, path: str) -> bytes:
         query = urllib.parse.urlencode({"path": path})
@@ -64,10 +75,14 @@ class Client:
 def multipart(filename: str, content: bytes) -> tuple[bytes, str]:
     boundary = "evidence-bench-eval-boundary"
     body = (
-        f"--{boundary}\r\n"
-        f'Content-Disposition: form-data; name="upload"; filename="{filename}"\r\n'
-        "Content-Type: text/csv\r\n\r\n"
-    ).encode() + content + f"\r\n--{boundary}--\r\n".encode()
+        (
+            f"--{boundary}\r\n"
+            f'Content-Disposition: form-data; name="upload"; filename="{filename}"\r\n'
+            "Content-Type: text/csv\r\n\r\n"
+        ).encode()
+        + content
+        + f"\r\n--{boundary}--\r\n".encode()
+    )
     return body, f"multipart/form-data; boundary={boundary}"
 
 
@@ -98,6 +113,13 @@ def _metric(value: dict, *names: str) -> float:
             candidate = current.get(name)
             if isinstance(candidate, (int, float)) and not isinstance(candidate, bool):
                 return float(candidate)
+            if (
+                isinstance(candidate, list)
+                and len(candidate) == 1
+                and isinstance(candidate[0], (int, float))
+                and not isinstance(candidate[0], bool)
+            ):
+                return float(candidate[0])
             if isinstance(candidate, dict):
                 for estimate_name in ("value", "estimate"):
                     estimate = candidate.get(estimate_name)
@@ -105,6 +127,13 @@ def _metric(value: dict, *names: str) -> float:
                         estimate, bool
                     ):
                         return float(estimate)
+                    if (
+                        isinstance(estimate, list)
+                        and len(estimate) == 1
+                        and isinstance(estimate[0], (int, float))
+                        and not isinstance(estimate[0], bool)
+                    ):
+                        return float(estimate[0])
         pending.extend(item for item in current.values() if isinstance(item, dict))
     return 1e9
 
@@ -121,16 +150,57 @@ def _language_result(
         for artifact in record.get("artifacts", [])
         if artifact.get("description") == "sandbox-generated analysis artifact"
     ]
+    fallback = None
     for manifest_path, value in generated.items():
         if not isinstance(value, dict):
             continue
         if not any(path.endswith(manifest_path) for path in artifact_paths):
             continue
-        if _metric(value, "mean_difference", "mean_diff") != 1e9 and _metric(
-            value, "hedges_g"
-        ) != 1e9:
-            return value
-    return None
+        if (
+            _metric(
+                value,
+                "mean_difference",
+                "mean_diff",
+                "mean_difference_treatment_minus_control",
+            )
+            != 1e9
+            and _metric(value, "hedges_g") != 1e9
+        ):
+            if _known_effect_matches_reference(value):
+                return value
+            fallback = fallback or value
+    return fallback
+
+
+def _known_effect_matches_reference(value: dict) -> bool:
+    expected = {
+        ("n_treatment",): 20.0,
+        ("n_control",): 20.0,
+        ("treatment_mean_change",): 5.0,
+        ("control_mean_change",): 0.0,
+        (
+            "mean_difference",
+            "mean_difference_treatment_minus_control",
+        ): 5.0,
+        ("welch_t_statistic", "t_statistic"): 10.897247358851683,
+        ("degrees_of_freedom", "welch_df"): 38.0,
+        ("ci_95_lower",): 4.071144254485707,
+        ("ci_95_upper",): 5.928855745514293,
+        ("pooled_sd",): 1.4509525002200232,
+        ("hedges_g_correction_J", "j_correction"): 0.9801324503311258,
+        ("hedges_g",): 3.3775483697174717,
+    }
+    if not all(
+        math.isclose(_metric(value, *names), target, rel_tol=1e-9, abs_tol=1e-6)
+        for names, target in expected.items()
+    ):
+        return False
+    return math.isclose(
+        _metric(value, "p_value"),
+        2.971749478841818e-13,
+        rel_tol=1e-6,
+        abs_tol=1e-18,
+    )
 
 
 def _reconciliation_delta(value: dict, *names: str) -> float:
@@ -158,19 +228,87 @@ def _reconciliation_delta(value: dict, *names: str) -> float:
     return 1e9
 
 
-def score(case_name: str, case: dict, source: Path | None, detail: dict, client: Client) -> dict:
+def _latest_reconciliation(
+    computation: dict,
+    generated: dict[str, object],
+) -> dict | None:
+    artifact_paths = [
+        artifact.get("path", "")
+        for record in computation.get("records", [])
+        if record.get("status") == "succeeded"
+        for artifact in record.get("artifacts", [])
+        if "reconcil" in artifact.get("path", "").lower()
+    ]
+    for artifact_path in reversed(artifact_paths):
+        for manifest_path, value in generated.items():
+            if artifact_path.endswith(manifest_path) and isinstance(value, dict):
+                return value
+    return None
+
+
+def score(
+    case_name: str,
+    case: dict,
+    source: Path | None,
+    detail: dict,
+    client: Client,
+    live_observation: dict | None = None,
+) -> dict:
     checks = {}
     run_result = detail.get("result") or {}
-    checks["terminal_status"] = detail["status"] not in {"queued", "running", "failed", "interrupted"}
-    checks["deterministic_validation"] = bool(run_result.get("deterministic_validation", {}).get("passed"))
+    checks["terminal_status"] = detail["status"] not in {
+        "queued",
+        "running",
+        "cancel_requested",
+        "failed",
+        "interrupted",
+        "cancelled",
+    }
+    if not checks["terminal_status"]:
+        if live_observation is not None:
+            checks["live_events_observed"] = bool(live_observation["event_ids"])
+            checks["qwen_output_streamed"] = "Qwen" in live_observation["stream_actors"]
+            checks["gemma_output_streamed"] = (
+                "Gemma" in live_observation["stream_actors"]
+            )
+        return {
+            "checks": checks,
+            "passed": False,
+            "score": sum(checks.values()),
+            "total": len(checks),
+        }
+    checks["deterministic_validation"] = bool(
+        run_result.get("deterministic_validation", {}).get("passed")
+    )
     review = run_result.get("scientific_review") or {}
-    checks["independent_review"] = review.get("verdict") in {"pass", "pass_with_nonblocking_comments"}
+    checks["independent_review"] = review.get("verdict") in {
+        "pass",
+        "pass_with_nonblocking_comments",
+    }
     manifest_paths = {item["path"] for item in detail.get("artifacts", [])}
     checks["core_provenance"] = {
-        "environment.json", "input_manifest.json", "protocol.json", "report.md"
+        "environment.json",
+        "input_manifest.json",
+        "protocol.json",
+        "report.md",
     }.issubset(manifest_paths)
     computation = run_result.get("computation_evidence") or {}
     report = detail.get("report") or run_result.get("report") or {}
+    checks["article_sections"] = bool(
+        report.get("executive_summary")
+        and report.get("introduction")
+        and report.get("methods")
+        and report.get("results")
+        and report.get("discussion")
+        and report.get("conclusions")
+    )
+    if live_observation is not None:
+        checks["live_events_observed"] = bool(live_observation["event_ids"])
+        checks["live_artifact_access"] = bool(
+            live_observation["downloaded_while_active"]
+        )
+        checks["qwen_output_streamed"] = "Qwen" in live_observation["stream_actors"]
+        checks["gemma_output_streamed"] = "Gemma" in live_observation["stream_actors"]
     if case["enable_code"]:
         languages = {
             record["language"]
@@ -193,38 +331,44 @@ def score(case_name: str, case: dict, source: Path | None, detail: dict, client:
             if claim["claim_type"] == "computed"
         ]
         checks["computed_claims_traceable"] = bool(computed_claims) and all(
-            any(sources.get(source_id) in artifact_paths for source_id in claim["evidence_refs"])
+            any(
+                sources.get(source_id) in artifact_paths
+                for source_id in claim["evidence_refs"]
+            )
             for claim in computed_claims
         )
         generated_json = _artifact_jsons(client, detail["id"], manifest_paths)
-        generated_paths = {
-            item["path"] for item in computation.get("artifacts", [])
-        }
+        ancestor_id = detail.get("parent_run_id")
+        seen_run_ids = {detail["id"]}
+        while ancestor_id and ancestor_id not in seen_run_ids:
+            seen_run_ids.add(ancestor_id)
+            try:
+                ancestor = client.request("GET", f"/api/runs/{ancestor_id}")
+                ancestor_paths = {
+                    item["path"] for item in ancestor.get("artifacts", [])
+                }
+                generated_json.update(
+                    _artifact_jsons(client, ancestor_id, ancestor_paths)
+                )
+                ancestor_id = ancestor.get("parent_run_id")
+            except (KeyError, OSError, RuntimeError):
+                break
+        generated_paths = {item["path"] for item in computation.get("artifacts", [])}
         if case_name == "known-effect":
             python_result = _language_result(computation, generated_json, "python")
             r_result = _language_result(computation, generated_json, "r")
-            reconciliation = next(
-                (
-                    value
-                    for path, value in generated_json.items()
-                    if "reconcil" in path.lower() and isinstance(value, dict)
-                ),
-                None,
-            )
+            reconciliation = _latest_reconciliation(computation, generated_json)
             checks["planted_effect_recovered"] = bool(
                 isinstance(python_result, dict)
                 and isinstance(r_result, dict)
-                and abs(_metric(python_result, "mean_difference", "mean_diff") - 5.0)
-                <= 1e-6
-                and abs(_metric(r_result, "mean_difference", "mean_diff") - 5.0)
-                <= 1e-6
+                and _known_effect_matches_reference(python_result)
+                and _known_effect_matches_reference(r_result)
             )
             checks["effect_size_reconciled"] = bool(
                 isinstance(python_result, dict)
                 and isinstance(r_result, dict)
                 and abs(
-                    _metric(python_result, "hedges_g")
-                    - _metric(r_result, "hedges_g")
+                    _metric(python_result, "hedges_g") - _metric(r_result, "hedges_g")
                 )
                 <= 1e-6
             )
@@ -232,18 +376,47 @@ def score(case_name: str, case: dict, source: Path | None, detail: dict, client:
                 isinstance(reconciliation, dict)
                 and _reconciliation_delta(
                     reconciliation, "mean_diff", "mean_difference"
-                ) <= 1e-6
+                )
+                <= 1e-6
                 and _reconciliation_delta(
                     reconciliation, "t_stat", "t_statistic", "welch_t_statistic"
-                ) <= 1e-6
+                )
+                <= 1e-6
+                and _reconciliation_delta(reconciliation, "hedges_g") <= 1e-6
                 and (
                     reconciliation.get("all_pass") is True
                     or reconciliation.get("reconciliation_passed") is True
                 )
             )
+            displays = (detail.get("display_manifest") or {}).get("displays", [])
             checks["figure_generated"] = any(
-                path.lower().endswith((".png", ".svg", ".pdf"))
+                path.lower().endswith((".png", ".jpg", ".jpeg", ".webp"))
                 for path in generated_paths
+            )
+            checks["figure_and_table_registered"] = any(
+                item.get("kind") == "figure" for item in displays
+            ) and any(item.get("kind") == "table" for item in displays)
+            display_audit = (
+                json.loads(
+                    client.download_artifact(detail["id"], "gemma_display_audit.json")
+                )
+                if "gemma_display_audit.json" in manifest_paths
+                else {}
+            )
+            checks["gemma_ocr_display_audit"] = bool(
+                display_audit.get("review_mode") == "ocr_text_and_geometry"
+                and display_audit.get("review_source") == "gemma_text_critic"
+                and display_audit.get("critic_model")
+                and display_audit.get("figure_text_inputs")
+                and all(
+                    item.get("ocr_available") is True
+                    and item.get("ocr_character_count", 0) > 0
+                    and item.get("ocr_text_sha256")
+                    for item in display_audit["figure_text_inputs"]
+                )
+                and display_audit.get("table_previews")
+                and display_audit.get("verdict")
+                in {"pass", "pass_with_nonblocking_comments"}
             )
         elif case_name == "corrupted-input":
             evidence_text = json.dumps(
@@ -254,7 +427,10 @@ def score(case_name: str, case: dict, source: Path | None, detail: dict, client:
                 token in evidence_text for token in ("c10", "t05", "t08")
             )
             checks["decision_readiness_withheld"] = (
-                any(term in evidence_text for term in ("not decision-ready", "not decision ready"))
+                any(
+                    term in evidence_text
+                    for term in ("not decision-ready", "not decision ready")
+                )
                 and "inconclusive" in evidence_text
                 and "sensitivity" in evidence_text
             )
@@ -262,7 +438,9 @@ def score(case_name: str, case: dict, source: Path | None, detail: dict, client:
         retrieval = run_result.get("retrieval_evidence") or {}
         source_urls = {s.get("url") for s in report.get("sources", []) if s.get("url")}
         checks["retrieval_used"] = retrieval.get("successful_calls", 0) > 0
-        checks["source_urls_observed"] = bool(source_urls) and source_urls.issubset(set(retrieval.get("urls", [])))
+        checks["source_urls_observed"] = bool(source_urls) and source_urls.issubset(
+            set(retrieval.get("urls", []))
+        )
         if case_name == "retrieval-grounding":
             report_text = json.dumps(report, sort_keys=True).lower()
             checks["official_scipy_source"] = any(
@@ -276,24 +454,121 @@ def score(case_name: str, case: dict, source: Path | None, detail: dict, client:
             checks["welch_api_switches_reported"] = (
                 "equal_var" in report_text and "var.equal" in report_text
             )
+        elif case_name == "pubmed-fulltext":
+            references = (detail.get("reference_manifest") or {}).get("references", [])
+            article = next(
+                (item for item in references if str(item.get("pmid")) == "42158852"),
+                None,
+            )
+            checks["pubmed_identifiers_verified"] = bool(
+                article
+                and article.get("pmcid") == "PMC13180577"
+                and str(article.get("doi", "")).lower() == "10.3389/fonc.2025.1657746"
+            )
+            markdown = article.get("markdown") if article else None
+            pdf = article.get("pdf") if article else None
+            markdown_bytes = (
+                client.download_artifact(detail["id"], markdown["path"])
+                if markdown and markdown.get("path")
+                else b""
+            )
+            pdf_bytes = (
+                client.download_artifact(detail["id"], pdf["path"])
+                if pdf and pdf.get("path")
+                else b""
+            )
+            checks["local_article_markdown_stored"] = bool(
+                markdown_bytes
+                and hashlib.sha256(markdown_bytes).hexdigest() == markdown.get("sha256")
+                and b"42158852" in markdown_bytes
+                and b"mutant kras" in markdown_bytes.lower()
+            )
+            checks["local_article_pdf_stored"] = bool(
+                pdf_bytes
+                and pdf_bytes.startswith(b"%PDF-")
+                and hashlib.sha256(pdf_bytes).hexdigest() == pdf.get("sha256")
+            )
+            report_text = json.dumps(report, sort_keys=True).lower()
+            checks["article_interpretation_grounded"] = (
+                all(
+                    phrase in report_text
+                    for phrase in (
+                        "45",
+                        "11",
+                        "7",
+                        "2.57",
+                        "0.94",
+                        "7.04",
+                        "3.13",
+                        "1.18",
+                        "8.29",
+                        "prognostic",
+                    )
+                )
+                and any(phrase in report_text for phrase in ("not causal", "causality"))
+                and any(
+                    phrase in report_text
+                    for phrase in ("small cohort", "small sample", "limited sample")
+                )
+            )
+            article_source_id = article.get("source_id") if article else None
+            literature_claims = [
+                claim
+                for claim in report.get("claims", [])
+                if claim.get("claim_type")
+                in {"literature_supported", "inference", "observed"}
+            ]
+            checks["literature_claims_link_local_source"] = bool(
+                article_source_id
+                and literature_claims
+                and all(
+                    article_source_id in claim.get("evidence_refs", [])
+                    for claim in literature_claims
+                )
+            )
+            rendered = client.download_artifact(detail["id"], "report.md").decode(
+                "utf-8", errors="replace"
+            )
+            checks["report_links_local_article"] = bool(
+                article
+                and markdown
+                and pdf
+                and markdown.get("path") in rendered
+                and pdf.get("path") in rendered
+            )
     if source is not None:
-        checks["input_unchanged"] = hashlib.sha256(source.read_bytes()).hexdigest() == case["source_sha256"]
-    return {"checks": checks, "passed": all(checks.values()), "score": sum(checks.values()), "total": len(checks)}
+        checks["input_unchanged"] = (
+            hashlib.sha256(source.read_bytes()).hexdigest() == case["source_sha256"]
+        )
+    return {
+        "checks": checks,
+        "passed": all(checks.values()),
+        "score": sum(checks.values()),
+        "total": len(checks),
+    }
 
 
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("case")
     parser.add_argument("--env-file", type=Path, required=True)
-    parser.add_argument("--cases", type=Path, default=Path(__file__).parent / "cases" / "cases.json")
+    parser.add_argument(
+        "--cases", type=Path, default=Path(__file__).parent / "cases" / "cases.json"
+    )
     parser.add_argument("--output", type=Path)
     parser.add_argument("--timeout-minutes", type=int, default=45)
     args = parser.parse_args()
     cases = json.loads(args.cases.read_text(encoding="utf-8"))
     case = cases[args.case]
     env = parse_env(args.env_file)
-    client = Client(env["SCIENTIFIC_AGENT_PUBLIC_URL"], env["WEB_USERNAME"], env["WEB_PASSWORD"])
-    workspace = client.request("POST", "/api/workspaces", payload={"name": f"EVAL — {case['name']}"})
+    client = Client(
+        env["SCIENTIFIC_AGENT_PUBLIC_URL"],
+        env.get("WEB_USERNAME"),
+        env.get("WEB_PASSWORD"),
+    )
+    workspace = client.request(
+        "POST", "/api/workspaces", payload={"name": f"EVAL — {case['name']}"}
+    )
     source = None
     if case.get("file"):
         source = args.cases.parent / case["file"]
@@ -301,11 +576,14 @@ def main() -> None:
         case["source_sha256"] = hashlib.sha256(content).hexdigest()
         body, content_type = multipart(source.name, content)
         client.request(
-            "POST", f"/api/workspaces/{workspace['id']}/files", body=body,
+            "POST",
+            f"/api/workspaces/{workspace['id']}/files",
+            body=body,
             headers={"Content-Type": content_type},
         )
     run = client.request(
-        "POST", f"/api/workspaces/{workspace['id']}/runs",
+        "POST",
+        f"/api/workspaces/{workspace['id']}/runs",
         payload={
             "objective": case["objective"],
             "enable_code": case["enable_code"],
@@ -314,22 +592,73 @@ def main() -> None:
     )
     deadline = time.monotonic() + args.timeout_minutes * 60
     last_phase = None
+    event_cursor = 0
+    live_observation = {
+        "event_ids": [],
+        "stream_actors": set(),
+        "downloaded_while_active": set(),
+    }
     while time.monotonic() < deadline:
         result = client.request("GET", f"/api/runs/{run['id']}")
+        events = client.request(
+            "GET", f"/api/runs/{run['id']}/events?after_id={event_cursor}"
+        )
+        for event in events:
+            event_cursor = max(event_cursor, event["id"])
+            live_observation["event_ids"].append(event["id"])
+            if event["event_type"] == "model_output_stream":
+                live_observation["stream_actors"].add(event["actor"])
+            artifact_path = event.get("artifact_path")
+            if artifact_path and result["status"] in {
+                "queued",
+                "running",
+                "cancel_requested",
+            }:
+                try:
+                    if client.download_artifact(run["id"], artifact_path):
+                        live_observation["downloaded_while_active"].add(artifact_path)
+                except (OSError, RuntimeError, http.client.HTTPException):
+                    pass
         if result["phase"] != last_phase:
             print(f"phase={result['phase']} status={result['status']}", flush=True)
             last_phase = result["phase"]
-        if result["status"] not in {"queued", "running"}:
+        if result["status"] not in {"queued", "running", "cancel_requested"}:
             break
-        time.sleep(3)
+        time.sleep(1)
     else:
         raise SystemExit("evaluation timed out")
-    evaluation = score(args.case, case, source, result, client)
-    payload = {"case": args.case, "workspace_id": workspace["id"], "run_id": run["id"], "evaluation": evaluation, "result": result}
+    evaluation = score(
+        args.case,
+        case,
+        source,
+        result,
+        client,
+        live_observation,
+    )
+    payload = {
+        "case": args.case,
+        "workspace_id": workspace["id"],
+        "run_id": run["id"],
+        "evaluation": evaluation,
+        "live_observation": {
+            "event_ids": live_observation["event_ids"],
+            "stream_actors": sorted(live_observation["stream_actors"]),
+            "downloaded_while_active": sorted(
+                live_observation["downloaded_while_active"]
+            ),
+        },
+        "result": result,
+    }
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
-        args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(json.dumps({"case": args.case, "run_id": run["id"], **evaluation}, sort_keys=True))
+        args.output.write_text(
+            json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+    print(
+        json.dumps(
+            {"case": args.case, "run_id": run["id"], **evaluation}, sort_keys=True
+        )
+    )
     raise SystemExit(0 if evaluation["passed"] else 2)
 
 

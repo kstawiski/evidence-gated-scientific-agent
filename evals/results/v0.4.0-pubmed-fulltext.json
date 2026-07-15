@@ -1,0 +1,50 @@
+{
+  "date": "2026-07-14",
+  "case": "pubmed-fulltext",
+  "source_evaluation_sha256": "8e7b8fd5073785ce67b6aac9f4174f02875c097d5bb930255fe80c0428d372b3",
+  "image_digest": null,
+  "image_digest_note": "The original deployed evaluator did not record the container digest; no digest is inferred retrospectively.",
+  "workspace_id": "25e02527-49bb-493b-8e47-e551b9ca7efe",
+  "run_id": "283834da-d138-401d-862a-95b5e083591d",
+  "created_at": "2026-07-14T21:17:10.227219+00:00",
+  "finished_at": "2026-07-14T21:28:54.706510+00:00",
+  "scientific_status": "supported",
+  "evaluation": {
+    "passed": true,
+    "score": 17,
+    "total": 17,
+    "checks": {
+      "article_interpretation_grounded": true,
+      "article_sections": true,
+      "core_provenance": true,
+      "deterministic_validation": true,
+      "gemma_output_streamed": true,
+      "independent_review": true,
+      "literature_claims_link_local_source": true,
+      "live_artifact_access": true,
+      "live_events_observed": true,
+      "local_article_markdown_stored": true,
+      "local_article_pdf_stored": true,
+      "pubmed_identifiers_verified": true,
+      "qwen_output_streamed": true,
+      "report_links_local_article": true,
+      "retrieval_used": true,
+      "source_urls_observed": true,
+      "terminal_status": true
+    }
+  },
+  "selected_artifacts": {
+    "deterministic_validation.json": "49fb8eb3f7a3eeae5cf509025b5759003751abf57b629f033cc9ebbb65639151",
+    "gemma_review.json": "01fdfde06afaae6a46e60e0b159ba1c02c1edee403ac5146465838adbbf995a9",
+    "reference_manifest.json": "8fc787cf79b98aba6a02f6ae306124ba49642354afbf6d06bcb7606dbe14e95d",
+    "report.md": "3aa596e1011a81de5b06397817aaad9cb9cfbf81dbe5bdbfe893cc56a5680971",
+    "run_result.json": "99317a380208d87aea660cf4c013083f66c1577ae8916d32ec36a76423d2c671"
+  },
+  "live_observation": {
+    "stream_actors": [
+      "Gemma",
+      "Qwen"
+    ],
+    "artifact_access_while_active": true
+  }
+}

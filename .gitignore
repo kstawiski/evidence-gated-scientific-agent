@@ -10,4 +10,5 @@ runs/
 delegated_tasks/
 .env
 web-data/
+.evidence-bench/
 *.log

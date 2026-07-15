@@ -1,0 +1,60 @@
+{
+  "date": "2026-07-15",
+  "case": "known-effect",
+  "source_evaluation_sha256": "44bf6c876ef364693e81e86df1a64143dac4440b76806d5f06f6532614bb368e",
+  "image_digest": "sha256:4f055eb3a5515b49257fad69e701dd3d46ec07fdf28c430b09293e66c4a2021c",
+  "workspace_id": "187c0fe5-2967-4bbd-a297-f7a9423274be",
+  "parent_run_id": "5428105d-8979-4bf1-8dd1-76f9fedccee2",
+  "accepted_revision_run_id": "b5bbf30c-15bd-42f2-bb65-b06519a94a9c",
+  "created_at": "2026-07-15T00:18:28.022117+00:00",
+  "finished_at": "2026-07-15T00:30:30.222734+00:00",
+  "scientific_status": "supported",
+  "evaluation": {
+    "passed": true,
+    "score": 18,
+    "total": 18,
+    "checks": {
+      "article_sections": true,
+      "computed_claims_traceable": true,
+      "core_provenance": true,
+      "cross_language_reconciled": true,
+      "deterministic_validation": true,
+      "effect_size_reconciled": true,
+      "figure_and_table_registered": true,
+      "figure_generated": true,
+      "gemma_ocr_display_audit": true,
+      "gemma_output_streamed": true,
+      "independent_review": true,
+      "input_unchanged": true,
+      "live_artifact_access": true,
+      "live_events_observed": true,
+      "planted_effect_recovered": true,
+      "python_and_r_succeeded": true,
+      "qwen_output_streamed": true,
+      "terminal_status": true
+    }
+  },
+  "accepted_revision_hashes": {
+    "manifest_sha256": "f188d04d4f51cea5985056ee3b53a86806c2d5c88fa7a1088716809bf398ce07",
+    "run_result_sha256": "9f38366836f6c92540e99c75a43c4919695c008d707048f2acc8d16263221b8d",
+    "report_sha256": "d962b492525d9ede43876b28e328773662f0d2fa4eb4de91161ddb1aa8500103"
+  },
+  "immutable_parent_hashes": {
+    "manifest_sha256": "bc2b52da36adf87ad118f15ad6943c43c78809f7767cb53e77572ec81e5d6728",
+    "run_result_sha256": "36ff2a43b52387d34eb91975d2a0e9723f666c706353324b0d5a31b19cb9cee5",
+    "report_sha256": "84ea5150074a24990371e7d68fa95ce8d569f4e021b63040396032930887944e"
+  },
+  "selected_artifacts": {
+    "deterministic_validation.json": "49fb8eb3f7a3eeae5cf509025b5759003751abf57b629f033cc9ebbb65639151",
+    "display_manifest.json": "d00e9949b8ad23ab9fcb053499040019faf11d33d7644a646d68eccb6d629472",
+    "gemma_display_audit.json": "7c199106f1d7c761346dd845e1edaa723af85fee49625f65eb53d54f6c6d292c",
+    "gemma_review.json": "c193008ef69a8a71b09e14699373c548c8878ed4d8b0f78ccbd403e08cece507",
+    "input_manifest.json": "e6659c031294fd818d50ef951c261d66c8ce5b00b4a323a2e32a8d70b34c0fad"
+  },
+  "review_notes": {
+    "accepted_revision_enabled_code": false,
+    "new_result_artifacts_created": false,
+    "display_review_mode": "ocr_text_and_geometry",
+    "manual_caption_and_prose_inspection": "passed"
+  }
+}

@@ -4,8 +4,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="light">
-    <meta name="theme-color" content="#102c2e">
+    <meta name="theme-color" content="#ffffff">
     <title>Evidence Bench</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/static/app.css">
     <script src="/static/app.js" defer></script>
   </head>
@@ -17,7 +18,7 @@
       </button>
       <a class="brand" href="/" aria-label="Evidence Bench home">
         <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span><strong>Evidence Bench</strong><small>computational science, under audit</small></span>
+        <span><strong>Evidence Bench</strong><small>Evidence-gated scientific AI</small></span>
       </a>
       <div class="model-strip" aria-label="Model roles">
         <span><b>Q</b><span id="executor-model">executor</span></span>
@@ -30,7 +31,7 @@
     <div class="app-shell">
       <aside class="sidebar" id="sidebar" aria-label="Workspaces">
         <div class="sidebar-heading">
-          <div><span class="eyebrow">Specimen trays</span><h2>Workspaces</h2></div>
+          <div><span class="eyebrow">Research projects</span><h2>Workspaces</h2></div>
           <button class="icon-button" id="new-workspace-button" aria-label="Create workspace">+</button>
         </div>
         <form class="new-workspace hidden" id="new-workspace-form">
@@ -47,9 +48,9 @@
       <main id="main" class="workspace-main" tabindex="-1">
         <section class="empty-state" id="empty-state">
           <div class="empty-orbit" aria-hidden="true"><i></i><i></i><i></i></div>
-          <span class="eyebrow">No active tray</span>
-          <h1>Give the work somewhere to live.</h1>
-          <p>Create an isolated workspace for inputs, Python/R output, evidence, and the final audited report.</p>
+          <span class="eyebrow">Start a scientific workspace</span>
+          <h1>From research question to audited evidence.</h1>
+          <p>Bring together source files, Python and R, current literature, figures, and an independently reviewed scientific report.</p>
           <button class="primary-button" id="empty-create-button">Create first workspace</button>
         </section>
 
@@ -60,7 +61,21 @@
               <h1 id="workspace-title">—</h1>
               <p id="workspace-meta">—</p>
             </div>
-            <button class="danger-link" id="delete-workspace-button">Delete workspace</button>
+            <button class="danger-link" id="delete-workspace-button" data-run-mutable>Delete workspace</button>
+          </section>
+
+          <section id="active-run-banner" class="panel active-run-banner hidden" aria-labelledby="active-run-heading">
+            <div class="run-now">
+              <span class="live-indicator" aria-hidden="true"></span>
+              <div><span class="eyebrow">Audited run in progress</span><h2 id="active-run-heading">Planning</h2><p id="active-run-message" role="status" aria-live="polite"></p></div>
+            </div>
+            <dl class="run-facts">
+              <div><dt>Actor</dt><dd id="active-run-actor">Controller</dd></div>
+              <div><dt>Started</dt><dd id="active-run-started">—</dd></div>
+              <div><dt>Capabilities</dt><dd id="active-run-capabilities">—</dd></div>
+              <div><dt>Run</dt><dd><code id="active-run-id">—</code></dd></div>
+            </dl>
+            <button id="cancel-run-button" class="danger-button" type="button">Cancel run</button>
           </section>
 
           <div class="bench-grid">
@@ -71,32 +86,43 @@
                   <span class="panel-state">INPUT</span>
                 </header>
                 <form id="task-form">
+                  <p id="workspace-lock-note" class="workspace-lock-note hidden" role="note">The protocol and inputs are locked until the active run finishes or is cancelled. Monitoring, downloads, history, and Cancel remain available.</p>
                   <label for="objective">Scientific objective</label>
                   <div class="workflow-starters" aria-label="Workflow templates">
-                    <button type="button" data-template="analyze">Analyze uploaded data</button>
-                    <button type="button" data-template="crosscheck">Cross-check Python + R</button>
-                    <button type="button" data-template="audit">Audit a sourced claim</button>
+                    <button type="button" data-template="analyze" data-run-mutable>Analyze uploaded data</button>
+                    <button type="button" data-template="crosscheck" data-run-mutable>Cross-check Python + R</button>
+                    <button type="button" data-template="audit" data-run-mutable>Audit a sourced claim</button>
                   </div>
-                  <textarea id="objective" rows="6" minlength="3" maxlength="20000" placeholder="Analyze the uploaded dataset, test the prespecified hypothesis, report effect sizes with uncertainty, and link every claim to computation or a retrieved source." required></textarea>
+                  <textarea id="objective" rows="6" minlength="3" maxlength="20000" placeholder="Analyze the uploaded dataset, test the prespecified hypothesis, report effect sizes with uncertainty, and link every claim to computation or a retrieved source." required data-run-mutable></textarea>
                   <div class="control-grid">
                     <fieldset>
                       <legend>Execution</legend>
-                      <label class="switch-row"><input type="checkbox" id="enable-code" checked><span class="switch"></span><span><strong>Python + R</strong><small>Offline, read-only inputs, bounded output</small></span></label>
+                      <label class="switch-row"><input type="checkbox" id="enable-code" checked data-run-mutable><span class="switch"></span><span><strong>Python + R</strong><small>Offline, read-only inputs, bounded output</small></span></label>
                     </fieldset>
                     <fieldset>
                       <legend>Research connections</legend>
                       <div class="mcp-options" id="mcp-options">
-                        <label><input type="checkbox" value="context7"><span>Context7</span></label>
-                        <label><input type="checkbox" value="brave-search"><span>Brave Search</span></label>
-                        <label><input type="checkbox" value="chrome-devtools"><span>Chrome DevTools</span></label>
+                        <label><input type="checkbox" value="context7" checked data-run-mutable><span>Context7</span></label>
+                        <label><input type="checkbox" value="brave-search" checked data-run-mutable><span>Brave Search</span></label>
+                        <label><input type="checkbox" value="chrome-devtools" checked data-run-mutable><span>Chrome DevTools</span></label>
                       </div>
+                      <p class="field-help">Enabled by default. Context7 and Brave send generated queries to external services; uncheck research connections before using confidential task text.</p>
+                      <button id="research-browser-button" class="research-browser-launch" type="button">
+                        <span aria-hidden="true">▣</span><span><strong>Open research browser</strong><small>Interact with the agent's shared Chromium session</small></span>
+                      </button>
                     </fieldset>
                   </div>
                   <div class="task-actions">
                     <p><span class="shield" aria-hidden="true">◇</span> Deterministic policy evaluates every tool call.</p>
-                    <button class="primary-button" type="submit" id="run-button">Start audited run <span>→</span></button>
+                    <button class="primary-button" type="submit" id="run-button" data-run-mutable>Start audited run <span>→</span></button>
                   </div>
                 </form>
+                <details class="workflow-explainer">
+                  <summary>How the evidence gate works</summary>
+                  <p><strong>Qwen plans, retrieves, computes, and drafts.</strong> The controller locks the method, confines Python/R and package installation, records artifacts, and runs deterministic checks. <strong>Gemma then independently audits</strong> methods, claims, tables, and actual raster figures. Tests and source records outrank model agreement.</p>
+                  <p>Biomedical and health-science analyses must search PubMed and acquire locally previewable article Markdown, with a verified PDF when legitimately available. Context7, Brave Search, and Chrome DevTools are enabled by default and Qwen is instructed to use the connection relevant to the task; users can uncheck any connection before starting. Every substantive claim remains linked to a retrieved source, successful computation, or explicit uncertainty. Cancellation preserves partial work as incomplete; a follow-up creates a new audited child revision and never overwrites its parent.</p>
+                  <p>Outputs are standards-derived exploratory scientific reports—not peer review, science lock, manuscript readiness, or clinical authority.</p>
+                </details>
               </section>
 
               <section class="panel result-panel" id="result-panel">
@@ -107,22 +133,43 @@
                 <div class="result-empty" id="result-empty">Run a task to populate the evidence record.</div>
                 <div class="hidden" id="result-content">
                   <div class="report-lead">
-                    <div><span class="eyebrow">Validated report</span><h3 id="report-title">—</h3></div>
+                    <div><span class="eyebrow">Exploratory scientific report</span><h3 id="report-title">—</h3><p id="revision-label" class="revision-label"></p></div>
                     <div class="report-actions">
-                      <button class="download-button" id="reuse-run" type="button">Reuse protocol</button>
+                      <button class="download-button" id="reuse-run" type="button" data-run-mutable>Reuse protocol</button>
                       <a class="download-button" id="bundle-download" href="#">Bundle.zip ↓</a>
                       <a class="download-button" id="report-download" href="#">Report.md ↓</a>
                     </div>
                   </div>
-                  <p class="executive-summary" id="report-summary"></p>
                   <div class="report-tabs" role="tablist" aria-label="Report sections">
-                    <button class="active" data-tab="claims" role="tab">Claims</button>
-                    <button data-tab="methods" role="tab">Methods</button>
+                    <button class="active" data-tab="article" role="tab">Article</button>
+                    <button data-tab="claims" role="tab">Claims</button>
                     <button data-tab="sources" role="tab">Sources</button>
                     <button data-tab="artifacts" role="tab">Artifacts</button>
-                    <button data-tab="limits" role="tab">Limits</button>
+                    <button data-tab="review" role="tab">Review</button>
+                    <button data-tab="discussion" role="tab">Discuss with Gemma</button>
                   </div>
                   <div class="tab-content" id="tab-content"></div>
+                  <section id="follow-up-panel" class="follow-up-panel">
+                    <h3>Improve this report</h3>
+                    <p>A follow-up creates a new Qwen→Gemma audited revision. This record is never overwritten.</p>
+                    <div class="follow-up-presets">
+                      <button type="button" data-follow-up="Clarify the methods and make every analysis choice reproducible." data-run-mutable>Clarify methods</button>
+                      <button type="button" data-follow-up="Add an appropriate sensitivity analysis and update only conclusions that the new evidence changes." data-run-mutable>Add sensitivity analysis</button>
+                      <button type="button" data-follow-up="Improve the scientific figures, captions, alternative text, and body-to-figure consistency." data-run-mutable>Improve figures</button>
+                      <button type="button" data-follow-up="Address the most consequential unresolved limitation without overstating the evidence." data-run-mutable>Address a limitation</button>
+                    </div>
+                    <form id="follow-up-form">
+                      <label for="follow-up-query">Requested improvement</label>
+                      <textarea id="follow-up-query" rows="3" minlength="3" maxlength="20000" required data-run-mutable></textarea>
+                      <label class="follow-up-code-option" for="follow-up-enable-code">
+                        <input id="follow-up-enable-code" type="checkbox" data-run-mutable>
+                        Allow Python/R for this revision
+                      </label>
+                      <p class="field-help">Leave off for writing, caption, or interpretation changes. Enable only when the requested revision must recompute results.</p>
+                      <button id="follow-up-submit" class="primary-button" type="submit" data-run-mutable>Create audited revision</button>
+                    </form>
+                    <nav id="revision-lineage" class="revision-lineage" aria-label="Report revisions"></nav>
+                  </section>
                 </div>
               </section>
             </div>
@@ -132,8 +179,8 @@
                 <header class="panel-heading compact">
                   <div><span class="panel-index">IN</span><div><h2>Inputs</h2><p>Immutable during an active run.</p></div></div>
                 </header>
-                <label class="drop-zone" id="drop-zone" for="file-input">
-                  <input id="file-input" type="file" multiple>
+                <label class="drop-zone" id="drop-zone" for="file-input" data-run-mutable>
+                  <input id="file-input" type="file" multiple data-run-mutable>
                   <span class="drop-icon">＋</span><strong>Add source files</strong><small>Click or drop files here</small>
                 </label>
                 <div class="file-list" id="file-list"></div>
@@ -151,6 +198,15 @@
                   <li data-phase="repair"><i></i><div><strong>Falsification & repair</strong><small>Bounded evidence-driven loop</small></div><span>—</span></li>
                   <li data-phase="finalizing"><i></i><div><strong>Provenance bundle</strong><small>Hashes, artifacts, final status</small></div><span>—</span></li>
                 </ol>
+                <details id="activity-details" class="activity-details" open>
+                  <summary>Live activity <span id="activity-count">0 events</span></summary>
+                  <section id="model-output-monitor" class="model-output-monitor hidden" aria-labelledby="model-output-heading">
+                    <div class="model-output-heading"><h3 id="model-output-heading">Observable model output</h3><div><span id="model-output-actor">Qwen</span><button id="model-output-expand" type="button">Open console</button></div></div>
+                    <pre id="model-output-text" aria-live="polite"></pre>
+                    <p>Visible non-thought output only. Hidden reasoning, prompts, secrets, and raw tool arguments are never shown.</p>
+                  </section>
+                  <ol id="activity-log" class="activity-log" aria-label="Run activity"></ol>
+                </details>
               </section>
 
               <section class="panel history-panel">
@@ -164,6 +220,40 @@
         </div>
       </main>
     </div>
+    <dialog id="cancel-dialog" class="cancel-dialog">
+      <form method="dialog">
+        <h2>Cancel the active run?</h2>
+        <p>The controller will stop at the next bounded checkpoint, terminate active Python/R computation, and preserve partial artifacts as incomplete. No supported final report will be issued.</p>
+        <div><button value="keep">Keep running</button><button value="cancel" class="danger-button">Cancel run</button></div>
+      </form>
+    </dialog>
+    <dialog id="artifact-preview-dialog" class="artifact-preview-dialog">
+      <section>
+        <header>
+          <div><span class="eyebrow">Text artifact / live console</span><h2 id="artifact-preview-title">Preview</h2></div>
+          <button id="artifact-preview-close" class="icon-button" type="button" aria-label="Close preview">×</button>
+        </header>
+        <p id="artifact-preview-meta">Loading preview…</p>
+        <pre id="artifact-preview-text" tabindex="0" aria-live="polite"></pre>
+        <footer><span>Live bounded UTF-8 preview. Hidden reasoning and secrets are excluded from model streams.</span><a id="artifact-preview-download" class="download-button" href="#">Download full file ↓</a></footer>
+      </section>
+    </dialog>
+    <dialog id="research-browser-dialog" class="research-browser-dialog">
+      <section>
+        <header>
+          <div><span class="eyebrow">Service-owned Chromium</span><h2>Research browser</h2></div>
+          <div class="research-browser-actions">
+            <button id="research-browser-reconnect" type="button">Reconnect view</button>
+            <a id="research-browser-new-tab" class="download-button" href="#" target="_blank" rel="noreferrer">Open in new tab ↗</a>
+            <button id="research-browser-close" class="icon-button" type="button" aria-label="Close research browser">×</button>
+          </div>
+        </header>
+        <p><strong>Shared lab session.</strong> Use this view to clear a bot check or complete a publisher interaction. Other users with access can see and control the same browser profile; do not enter personal credentials.</p>
+        <div class="research-browser-frame-wrap">
+          <iframe id="research-browser-frame" title="Interactive Evidence Bench research browser" referrerpolicy="no-referrer" allow="clipboard-read; clipboard-write"></iframe>
+        </div>
+      </section>
+    </dialog>
     <div class="toast-region" id="toast-region" aria-live="polite"></div>
   </body>
 </html>

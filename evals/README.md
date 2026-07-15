@@ -5,13 +5,18 @@ and provenance downloads rather than mocking an agent response.
 
 - `known-effect` requires both Python and R to recover the planted +5 mean-change
   difference, agree on the test statistic and Hedges g, emit a passing JSON
-  reconciliation record, and generate a figure.
+  reconciliation record, and generate and register a figure plus a report-ready
+  CSV table.
 - `corrupted-input` requires both languages to identify duplicate `C10`, missing
   `T05`, and extreme `T08` without silently modifying the data; the report must
   withhold decision readiness and label any calculation sensitivity-only.
 - `retrieval-grounding` requires successful MCP retrieval, observed source URLs,
   official SciPy and R documentation domains, and the two unequal-variance API
   switches.
+- `pubmed-fulltext` requires the agent to search, acquire, and search within one
+  known open-access PubMed article; preserve its identifiers and evidentiary
+  limitations; and expose hash-verified local Markdown and PDF copies through
+  the portable report bundle.
 
 Run one case from the deployed checkout. The owner-only `.env` supplies browser
 authentication without placing credentials on the command line:
@@ -25,7 +30,68 @@ python3 evals/run_deployed_eval.py known-effect \
 The command exits nonzero when any workflow, provenance, independent-review, or
 case-specific scientific check fails. Failed results are retained for diagnosis.
 
-## v0.3.0 release validation
+Exercise the public A2A 1.0 streaming surface with the reusable live gate. Keep
+the bearer token in the environment so it is neither passed in process arguments
+nor printed by the evaluator:
+
+```bash
+A2A_TOKEN="$(< /secure/path/a2a-token)" \
+A2A_BASE_URL=https://evidence-bench.example.org \
+python3 evals/run_a2a_live_gate.py
+```
+
+The gate selects Context7, Brave Search, and Chrome DevTools by default. Optional
+`--mcp-server` flags select a narrower set (an explicit empty value opts out), and
+`--enable-code` authorizes sandboxed Python/R. The gate validates the Agent Card, server-assigned
+task ID, submitted/working/completed SSE states, streamed report artifacts,
+`GetTask`, scientific terminal status, and the report's Introduction, Methods,
+Results, Discussion, and Conclusions sections. It emits only non-secret JSON
+evidence and exits nonzero on a failed assertion.
+
+## v0.4.0 release validation
+
+The candidate was exercised against a persistent deployed Compose stack starting
+on 2026-07-14, with final v0.4.0 gates completed on 2026-07-15, not against
+mocked model responses. Model routes are private deployment configuration; the
+repository does not embed them.
+
+| Case or boundary | Result | What the gate established |
+| --- | ---: | --- |
+| PubMed/full-text | **17/17** | A biomedical run performed typed PubMed search and acquisition, imported a browser-obtained open-access PDF, verified and stored local Markdown/PDF copies, reported the exact PMID/PMCID/DOI, cohort count and survival estimates, constrained the prognostic interpretation, repaired a missing search artifact and DOI after independent review, and finished with deterministic and deployment-configured Gemma text-review passes. |
+| Known planted effect | **18/18** | On 2026-07-15, workspace `187c0fe5-2967-4bbd-a297-f7a9423274be` used image `sha256:4f055eb3a5515b49257fad69e701dd3d46ec07fdf28c430b09293e66c4a2021c`. Parent run `5428105d-8979-4bf1-8dd1-76f9fedccee2` independently recovered the planted +5 effect in Python and R and reconciled the results; Qwen and Gemma streamed and live artifacts were accessed. Accepted code-disabled revision `b5bbf30c-15bd-42f2-bb65-b06519a94a9c` passed the evaluator, deterministic validation, Gemma report review, and OCR/geometry/table display review; it preserved the parent immutably, generated no result outputs, and passed final manual caption/prose inspection. An earlier nominally supported revision with inverted provenance was rejected and excluded from the score. |
+| A2A 1.0 live interoperability | **PASS** | On 2026-07-15, functional image `sha256:e95760b378f4923142e499899ebb481687c0a71012aee480556458a6d2a6f726` served task `44702ea7-72d8-4545-853e-82fd926e0831` backed by run `0c69fa4f-459b-419f-81a8-47737f732ce6`. Streaming emitted submitted, working, and completed states plus `report.md` and `run-summary.json`; `GetTask` returned the completed artifacts and the scientific status was `supported`. MCP probe run `fa5e58b9-92b4-4bfb-82f3-fd0e14dd279d` in workspace `6e08b205-4d2b-49fb-a0ec-5bbbea735c4a` observed Brave Search, Context7, `resolve-library-id`, `query-docs`, `brave_web_search`, `brave_llm_context`, `search_pubmed`, and `acquire_pubmed_article`; it repaired a blocking canonical PubMed-title mismatch before Gemma passed. |
+| Package lifecycle | **PASS** | The isolated package worker installed and the offline analysis sandbox loaded PyPI `emoji` 2.15.0, CRAN `moments` 0.14.1, and Bioconductor `BiocGenerics` 0.44.0. Deleting the workspace removed its immutable environment generations. |
+| Cancellation | **PASS** | A live in-flight analysis was cooperatively cancelled and durably remained `cancelled`; its partial state was not presented as a report. |
+| Managed browser boundary | **PASS** | The service-owned Chromium CDP session and passwordless trusted-network noVNC view were reachable through their intended gateways; CDP stayed unpublished, direct Internet and private proxy targets were denied, downloads/profile data survived restart, and the application saw downloads read-only. |
+
+The PubMed gate's scored JSON and full provenance bundle are retained with the
+deployment evaluation artifacts. The local paper copies are hash verified and
+report citations link to the portable Markdown/PDF artifacts, not to an
+unverified filename. The display critic receives sandbox-extracted OCR text and
+geometry rather than image pixels; this is a text-review gate, not a multimodal
+or pixel-level claim.
+
+Public compact records for the exact scores, run identifiers, timestamps, and
+selected artifact hashes are retained as
+[`results/v0.4.0-pubmed-fulltext.json`](results/v0.4.0-pubmed-fulltext.json) and
+[`results/v0.4.0-known-effect.json`](results/v0.4.0-known-effect.json). The
+PubMed evaluator did not record its image digest, and the public record states
+that gap instead of inferring one retrospectively.
+
+The A2A evidence is retained as
+[`results/v0.4.0-a2a-live.json`](results/v0.4.0-a2a-live.json). The server uses
+the SDK `InMemoryTaskStore`: durable Evidence Bench runs and provenance survive
+service restart, but A2A `GetTask` snapshots and task-subscription state do not.
+An issue-first proposal is open in
+[`a2aproject/a2a-samples#639`](https://github.com/a2aproject/a2a-samples/issues/639),
+and a small draft pull request is the proposed next action pending maintainer
+direction.
+
+These are narrow release gates, not an estimate of performance on arbitrary
+scientific work. Failed and repaired attempts remain part of the durable audit
+trail.
+
+## Historical v0.3.0 validation
 
 The release candidate was exercised against the permanently deployed Compose
 stack on 2026-07-13, not against mocked model responses:

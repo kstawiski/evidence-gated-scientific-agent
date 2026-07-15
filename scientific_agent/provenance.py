@@ -52,12 +52,17 @@ def write_json(path: Path, value: Any) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     if hasattr(value, "model_dump"):
         value = value.model_dump(mode="json")
-    path.write_text(json.dumps(value, indent=2, sort_keys=True, default=str) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(value, indent=2, sort_keys=True, default=str) + "\n",
+        encoding="utf-8",
+    )
 
 
 def build_manifest(run_dir: Path) -> dict[str, Any]:
     files = []
-    for path in sorted(p for p in run_dir.rglob("*") if p.is_file() and p.name != "manifest.json"):
+    for path in sorted(
+        p for p in run_dir.rglob("*") if p.is_file() and p.name != "manifest.json"
+    ):
         files.append(
             {
                 "path": str(path.relative_to(run_dir)),

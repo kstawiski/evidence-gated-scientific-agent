@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
-from concurrent.futures import ThreadPoolExecutor
+import threading
+from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
 from typing import Awaitable, Callable
@@ -17,6 +18,18 @@ from .store import ACTIVE_RUN_STATES, WorkspaceStore
 
 
 Runner = Callable[..., Awaitable[RunResult]]
+ACTORS = {
+    "planning": "Qwen + Gemma",
+    "plan-review": "Qwen + Gemma",
+    "research": "Qwen",
+    "reporting": "Qwen",
+    "validation": "Controller",
+    "scientific-review": "Gemma",
+    "repair": "Qwen",
+    "finalizing": "Controller",
+    "complete": "Controller",
+    "stopped": "Controller",
+}
 
 
 class TaskService:
@@ -33,6 +46,12 @@ class TaskService:
         self.executor = ThreadPoolExecutor(
             max_workers=max_workers, thread_name_prefix="evidence-bench"
         )
+        self._lock = threading.Lock()
+        self._futures: dict[str, Future] = {}
+        self._cancel_events: dict[str, threading.Event] = {}
+        self._async_tasks: dict[
+            str, tuple[asyncio.AbstractEventLoop, asyncio.Task]
+        ] = {}
 
     def submit(
         self,
@@ -40,55 +59,193 @@ class TaskService:
         objective: str,
         enable_code: bool,
         mcp_servers: tuple[str, ...],
+        *,
+        parent_run_id: str | None = None,
+        run_kind: str = "analysis",
     ) -> dict:
         run = self.store.create_run(
-            workspace_id, objective, enable_code, mcp_servers
+            workspace_id,
+            objective,
+            enable_code,
+            mcp_servers,
+            parent_run_id=parent_run_id,
+            run_kind=run_kind,
         )
-        self.executor.submit(lambda: asyncio.run(self.execute(run["id"])))
+        cancellation = threading.Event()
+        with self._lock:
+            self._cancel_events[run["id"]] = cancellation
+            future = self.executor.submit(
+                lambda: asyncio.run(self.execute(run["id"], cancellation))
+            )
+            self._futures[run["id"]] = future
+        future.add_done_callback(lambda _: self._forget(run["id"]))
         return run
 
-    async def execute(self, run_id: str) -> dict:
+    def _forget(self, run_id: str) -> None:
+        with self._lock:
+            self._futures.pop(run_id, None)
+            self._cancel_events.pop(run_id, None)
+            self._async_tasks.pop(run_id, None)
+
+    def submit_follow_up(
+        self,
+        parent_run_id: str,
+        request: str,
+        *,
+        enable_code: bool | None = None,
+    ) -> dict:
+        parent = self.store.get_run(parent_run_id)
+        request = request.strip()
+        if not 3 <= len(request) <= 20_000:
+            raise ValueError("follow-up request must contain 3-20,000 characters")
+        provenance = parent.get("provenance_dir")
+        if (
+            not provenance
+            or not (Path(provenance) / "scientific_report.json").is_file()
+        ):
+            raise RuntimeError("the parent run has no scientific report to revise")
+        return self.submit(
+            parent["workspace_id"],
+            request,
+            parent["enable_code"] if enable_code is None else enable_code,
+            tuple(parent["mcp_servers"]),
+            parent_run_id=parent_run_id,
+            run_kind="revision",
+        )
+
+    async def execute(
+        self,
+        run_id: str,
+        cancellation: threading.Event | None = None,
+    ) -> dict:
+        cancellation = cancellation or threading.Event()
         run = self.store.get_run(run_id)
         if run["status"] not in ACTIVE_RUN_STATES:
             return run
+        if not self.store.start_run(run_id):
+            if self.store.get_run(run_id)["status"] == "cancel_requested":
+                self.store.mark_cancelled(run_id)
+            return self.store.get_run(run_id)
+
+        loop = asyncio.get_running_loop()
+        task = asyncio.current_task()
+        if task is not None:
+            with self._lock:
+                self._async_tasks[run_id] = (loop, task)
+
         files_dir, runs_dir = self.store.paths(run["workspace_id"])
         settings = replace(
             self.base_settings,
             workspace=files_dir,
             runs_dir=runs_dir,
         )
+        provenance_holder: dict[str, Path] = {}
+
+        def provenance_ready(path: Path) -> None:
+            resolved = path.resolve()
+            if resolved.parent != runs_dir.resolve():
+                raise ValueError("run provenance escaped the workspace")
+            provenance_holder["path"] = resolved
+            self.store.update_run(
+                run_id,
+                provenance_dir=str(resolved),
+                event_type="provenance_ready",
+                actor="Controller",
+            )
 
         def progress(phase: str, message: str) -> None:
-            self.store.update_run(run_id, phase=phase, message=message)
+            current = self.store.get_run(run_id)
+            if current["status"] != "running" or cancellation.is_set():
+                return
+            self.store.update_run(
+                run_id,
+                phase=phase,
+                message=message,
+                event_type="phase_changed",
+                actor=ACTORS.get(phase, "Controller"),
+            )
 
-        self.store.update_run(
-            run_id,
-            status="running",
-            phase="planning",
-            message="Independent plans are being prepared",
-            started_at=utc_now(),
-        )
+        def activity(
+            event_type: str,
+            actor: str,
+            phase: str,
+            message: str,
+            artifact_path: str | None,
+        ) -> None:
+            relative: str | None = None
+            if artifact_path is not None:
+                root = provenance_holder.get("path")
+                candidate = Path(artifact_path).resolve()
+                if root is None or (
+                    candidate != root and root not in candidate.parents
+                ):
+                    return
+                relative = candidate.relative_to(root).as_posix()
+            self.store.append_event(
+                run_id,
+                event_type,
+                actor,
+                phase,
+                message,
+                relative,
+            )
+
+        runner_kwargs = {
+            "mcp_names": tuple(run["mcp_servers"]),
+            "include_chrome": "chrome-devtools" in run["mcp_servers"],
+            "enable_code": run["enable_code"],
+            "progress": progress,
+            "on_provenance_ready": provenance_ready,
+            "activity": activity,
+            "cancel_event": cancellation,
+            # The shared lab service uses the asymmetric evidence gate by default:
+            # one Qwen plan, a fixed five-criterion Gemma plan audit, and the
+            # independent final report/display audits. The CLI retains explicit
+            # full dual-plan mode for exceptional investigations.
+            "simple_mode": True,
+        }
+        if run.get("parent_run_id"):
+            parent = self.store.get_run(run["parent_run_id"])
+            runner_kwargs.update(
+                {
+                    "parent_provenance_dir": Path(parent["provenance_dir"]),
+                    "revision_request": run["objective"],
+                }
+            )
+
         existing_run_dirs = {
             path.resolve() for path in runs_dir.iterdir() if path.is_dir()
         }
         try:
-            result = await self.runner(
-                run["objective"],
-                settings,
-                mcp_names=tuple(run["mcp_servers"]),
-                include_chrome="chrome-devtools" in run["mcp_servers"],
-                enable_code=run["enable_code"],
-                progress=progress,
+            result = await self.runner(run["objective"], settings, **runner_kwargs)
+        except asyncio.CancelledError:
+            cancellation.set()
+            partial = self._partial_root(
+                runs_dir, existing_run_dirs, provenance_holder.get("path")
             )
+            self._preserve_cancelled(partial)
+            self.store.mark_cancelled(
+                run_id, provenance_dir=str(partial) if partial is not None else None
+            )
+            return self.store.get_run(run_id)
         except Exception as exc:
+            if (
+                cancellation.is_set()
+                or self.store.get_run(run_id)["status"] == "cancel_requested"
+            ):
+                partial = self._partial_root(
+                    runs_dir, existing_run_dirs, provenance_holder.get("path")
+                )
+                self._preserve_cancelled(partial)
+                self.store.mark_cancelled(
+                    run_id, provenance_dir=str(partial) if partial is not None else None
+                )
+                return self.store.get_run(run_id)
+            partial = self._partial_root(
+                runs_dir, existing_run_dirs, provenance_holder.get("path")
+            )
             provenance_dir = None
-            candidates = [
-                path.resolve()
-                for path in runs_dir.iterdir()
-                if path.is_dir() and path.resolve() not in existing_run_dirs
-            ]
-            if candidates:
-                partial = max(candidates, key=lambda path: path.stat().st_mtime_ns)
+            if partial is not None:
                 try:
                     write_json(
                         partial / "run_failure.json",
@@ -98,7 +255,7 @@ class TaskService:
                     provenance_dir = str(partial)
                 except Exception:
                     provenance_dir = None
-            self.store.update_run(
+            self.store.finish_run(
                 run_id,
                 status="failed",
                 phase="failed",
@@ -108,34 +265,156 @@ class TaskService:
                 provenance_dir=provenance_dir,
             )
             return self.store.get_run(run_id)
-        self.store.update_run(
+        finally:
+            with self._lock:
+                self._async_tasks.pop(run_id, None)
+
+        completion_messages = {
+            "supported": "Validated result is ready",
+            "supported_with_comments": "Validated result is ready with nonblocking comments",
+            "contradicted": "Completed: the evidence contradicts a material claim",
+            "inconclusive": "Completed: the available evidence is inconclusive",
+            "requires_more_evidence": "Completed with unresolved evidence requirements",
+            "requires_human_decision": "Completed and awaiting a human scientific decision",
+        }
+        committed = self.store.finish_run(
             run_id,
             status=result.status,
             phase="complete",
-            message="Validated result is ready",
+            message=completion_messages.get(result.status, "Run completed"),
             finished_at=utc_now(),
             provenance_dir=result.provenance_dir,
         )
+        if not committed:
+            cancellation.set()
+            partial = Path(result.provenance_dir)
+            self._preserve_cancelled(partial)
+            self.store.mark_cancelled(run_id, provenance_dir=str(partial))
+        return self.store.get_run(run_id)
+
+    @staticmethod
+    def _partial_root(
+        runs_dir: Path,
+        existing: set[Path],
+        known: Path | None,
+    ) -> Path | None:
+        if known is not None and known.is_dir():
+            return known
+        candidates = [
+            path.resolve()
+            for path in runs_dir.iterdir()
+            if path.is_dir() and path.resolve() not in existing
+        ]
+        return (
+            max(candidates, key=lambda path: path.stat().st_mtime_ns)
+            if candidates
+            else None
+        )
+
+    @staticmethod
+    def _preserve_cancelled(partial: Path | None) -> None:
+        if partial is None:
+            return
+        try:
+            write_json(
+                partial / "run_cancelled.json",
+                {
+                    "cancelled_at": utc_now(),
+                    "status": "cancelled",
+                    "note": "Partial artifacts are incomplete and are not validated evidence.",
+                },
+            )
+            build_manifest(partial)
+        except Exception:
+            pass
+
+    def cancel(self, run_id: str) -> dict:
+        run = self.store.request_cancel(run_id)
+        if run["status"] != "cancel_requested":
+            return run
+        with self._lock:
+            cancellation = self._cancel_events.get(run_id)
+            future = self._futures.get(run_id)
+            async_task = self._async_tasks.get(run_id)
+        if cancellation is not None:
+            cancellation.set()
+        if future is not None and future.cancel():
+            self.store.mark_cancelled(run_id)
+            return self.store.get_run(run_id)
+        if async_task is not None:
+            loop, task = async_task
+            loop.call_soon_threadsafe(task.cancel)
         return self.store.get_run(run_id)
 
     def detail(self, run_id: str) -> dict:
         run = self.store.get_run(run_id)
         provenance = run.get("provenance_dir")
         if not provenance:
-            return {**run, "result": None, "report": None, "artifacts": []}
+            return {
+                **run,
+                "result": None,
+                "report": None,
+                "display_manifest": None,
+                "reference_manifest": None,
+                "artifacts": [],
+            }
         root = Path(provenance)
         result_path = root / "run_result.json"
         report_path = root / "scientific_report.json"
         manifest_path = root / "manifest.json"
-        result = json.loads(result_path.read_text(encoding="utf-8")) if result_path.is_file() else None
-        report = json.loads(report_path.read_text(encoding="utf-8")) if report_path.is_file() else None
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.is_file() else {"files": []}
+        displays_path = root / "display_manifest.json"
+        references_path = root / "reference_manifest.json"
+        result = (
+            json.loads(result_path.read_text(encoding="utf-8"))
+            if result_path.is_file()
+            else None
+        )
+        report = (
+            json.loads(report_path.read_text(encoding="utf-8"))
+            if report_path.is_file()
+            else None
+        )
+        display_manifest = (
+            json.loads(displays_path.read_text(encoding="utf-8"))
+            if displays_path.is_file()
+            else None
+        )
+        reference_manifest = (
+            json.loads(references_path.read_text(encoding="utf-8"))
+            if references_path.is_file()
+            else None
+        )
+        if manifest_path.is_file() and run["status"] not in ACTIVE_RUN_STATES:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            artifacts = manifest.get("files", [])
+        else:
+            artifacts = self._live_artifacts(root)
         return {
             **run,
             "result": result,
             "report": report,
-            "artifacts": manifest.get("files", []),
+            "display_manifest": display_manifest,
+            "reference_manifest": reference_manifest,
+            "artifacts": artifacts,
         }
+
+    @staticmethod
+    def _live_artifacts(root: Path) -> list[dict]:
+        if not root.is_dir():
+            return []
+        artifacts = []
+        for path in sorted(root.rglob("*")):
+            if not path.is_file() or path.is_symlink():
+                continue
+            artifacts.append(
+                {
+                    "path": path.relative_to(root).as_posix(),
+                    "bytes": path.stat().st_size,
+                    "sha256": None,
+                    "live": True,
+                }
+            )
+        return artifacts[:2000]
 
     async def wait(self, run_id: str, poll_seconds: float = 0.5) -> dict:
         while True:
@@ -145,4 +424,8 @@ class TaskService:
             await asyncio.sleep(poll_seconds)
 
     def close(self) -> None:
+        with self._lock:
+            cancellations = list(self._cancel_events.values())
+        for cancellation in cancellations:
+            cancellation.set()
         self.executor.shutdown(wait=False, cancel_futures=True)

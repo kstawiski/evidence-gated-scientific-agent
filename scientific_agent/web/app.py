@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import logging
 import mimetypes
 import secrets
 import tempfile
@@ -27,14 +28,37 @@ from pydantic import BaseModel, Field
 
 from .. import __version__
 from ..config import Settings, load_mcp_secrets
+from ..discussion import discuss_report
+from ..environment import cleanup_workspace_environment
 from ..orchestrator import run_scientific_task
+from ..provenance import sha256_file
+from ..reporting import FIGURE_MEDIA_TYPES
 from .a2a import ALLOWED_MCP_SERVERS, EvidenceBenchExecutor, build_agent_card
 from .service import Runner, TaskService
 from .settings import WebSettings
-from .store import WorkspaceStore
+from .store import ACTIVE_RUN_STATES, WorkspaceStore
 
 
 STATIC_DIR = Path(__file__).with_name("static")
+MAX_TEXT_PREVIEW_BYTES = 512 * 1024
+PREVIEW_TRUNCATION_MARKER = "\n\n--- PREVIEW TRUNCATED; MIDDLE OMITTED ---\n\n"
+logger = logging.getLogger(__name__)
+
+
+def _decode_truncated_utf8(head: bytes, tail: bytes) -> str:
+    """Decode independently cut UTF-8 ranges without accepting interior corruption."""
+
+    try:
+        head_text = head.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        if exc.end != len(head) or exc.reason != "unexpected end of data":
+            raise
+        head_text = head[: exc.start].decode("utf-8-sig")
+    tail_start = 0
+    while tail_start < len(tail) and tail[tail_start] & 0b1100_0000 == 0b1000_0000:
+        tail_start += 1
+    tail_text = tail[tail_start:].decode("utf-8")
+    return head_text + PREVIEW_TRUNCATION_MARKER + tail_text
 
 
 class WorkspaceCreate(BaseModel):
@@ -44,7 +68,16 @@ class WorkspaceCreate(BaseModel):
 class RunCreate(BaseModel):
     objective: str = Field(min_length=3, max_length=20_000)
     enable_code: bool = True
-    mcp_servers: list[str] = Field(default_factory=list, max_length=3)
+    mcp_servers: list[str] | None = Field(default=None, max_length=3)
+
+
+class FollowUpCreate(BaseModel):
+    request: str = Field(min_length=3, max_length=20_000)
+    enable_code: bool | None = None
+
+
+class DiscussionCreate(BaseModel):
+    message: str = Field(min_length=3, max_length=20_000)
 
 
 def _json_error(status: int, message: str, *, challenge: str | None = None):
@@ -81,9 +114,7 @@ class AuthenticationMiddleware:
                 )
                 await response(scope, receive, send)
                 return
-        elif self.settings.auth_enabled and not self._valid_basic_auth(
-            authorization
-        ):
+        elif self.settings.auth_enabled and not self._valid_basic_auth(authorization):
             response = _json_error(
                 401,
                 "authentication required",
@@ -97,9 +128,7 @@ class AuthenticationMiddleware:
         if not authorization.startswith("Basic "):
             return False
         try:
-            decoded = base64.b64decode(
-                authorization[6:], validate=True
-            ).decode("utf-8")
+            decoded = base64.b64decode(authorization[6:], validate=True).decode("utf-8")
             username, password = decoded.split(":", 1)
         except (ValueError, UnicodeDecodeError, binascii.Error):
             return False
@@ -119,14 +148,28 @@ def create_app(
     web_settings: WebSettings | None = None,
     agent_settings: Settings | None = None,
     runner: Runner = run_scientific_task,
+    discussion_runner=discuss_report,
 ) -> FastAPI:
     web = web_settings or WebSettings()
+    scientific_settings = agent_settings or Settings()
     web.validate()
     web.data_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
+    try:
+        configured_mcp_secrets = load_mcp_secrets()
+    except (OSError, ValueError):
+        configured_mcp_secrets = {}
+    mcp_availability = {
+        "context7": bool(configured_mcp_secrets.get("CONTEXT7_API_KEY")),
+        "brave-search": bool(configured_mcp_secrets.get("BRAVE_API_KEY")),
+        "chrome-devtools": bool(scientific_settings.chrome_browser_url),
+    }
+    default_mcp_servers = tuple(
+        name for name in scientific_settings.mcp_servers if mcp_availability.get(name)
+    )
     store = WorkspaceStore(web.database_path, web.workspaces_dir)
     service = TaskService(
         store,
-        agent_settings or Settings(),
+        scientific_settings,
         max_workers=web.max_workers,
         runner=runner,
     )
@@ -148,6 +191,19 @@ def create_app(
     app.state.store = store
     app.state.service = service
     app.state.web_settings = web
+
+    @app.middleware("http")
+    async def security_headers(request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; img-src 'self' data:; script-src 'self'; "
+            "style-src 'self'; connect-src 'self'; object-src 'none'; "
+            f"base-uri 'none'; frame-src 'self' {' '.join(web.browser_frame_sources)}; "
+            "frame-ancestors 'none'"
+        )
+        return response
 
     @app.exception_handler(KeyError)
     async def key_error_handler(_, exc: KeyError):
@@ -172,24 +228,21 @@ def create_app(
 
     @app.get("/api/config")
     async def public_config() -> dict:
-        settings = agent_settings or Settings()
-        try:
-            mcp_secrets = load_mcp_secrets()
-        except (OSError, ValueError):
-            mcp_secrets = {}
         return {
             "version": __version__,
             "models": {
-                "executor": settings.qwen.model,
-                "critic": settings.gemma.model,
+                "executor": scientific_settings.qwen.model,
+                "critic": scientific_settings.gemma.model,
             },
-            "mcp": {
-                "context7": bool(mcp_secrets.get("CONTEXT7_API_KEY")),
-                "brave-search": bool(mcp_secrets.get("BRAVE_API_KEY")),
-                "chrome-devtools": bool(settings.chrome_browser_url),
-            },
+            "mcp": mcp_availability,
+            "default_mcp_servers": list(default_mcp_servers),
             "a2a": web.a2a_enabled,
             "browser_auth": web.auth_enabled,
+            "browser": {
+                "enabled": bool(scientific_settings.chrome_browser_url),
+                "public_url": web.browser_public_url,
+                "novnc_port": web.browser_novnc_port,
+            },
             "max_upload_bytes": web.max_upload_bytes,
         }
 
@@ -211,7 +264,13 @@ def create_app(
 
     @app.delete("/api/workspaces/{workspace_id}", status_code=204)
     async def delete_workspace(workspace_id: str) -> Response:
-        store.delete_workspace(workspace_id)
+        store.delete_workspace(
+            workspace_id,
+            before_delete=lambda: cleanup_workspace_environment(
+                scientific_settings.environment,
+                workspace_id,
+            ),
+        )
         return Response(status_code=204)
 
     @app.post("/api/workspaces/{workspace_id}/files", status_code=201)
@@ -235,16 +294,18 @@ def create_app(
         path = store.file_path(workspace_id, filename)
         return FileResponse(path, filename=path.name)
 
-    @app.delete(
-        "/api/workspaces/{workspace_id}/files/{filename}", status_code=204
-    )
+    @app.delete("/api/workspaces/{workspace_id}/files/{filename}", status_code=204)
     async def delete_file(workspace_id: str, filename: str) -> Response:
         store.delete_file(workspace_id, filename)
         return Response(status_code=204)
 
     @app.post("/api/workspaces/{workspace_id}/runs", status_code=202)
     async def create_run(workspace_id: str, request: RunCreate) -> dict:
-        selected = _validate_mcp_servers(request.mcp_servers)
+        selected = _validate_mcp_servers(
+            request.mcp_servers
+            if request.mcp_servers is not None
+            else list(default_mcp_servers)
+        )
         return service.submit(
             workspace_id,
             request.objective,
@@ -256,11 +317,201 @@ def create_app(
     async def get_run(run_id: str) -> dict:
         return service.detail(run_id)
 
+    @app.get("/api/runs/{run_id}/events")
+    async def get_run_events(
+        run_id: str,
+        after_id: int = Query(default=0, ge=0),
+    ) -> list[dict]:
+        return store.list_events(run_id, after_id)
+
+    @app.post("/api/runs/{run_id}/cancel", status_code=202)
+    async def cancel_run(run_id: str) -> dict:
+        return service.cancel(run_id)
+
+    @app.post("/api/runs/{run_id}/follow-ups", status_code=202)
+    async def follow_up(run_id: str, request: FollowUpCreate) -> dict:
+        return service.submit_follow_up(
+            run_id,
+            request.request,
+            enable_code=request.enable_code,
+        )
+
+    @app.get("/api/runs/{run_id}/discussion")
+    async def get_discussion(run_id: str) -> list[dict]:
+        return store.list_discussion(run_id)
+
+    @app.post("/api/runs/{run_id}/discussion", status_code=201)
+    async def create_discussion(run_id: str, request: DiscussionCreate) -> dict:
+        run = service.detail(run_id)
+        if run["status"] in ACTIVE_RUN_STATES:
+            raise RuntimeError("the report is not complete")
+        if run.get("report") is None or not run.get("provenance_dir"):
+            raise RuntimeError("the run has no scientific report to discuss")
+        history = store.list_discussion(run_id)
+        response_id = store.start_discussion(
+            run_id, request.message, scientific_settings.gemma.model
+        )
+        try:
+            response = await discussion_runner(
+                scientific_settings,
+                Path(run["provenance_dir"]),
+                history,
+                request.message,
+            )
+            return store.finish_discussion(
+                response_id,
+                content=response.answer,
+                evidence_refs=response.evidence_refs,
+                unresolved_uncertainties=response.unresolved_uncertainties,
+                suggested_revision_prompt=response.suggested_revision_prompt,
+            )
+        except Exception as exc:
+            logger.warning("Report discussion failed safely (%s)", type(exc).__name__)
+            store.fail_discussion(response_id)
+            raise RuntimeError("Gemma could not complete the report discussion")
+
     @app.get("/api/runs/{run_id}/artifacts")
     async def download_artifact(run_id: str, path: str = Query(...)) -> FileResponse:
         artifact = store.run_artifact(run_id, path)
         media_type = mimetypes.guess_type(artifact.name)[0]
         return FileResponse(artifact, filename=artifact.name, media_type=media_type)
+
+    @app.get("/api/runs/{run_id}/artifact-preview")
+    async def preview_text_artifact(run_id: str, path: str = Query(...)) -> dict:
+        artifact = store.run_artifact(run_id, path)
+        size = artifact.stat().st_size
+        with artifact.open("rb") as handle:
+            if size <= MAX_TEXT_PREVIEW_BYTES:
+                data = handle.read(MAX_TEXT_PREVIEW_BYTES + 1)
+                truncated = False
+            else:
+                head_bytes = MAX_TEXT_PREVIEW_BYTES * 3 // 4
+                tail_bytes = MAX_TEXT_PREVIEW_BYTES - head_bytes
+                head = handle.read(head_bytes)
+                handle.seek(-tail_bytes, 2)
+                tail = handle.read(tail_bytes)
+                marker = PREVIEW_TRUNCATION_MARKER.encode("utf-8")
+                data = head + marker + tail
+                truncated = True
+        if b"\x00" in data:
+            raise ValueError("artifact is not UTF-8 text")
+        try:
+            content = (
+                _decode_truncated_utf8(head, tail)
+                if truncated
+                else data.decode("utf-8-sig")
+            )
+        except UnicodeDecodeError as exc:
+            raise ValueError("artifact is not UTF-8 text") from exc
+        return {
+            "path": path,
+            "content": content,
+            "bytes": size,
+            "preview_bytes": len(data),
+            "truncated": truncated,
+        }
+
+    def registered_reference(run_id: str, source_id: str, kind: str) -> Path:
+        root = store.run_root(run_id)
+        manifest_path = root / "reference_manifest.json"
+        if not manifest_path.is_file():
+            raise KeyError("reference not found")
+        import json
+
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        entry = next(
+            (
+                item
+                for item in manifest.get("references", [])
+                if item.get("source_id") == source_id
+            ),
+            None,
+        )
+        artifact = entry.get(kind) if isinstance(entry, dict) else None
+        if not isinstance(artifact, dict) or not isinstance(artifact.get("path"), str):
+            raise KeyError("reference not found")
+        path = store.run_artifact(run_id, artifact["path"])
+        if sha256_file(path) != artifact.get("sha256"):
+            raise KeyError("reference integrity check failed")
+        return path
+
+    @app.get("/api/runs/{run_id}/references/{source_id}/pdf")
+    async def reference_pdf(run_id: str, source_id: str) -> FileResponse:
+        path = registered_reference(run_id, source_id, "pdf")
+        if path.suffix.lower() != ".pdf" or path.stat().st_size < 5:
+            raise KeyError("reference not found")
+        with path.open("rb") as handle:
+            if handle.read(5) != b"%PDF-":
+                raise KeyError("reference integrity check failed")
+        return FileResponse(
+            path,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'inline; filename="{path.name}"',
+                "Cache-Control": "private, max-age=3600",
+            },
+        )
+
+    def registered_display(
+        run_id: str, display_id: str, kind: str
+    ) -> tuple[Path, dict]:
+        root = store.run_root(run_id)
+        manifest_path = root / "display_manifest.json"
+        if not manifest_path.is_file():
+            raise KeyError("display not found")
+        import json
+
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        entry = next(
+            (
+                item
+                for item in manifest.get("displays", [])
+                if item.get("display_id") == display_id and item.get("kind") == kind
+            ),
+            None,
+        )
+        if entry is None:
+            raise KeyError("display not found")
+        path = store.run_artifact(run_id, str(entry.get("path", "")))
+        if sha256_file(path) != entry.get("sha256"):
+            raise KeyError("display integrity check failed")
+        return path, entry
+
+    @app.get("/api/runs/{run_id}/displays/{display_id}/image")
+    async def display_image(run_id: str, display_id: str) -> FileResponse:
+        path, _ = registered_display(run_id, display_id, "figure")
+        media_type = FIGURE_MEDIA_TYPES.get(path.suffix.lower())
+        if media_type is None:
+            raise KeyError("display not found")
+        return FileResponse(
+            path,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'inline; filename="{path.name}"',
+                "Cache-Control": "private, max-age=3600",
+            },
+        )
+
+    @app.get("/api/runs/{run_id}/displays/{display_id}/table")
+    async def display_table(run_id: str, display_id: str) -> dict:
+        _, entry = registered_display(run_id, display_id, "table")
+        return {
+            key: entry[key]
+            for key in (
+                "display_id",
+                "number",
+                "title",
+                "caption",
+                "columns",
+                "rows",
+                "total_rows",
+                "total_columns",
+                "truncated",
+                "claim_ids",
+                "evidence_refs",
+            )
+            if key in entry
+        }
 
     @app.get("/api/runs/{run_id}/bundle")
     async def download_bundle(run_id: str, background: BackgroundTasks) -> FileResponse:
@@ -289,7 +540,12 @@ def create_app(
 
     if web.a2a_enabled:
         card = build_agent_card(web.public_url)
-        executor = EvidenceBenchExecutor(store, service, web.max_upload_bytes)
+        executor = EvidenceBenchExecutor(
+            store,
+            service,
+            web.max_upload_bytes,
+            default_mcp_servers=default_mcp_servers,
+        )
         request_handler = DefaultRequestHandler(
             agent_executor=executor,
             task_store=InMemoryTaskStore(),

@@ -5,7 +5,7 @@ services:
     build:
       context: .
       target: runtime
-    image: evidence-bench:0.3.1
+    image: evidence-bench:0.4.0
     restart: unless-stopped
     env_file:
       - path: .env
@@ -14,19 +14,28 @@ services:
       WEB_HOST: 0.0.0.0
       WEB_PORT: 8080
       SCIENTIFIC_AGENT_DATA_DIR: /data
-      SCIENTIFIC_AGENT_SANDBOX_WORKER_URL: http://sandbox-worker:8090
+      SCIENTIFIC_AGENT_SANDBOX_WORKER_URL: http://sandbox-gateway:8090
       SCIENTIFIC_AGENT_SANDBOX_WORKER_TOKEN: ${SANDBOX_WORKER_TOKEN:-}
-      SCIENTIFIC_AGENT_PACKAGE_WORKER_URL: http://environment-worker:8091
+      SCIENTIFIC_AGENT_PACKAGE_WORKER_URL: http://environment-gateway:8091
       SCIENTIFIC_AGENT_PACKAGE_WORKER_TOKEN: ${PACKAGE_WORKER_TOKEN:-}
+      CHROME_DEVTOOLS_BROWSER_URL: http://browser-cdp-gateway:9222
+      BROWSER_PUBLIC_URL: ${BROWSER_PUBLIC_URL:-}
+      BROWSER_NOVNC_PORT: ${BROWSER_NOVNC_PORT:-6080}
+      SCIENTIFIC_AGENT_BROWSER_DOWNLOADS: /browser-downloads
     depends_on:
-      sandbox-worker:
+      sandbox-gateway:
         condition: service_healthy
-      environment-worker:
+      environment-gateway:
+        condition: service_healthy
+      browser-cdp-gateway:
+        condition: service_healthy
+      browser-ui-gateway:
         condition: service_healthy
     ports:
       - "${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_PUBLISHED_PORT:-8080}:8080"
     volumes:
       - ${EVIDENCE_BENCH_DATA_PATH:-evidence-bench-data}:/data
+      - ${EVIDENCE_BENCH_BROWSER_PATH:-./.evidence-bench/browser}/downloads:/browser-downloads:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
     read_only: true
@@ -41,11 +50,222 @@ services:
     cpus: 4
     networks:
       - default
-      - sandbox
+      - browser-client
+      - sandbox-client
+      - package-client
+
+  browser:
+    build:
+      context: .
+      dockerfile: browser/Dockerfile
+    image: evidence-bench-browser:0.4.0
+    user: "${BROWSER_RUNTIME_USER:-0:0}"
+    restart: unless-stopped
+    environment:
+      BROWSER_GEOMETRY: ${BROWSER_GEOMETRY:-1600x1000x24}
+      BROWSER_DOWNLOADS_MODE: ${BROWSER_DOWNLOADS_MODE:-2750}
+    depends_on:
+      browser-egress:
+        condition: service_healthy
+    expose:
+      - "9222"
+    volumes:
+      - ${EVIDENCE_BENCH_BROWSER_PATH:-./.evidence-bench/browser}:/browser-data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,size=1g,mode=1777
+      - /run:rw,nosuid,nodev,size=64m,mode=0755
+    shm_size: 2gb
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+      - SETGID
+      - SETUID
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 1024
+    mem_limit: 4g
+    cpus: 2
+    networks:
+      - browser-control
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9222/json/version >/dev/null && curl -fsS http://127.0.0.1:6080/vnc.html >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      start_period: 20s
+      retries: 5
+
+  browser-egress:
+    build:
+      context: .
+      dockerfile: browser/Dockerfile
+    image: evidence-bench-browser:0.4.0
+    entrypoint: ["/usr/bin/tini", "--", "/usr/sbin/squid", "-N", "-f", "/etc/squid/evidence-bench.conf"]
+    user: "proxy:proxy"
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m,mode=1777
+      - /run:rw,noexec,nosuid,nodev,size=16m,mode=0755
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 256m
+    cpus: 0.5
+    networks:
+      - public-egress
+      - browser-control
       - packages
+    healthcheck:
+      test: ["CMD-SHELL", "test \"$(curl -sS -o /dev/null -w '%{http_code}' --proxy http://127.0.0.1:3128 http://127.0.0.1/)\" = 403"]
+      interval: 15s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+
+  browser-cdp-gateway:
+    build:
+      context: .
+      dockerfile: browser/Dockerfile
+    image: evidence-bench-browser:0.4.0
+    entrypoint: ["/usr/bin/tini", "--", "/usr/bin/socat"]
+    command: ["TCP-LISTEN:9222,reuseaddr,fork", "TCP:browser:9222"]
+    user: "65534:65534"
+    restart: unless-stopped
+    depends_on:
+      browser:
+        condition: service_healthy
+    expose:
+      - "9222"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.25
+    networks:
+      - browser-control
+      - browser-client
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:9222/json/version >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+
+  browser-ui-gateway:
+    build:
+      context: .
+      dockerfile: browser/Dockerfile
+    image: evidence-bench-browser:0.4.0
+    entrypoint: ["/usr/bin/tini", "--", "/usr/bin/socat"]
+    command: ["TCP-LISTEN:6080,reuseaddr,fork", "TCP:browser:6080"]
+    user: "65534:65534"
+    restart: unless-stopped
+    depends_on:
+      browser:
+        condition: service_healthy
+    ports:
+      - "${BROWSER_BIND_ADDRESS:-127.0.0.1}:${BROWSER_NOVNC_PORT:-6080}:6080"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.25
+    networks:
+      - browser-control
+      - browser-ui
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:6080/vnc.html >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+
+  sandbox-gateway:
+    build:
+      context: .
+      dockerfile: browser/Dockerfile
+    image: evidence-bench-browser:0.4.0
+    entrypoint: ["/usr/bin/tini", "--", "/usr/bin/socat"]
+    command: ["TCP-LISTEN:8090,reuseaddr,fork", "TCP:sandbox-worker:8090"]
+    user: "65534:65534"
+    restart: unless-stopped
+    depends_on:
+      sandbox-worker:
+        condition: service_healthy
+    expose:
+      - "8090"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.25
+    networks:
+      - sandbox
+      - sandbox-client
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8090/healthz >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
+
+  environment-gateway:
+    build:
+      context: .
+      dockerfile: browser/Dockerfile
+    image: evidence-bench-browser:0.4.0
+    entrypoint: ["/usr/bin/tini", "--", "/usr/bin/socat"]
+    command: ["TCP-LISTEN:8091,reuseaddr,fork", "TCP:environment-worker:8091"]
+    user: "65534:65534"
+    restart: unless-stopped
+    depends_on:
+      environment-worker:
+        condition: service_healthy
+    expose:
+      - "8091"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: 0.25
+    networks:
+      - packages
+      - package-client
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8091/healthz >/dev/null"]
+      interval: 15s
+      timeout: 5s
+      start_period: 5s
+      retries: 3
 
   sandbox-worker:
-    image: evidence-bench:0.3.1
+    image: evidence-bench:0.4.0
     command: ["scientific-agent-sandbox-worker"]
     user: "0:0"
     restart: unless-stopped
@@ -105,18 +325,27 @@ services:
     build:
       context: .
       target: environment-worker
-    image: evidence-bench-packages:0.3.1
+    image: evidence-bench-packages:0.4.0
     restart: unless-stopped
     user: "0:0"
+    depends_on:
+      browser-egress:
+        condition: service_healthy
     environment:
       SCIENTIFIC_AGENT_PACKAGE_WORKER_TOKEN: ${PACKAGE_WORKER_TOKEN:-}
       SCIENTIFIC_AGENT_ENVIRONMENTS_DIR: /environments
       PACKAGE_WORKER_HOST: 0.0.0.0
       PACKAGE_WORKER_PORT: 8091
+      SCIENTIFIC_AGENT_PACKAGE_PROXY_URL: http://browser-egress:3128
       SCIENTIFIC_AGENT_MAX_PACKAGES_PER_CALL: ${SCIENTIFIC_AGENT_MAX_PACKAGES_PER_CALL:-24}
       SCIENTIFIC_AGENT_PACKAGE_TIMEOUT_SECONDS: ${SCIENTIFIC_AGENT_PACKAGE_TIMEOUT_SECONDS:-900}
       SCIENTIFIC_AGENT_MAX_ENVIRONMENT_BYTES: ${SCIENTIFIC_AGENT_MAX_ENVIRONMENT_BYTES:-21474836480}
-      SCIENTIFIC_AGENT_WORKER_IMAGE_ID: evidence-bench-packages:0.3.1
+      SCIENTIFIC_AGENT_MAX_WORKSPACE_ENVIRONMENT_BYTES: ${SCIENTIFIC_AGENT_MAX_WORKSPACE_ENVIRONMENT_BYTES:-42949672960}
+      SCIENTIFIC_AGENT_MAX_TOTAL_ENVIRONMENT_BYTES: ${SCIENTIFIC_AGENT_MAX_TOTAL_ENVIRONMENT_BYTES:-214748364800}
+      SCIENTIFIC_AGENT_MAX_ENVIRONMENT_ENTRIES: ${SCIENTIFIC_AGENT_MAX_ENVIRONMENT_ENTRIES:-250000}
+      SCIENTIFIC_AGENT_MAX_WORKSPACE_ENVIRONMENT_ENTRIES: ${SCIENTIFIC_AGENT_MAX_WORKSPACE_ENVIRONMENT_ENTRIES:-500000}
+      SCIENTIFIC_AGENT_MAX_TOTAL_ENVIRONMENT_ENTRIES: ${SCIENTIFIC_AGENT_MAX_TOTAL_ENVIRONMENT_ENTRIES:-2500000}
+      SCIENTIFIC_AGENT_WORKER_IMAGE_ID: evidence-bench-packages:0.4.0
     expose:
       - "8091"
     volumes:
@@ -155,6 +384,17 @@ volumes:
   evidence-bench-environments:
 
 networks:
+  public-egress:
+  browser-ui:
+  browser-control:
+    internal: true
+  browser-client:
+    internal: true
   sandbox:
     internal: true
+  sandbox-client:
+    internal: true
   packages:
+    internal: true
+  package-client:
+    internal: true

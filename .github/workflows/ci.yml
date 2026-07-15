@@ -21,9 +21,21 @@ jobs:
           node-version: "22.18.0"
           cache: npm
       - run: uv sync --frozen --extra dev --extra analysis
+      - name: Lint and formatting
+        run: |
+          uvx ruff==0.15.21 check scientific_agent tests evals deploy skills
+          uvx ruff==0.15.21 format --check scientific_agent tests evals deploy skills
+          git diff --check
+      - name: Audit locked runtime dependencies
+        run: >-
+          uv export --python 3.12 --frozen --no-dev --extra analysis
+          --no-emit-project |
+          uvx --python 3.12 pip-audit==2.10.1 -r /dev/stdin
       - run: npm ci --ignore-scripts
+      - run: npm audit --omit=dev
       - run: uv run pytest -m "not live"
       - run: node --check scientific_agent/web/static/app.js
+      - run: shellcheck scripts/*.sh browser/*.sh
       - run: docker compose config --quiet
 
   container:
@@ -42,3 +54,24 @@ jobs:
           tags: evidence-bench:${{ matrix.target }}-test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  browser-container:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: browser/Dockerfile
+          push: false
+          load: true
+          tags: evidence-bench:browser-test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Smoke-test isolated browser, CDP, and public-only egress
+        run: |
+          version=$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')
+          docker tag evidence-bench:browser-test "evidence-bench-browser:${version}"
+          docker compose build environment-worker
+          bash scripts/container_boundary_smoke.sh

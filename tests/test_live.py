@@ -51,7 +51,7 @@ async def test_live_adk_context7_tool_is_called(tmp_path):
     )
     agent = Agent(
         name="context7_tool_probe",
-        model=qwen_model(settings, temperature=0.2, max_tokens=1600, timeout=180),
+        model=qwen_model(settings, temperature=0.2, timeout=180),
         instruction=(
             "You must call Context7 to retrieve Google ADK graph workflow "
             "documentation before answering. Return one concise summary."

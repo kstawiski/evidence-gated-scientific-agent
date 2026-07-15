@@ -1,0 +1,6 @@
+{
+  "DefaultDownloadDirectory": "/browser-data/downloads",
+  "DownloadDirectory": "/browser-data/downloads",
+  "DownloadRestrictions": 0,
+  "PromptForDownloadLocation": false
+}

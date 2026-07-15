@@ -1,0 +1,4 @@
+interface:
+  display_name: "Evidence Bench"
+  short_description: "Run audited science on the lab service"
+  default_prompt: "Use $evidence-bench to run this scientific task on the lab Evidence Bench service and return the audited report."

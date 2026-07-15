@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from typing import Any
+from typing import Any, Callable
 
 from google.adk import Workflow
 from google.adk.workflow import JoinNode
@@ -15,7 +15,10 @@ from .config import Settings
 from .linting import lint_plan
 from .prompts import PLAN_AUDITOR, PLANNER_A, PLANNER_B, SIMPLE_PLANNER, SYNTHESIZER
 from .schemas import (
+    CheckSpec,
+    Finding,
     MasterPlan,
+    PlanAuditChecklist,
     PlanBundle,
     PlanProposal,
     PlanningResult,
@@ -23,6 +26,8 @@ from .schemas import (
     VerificationReport,
 )
 from .structured_client import request_structured
+
+PLAN_CRITIC_UNAVAILABLE = "plan-critic-unavailable"
 
 
 def normalize_task(node_input: str) -> TaskSpec:
@@ -41,7 +46,9 @@ def normalize_task(node_input: str) -> TaskSpec:
     return TaskSpec(
         task_id=task_id,
         objective=objective,
-        deliverables=["Evidence-backed scientific report with claim and source ledgers"],
+        deliverables=[
+            "Evidence-backed scientific report with claim and source ledgers"
+        ],
         constraints=[
             "Read-only MVP: no shell, package installation, or model-controlled writes",
             "Model agreement is not proof; deterministic checks and retrieved evidence outrank both models",
@@ -113,11 +120,17 @@ def merge_and_lint(node_input: dict) -> PlanBundle:
         branch_a = [by_label["A"]] if "A" in by_label else []
         branch_b = [by_label["B"]] if "B" in by_label else []
     if len(branch_a) != 1 or len(branch_b) != 1:
-        raise ValueError("planning join must contain one output from each blinded branch")
+        raise ValueError(
+            "planning join must contain one output from each blinded branch"
+        )
     task = TaskSpec.model_validate(tasks[0])
     # Branch identity is controller state. Do not trust a model to self-label it.
-    plan_a = PlanProposal.model_validate(branch_a[0]).model_copy(update={"plan_label": "A"})
-    plan_b = PlanProposal.model_validate(branch_b[0]).model_copy(update={"plan_label": "B"})
+    plan_a = PlanProposal.model_validate(branch_a[0]).model_copy(
+        update={"plan_label": "A"}
+    )
+    plan_b = PlanProposal.model_validate(branch_b[0]).model_copy(
+        update={"plan_label": "B"}
+    )
     return PlanBundle(
         task=task,
         plan_a=plan_a,
@@ -131,16 +144,13 @@ def package_planning(node_input: dict) -> PlanningResult:
     masters = _collect(node_input, MasterPlan)
     audits = _collect(node_input, VerificationReport)
     if len(masters) != 1 or len(audits) != 1:
-        raise ValueError("audit join must contain one MasterPlan and one VerificationReport")
+        raise ValueError(
+            "audit join must contain one MasterPlan and one VerificationReport"
+        )
     master = MasterPlan.model_validate(masters[0])
     audit = VerificationReport.model_validate(audits[0])
     master_lint = lint_plan(master.task, master.plan)
-    if not master_lint.passed or audit.verdict == "fail":
-        status = "requires_revision"
-    elif audit.verdict == "inconclusive" and audit.blocking_findings:
-        status = "inconclusive"
-    else:
-        status = "supported"
+    status = planning_status(master_lint, audit)
     return PlanningResult(
         master_plan=master,
         audit=audit,
@@ -149,8 +159,189 @@ def package_planning(node_input: dict) -> PlanningResult:
     )
 
 
-async def build_simple_planning(settings: Settings, task: TaskSpec) -> PlanningResult:
-    """Create one lean Qwen plan; final-result Gemma audit remains independent."""
+def build_plan_audit_packet(master: MasterPlan) -> dict:
+    """Build a compact blinded packet with deterministic lint evidence."""
+
+    task = master.task
+    plan = master.plan
+    lint = lint_plan(task, plan)
+    return {
+        "task": {
+            "objective": task.objective,
+            "deliverables": task.deliverables,
+            "constraints": task.constraints,
+            "unknowns": task.unknowns,
+            "scientific_domain": task.scientific_domain,
+            "task_type": task.task_type,
+            "scientific_risk": task.scientific_risk,
+            "acceptance_tests": task.acceptance_tests,
+        },
+        "plan": {
+            "objective": plan.objective,
+            "assumptions": plan.assumptions,
+            "required_data": plan.required_data,
+            "alternatives_considered": plan.alternatives_considered,
+            "foreseeable_failure_modes": plan.foreseeable_failure_modes,
+            "steps": [step.model_dump(mode="json") for step in plan.steps],
+            "expected_artifacts": plan.expected_artifacts,
+            "unresolved_questions": plan.unresolved_questions,
+            "estimated_resources": plan.estimated_resources,
+        },
+        "resolutions": [item.model_dump(mode="json") for item in master.resolutions],
+        "method_lock_required": master.method_lock_required,
+        "protocol_fields": master.protocol_fields,
+        "deterministic_lint": lint.model_dump(mode="json"),
+    }
+
+
+def plan_audit_to_verification(
+    checklist: PlanAuditChecklist,
+    *,
+    master: MasterPlan,
+) -> VerificationReport:
+    """Derive the overall verdict in deterministic controller code."""
+
+    blocking: list[Finding] = []
+    nonblocking = list(checklist.nonblocking_findings)
+    proposed_tests: list[CheckSpec] = []
+    statuses: list[str] = []
+    for review in checklist.reviews:
+        statuses.append(review.status)
+        if review.status == "pass":
+            continue
+        finding = review.finding
+        assert finding is not None
+        blocking.append(
+            Finding(
+                finding_id=f"plan-audit-{review.criterion}",
+                location=finding.location,
+                problem=finding.problem,
+                why_it_matters=finding.why_it_matters,
+                evidence=finding.plan_evidence_quote,
+                falsification_test_or_correction=(
+                    finding.falsification_test_or_correction
+                ),
+            )
+        )
+        proposed_tests.append(
+            CheckSpec(
+                check_id=f"test-{review.criterion}",
+                description=finding.falsification_test_or_correction,
+                check_type="test",
+                blocking=True,
+            )
+        )
+
+    lint = lint_plan(master.task, master.plan)
+    for item in lint.findings:
+        target = blocking if item.blocking else nonblocking
+        if len(target) >= 8:
+            continue
+        target.append(
+            Finding(
+                finding_id=f"deterministic-{item.code}",
+                location=item.location,
+                problem=item.message,
+                why_it_matters="The executable plan contract did not pass deterministic lint.",
+                evidence=f"Deterministic lint code: {item.code}",
+                falsification_test_or_correction=(
+                    "Correct the declared plan field and rerun deterministic plan lint."
+                ),
+            )
+        )
+
+    if not lint.passed or "fail" in statuses:
+        verdict = "fail"
+    elif "inconclusive" in statuses:
+        verdict = "inconclusive"
+    elif nonblocking:
+        verdict = "pass_with_nonblocking_comments"
+    else:
+        verdict = "pass"
+    return VerificationReport(
+        verdict=verdict,
+        blocking_findings=blocking,
+        nonblocking_findings=nonblocking,
+        proposed_falsification_tests=proposed_tests,
+        evidence_refs=[
+            "bounded independent plan audit: "
+            + ", ".join(
+                f"{review.criterion}={review.status}" for review in checklist.reviews
+            ),
+            f"deterministic plan lint passed={lint.passed}",
+        ],
+    )
+
+
+async def audit_master_plan(
+    settings: Settings,
+    master: MasterPlan,
+    on_visible_text: Callable[[str, str], None] | None = None,
+) -> VerificationReport:
+    if on_visible_text is not None:
+        try:
+            on_visible_text(
+                "Gemma",
+                "\n[Controller: Gemma plan audit started; private reasoning is not "
+                "displayed.]\n",
+            )
+        except Exception:
+            pass
+    try:
+        checklist = await request_structured(
+            settings.gemma,
+            system_prompt=PLAN_AUDITOR,
+            payload=build_plan_audit_packet(master),
+            output_type=PlanAuditChecklist,
+            temperature=settings.gemma.temperature,
+            timeout=150,
+            on_visible_text=(
+                (lambda text: on_visible_text("Gemma", text))
+                if on_visible_text is not None
+                else None
+            ),
+        )
+    except Exception as exc:
+        return VerificationReport(
+            verdict="inconclusive",
+            blocking_findings=[
+                Finding(
+                    finding_id=PLAN_CRITIC_UNAVAILABLE,
+                    location="plan audit",
+                    problem="The independent plan critic did not return a valid audit.",
+                    why_it_matters=(
+                        "Research cannot begin without the required independent "
+                        "methodological review."
+                    ),
+                    evidence=f"critic transition failed closed: {type(exc).__name__}",
+                    falsification_test_or_correction=(
+                        "Rerun the bounded Gemma plan audit when the critic can "
+                        "produce a valid non-repetitive response."
+                    ),
+                )
+            ],
+            evidence_refs=[f"critic unavailable: {type(exc).__name__}"],
+        )
+    return plan_audit_to_verification(checklist, master=master)
+
+
+def planning_status(master_lint, audit: VerificationReport) -> str:
+    if any(
+        finding.finding_id == PLAN_CRITIC_UNAVAILABLE
+        for finding in audit.blocking_findings
+    ):
+        return "inconclusive"
+    if not master_lint.passed or audit.verdict == "fail" or audit.blocking_findings:
+        return "requires_revision"
+    return "supported"
+
+
+async def build_simple_planning(
+    settings: Settings,
+    task: TaskSpec,
+    on_visible_text: Callable[[str, str], None] | None = None,
+) -> PlanningResult:
+    """Create one lean Qwen plan and subject it to a bounded Gemma audit."""
 
     proposal = await request_structured(
         settings.qwen,
@@ -158,37 +349,45 @@ async def build_simple_planning(settings: Settings, task: TaskSpec) -> PlanningR
         payload=task,
         output_type=PlanProposal,
         temperature=0.2,
-        max_tokens=1800,
         timeout=90,
-        enable_thinking=False,
+        on_visible_text=(
+            (lambda text: on_visible_text("Qwen", text))
+            if on_visible_text is not None
+            else None
+        ),
     )
     artifacts = list(proposal.expected_artifacts)
-    controller_report = "Evidence-backed scientific report with claim and source ledgers"
+    controller_report = (
+        "Evidence-backed scientific report with claim and source ledgers"
+    )
     if controller_report in task.deliverables and controller_report not in artifacts:
         artifacts.append(controller_report)
     proposal = proposal.model_copy(
         update={"plan_label": "MASTER", "expected_artifacts": artifacts}
     )
-    lint = lint_plan(task, proposal)
-    audit = VerificationReport(
-        verdict="pass" if lint.passed else "inconclusive",
-        evidence_refs=["deterministic simple-plan lint; final Gemma result audit required"],
+    master = MasterPlan(
+        task=task,
+        plan=proposal,
+        resolutions=[],
+        method_lock_required=task.scientific_risk
+        in {"confirmatory", "decision_critical"},
+        protocol_fields=[],
     )
+    lint = lint_plan(task, proposal)
+    audit = await audit_master_plan(settings, master, on_visible_text)
+    status = planning_status(lint, audit)
     return PlanningResult(
-        master_plan=MasterPlan(
-            task=task,
-            plan=proposal,
-            resolutions=[],
-            method_lock_required=task.scientific_risk in {"confirmatory", "decision_critical"},
-            protocol_fields=[],
-        ),
+        master_plan=master,
         audit=audit,
         plan_lints=[lint],
-        status="supported" if lint.passed else "inconclusive",
+        status=status,
     )
 
 
-def build_planning_workflow(settings: Settings) -> Workflow:
+def build_planning_workflow(
+    settings: Settings,
+    on_visible_text: Callable[[str, str], None] | None = None,
+) -> Workflow:
     async def planner_a(node_input: TaskSpec) -> PlanProposal:
         return await request_structured(
             settings.qwen,
@@ -196,9 +395,12 @@ def build_planning_workflow(settings: Settings) -> Workflow:
             payload=node_input,
             output_type=PlanProposal,
             temperature=0.8,
-            max_tokens=3200,
-            timeout=120,
-            enable_thinking=True,
+            timeout=180,
+            on_visible_text=(
+                (lambda text: on_visible_text("Qwen", text))
+                if on_visible_text is not None
+                else None
+            ),
         )
 
     async def planner_b(node_input: TaskSpec) -> PlanProposal:
@@ -207,10 +409,13 @@ def build_planning_workflow(settings: Settings) -> Workflow:
             system_prompt=PLANNER_B,
             payload=node_input,
             output_type=PlanProposal,
-            temperature=0.3,
-            max_tokens=1800,
+            temperature=settings.gemma.temperature,
             timeout=150,
-            enable_thinking=False,
+            on_visible_text=(
+                (lambda text: on_visible_text("Gemma", text))
+                if on_visible_text is not None
+                else None
+            ),
         )
 
     plan_join = JoinNode(name="join_independent_plans")
@@ -222,23 +427,17 @@ def build_planning_workflow(settings: Settings) -> Workflow:
             payload=node_input,
             output_type=MasterPlan,
             temperature=0.5,
-            max_tokens=5000,
             timeout=150,
-            enable_thinking=False,
+            on_visible_text=(
+                (lambda text: on_visible_text("Qwen", text))
+                if on_visible_text is not None
+                else None
+            ),
         )
         return bind_controller_task(master, node_input.task)
 
     async def plan_auditor(node_input: MasterPlan) -> VerificationReport:
-        return await request_structured(
-            settings.gemma,
-            system_prompt=PLAN_AUDITOR,
-            payload=node_input,
-            output_type=VerificationReport,
-            temperature=0.2,
-            max_tokens=1400,
-            timeout=150,
-            enable_thinking=False,
-        )
+        return await audit_master_plan(settings, node_input, on_visible_text)
 
     audit_join = JoinNode(name="join_master_and_audit")
     return Workflow(

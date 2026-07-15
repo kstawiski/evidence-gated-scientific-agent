@@ -4,22 +4,26 @@ build-backend = "hatchling.build"
 
 [project]
 name = "evidence-gated-scientific-agent"
-version = "0.3.1"
+version = "0.4.0"
 description = "Evidence-gated ADK workflow using Qwen as executor and Gemma as independent critic"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 license = "Apache-2.0"
 authors = [{ name = "Konrad Stawiski" }]
 keywords = ["a2a", "scientific-computing", "local-llm", "adk", "provenance"]
 dependencies = [
   "google-adk==2.3.0",
-  "litellm==1.83.7",
+  "litellm==1.84.0",
+  "aiohttp>=3.14.1,<4",
+  "click>=8.3.3,<9",
   "mcp==1.28.1",
   "httpx>=0.28,<1",
   "packaging>=24,<27",
   "pydantic>=2.11,<3",
+  "pillow>=11,<13",
   "a2a-sdk[fastapi]==1.1.0",
   "python-multipart>=0.0.20,<1",
+  "python-dotenv>=1.2.2,<2",
   "uvicorn[standard]>=0.35,<1",
 ]
 

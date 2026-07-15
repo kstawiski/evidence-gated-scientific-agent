@@ -9,7 +9,7 @@ import stat
 import sys
 from pathlib import Path
 
-from .config import Settings
+from .config import DEFAULT_MCP_SERVERS, Settings
 from .orchestrator import run
 from .preflight import preflight
 
@@ -20,7 +20,7 @@ def _parser() -> argparse.ArgumentParser:
     check = sub.add_parser("preflight", help="check model endpoints and MCP schemas")
     check.add_argument(
         "--mcp",
-        default="context7,brave-search",
+        default=",".join(DEFAULT_MCP_SERVERS),
         help="comma-separated MCP servers to validate; pass an empty value for none",
     )
     check.add_argument(
@@ -41,8 +41,8 @@ def _parser() -> argparse.ArgumentParser:
     )
     execute.add_argument(
         "--mcp",
-        default="context7,brave-search",
-        help="comma-separated MCP servers; chrome-devtools is opt-in",
+        default=",".join(DEFAULT_MCP_SERVERS),
+        help="comma-separated MCP servers; all research connections are enabled by default",
     )
     execute.add_argument(
         "--enable-code",

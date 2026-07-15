@@ -1,0 +1,55 @@
+import json
+import re
+import tomllib
+from pathlib import Path
+
+import yaml
+
+
+def test_public_release_assets_share_the_project_version():
+    project_version = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))[
+        "project"
+    ]["version"]
+    package = json.loads(Path("package.json").read_text(encoding="utf-8"))
+    package_lock = json.loads(Path("package-lock.json").read_text(encoding="utf-8"))
+    citation = Path("CITATION.cff").read_text(encoding="utf-8")
+    init = Path("scientific_agent/__init__.py").read_text(encoding="utf-8")
+
+    assert package["version"] == project_version
+    assert package_lock["version"] == project_version
+    assert package_lock["packages"][""]["version"] == project_version
+    assert re.search(r"^version:\s*([^\s]+)", citation, re.M).group(1) == (
+        project_version
+    )
+    assert re.search(r'^__version__\s*=\s*"([^"]+)"', init, re.M).group(1) == (
+        project_version
+    )
+
+    compose = yaml.safe_load(Path("compose.yaml").read_text(encoding="utf-8"))
+    image_tags = {
+        service["image"].rsplit(":", 1)[1]
+        for service in compose["services"].values()
+        if service.get("image", "").startswith("evidence-bench")
+    }
+    worker_image = compose["services"]["environment-worker"]["environment"][
+        "SCIENTIFIC_AGENT_WORKER_IMAGE_ID"
+    ]
+    image_tags.add(worker_image.rsplit(":", 1)[1])
+    assert image_tags == {project_version}
+
+
+def test_container_smoke_derives_its_image_tag_from_project_metadata():
+    smoke = Path("scripts/container_boundary_smoke.sh").read_text(encoding="utf-8")
+
+    assert "tomllib" in smoke
+    assert "evidence-bench-browser:${version}" in smoke
+    assert not re.search(r"evidence-bench(?:-browser|-packages)?:\d+\.\d+\.\d+", smoke)
+
+
+def test_container_smoke_is_isolated_from_the_production_compose_project():
+    smoke = Path("scripts/container_boundary_smoke.sh").read_text(encoding="utf-8")
+
+    assert "evidence-bench-smoke-$$" in smoke
+    assert 'if [ "$project_name" = evidence-bench ]' in smoke
+    assert "BROWSER_BIND_ADDRESS=127.0.0.1" in smoke
+    assert "mktemp -d" in smoke

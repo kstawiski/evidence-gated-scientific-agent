@@ -12,6 +12,37 @@ from pathlib import Path
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_MCP_SERVERS = ("context7", "brave-search", "chrome-devtools")
+
+
+def _bool_env(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    normalized = value.strip().casefold()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean")
+
+
+def _optional_bool_env(name: str, default: str = "inherit") -> bool | None:
+    value = os.environ.get(name, default).strip().casefold()
+    if value in {"", "auto", "default", "inherit"}:
+        return None
+    if value in {"1", "true", "yes", "on"}:
+        return True
+    if value in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be true, false, or inherit")
+
+
+def _optional_positive_int_env(name: str, default: str) -> int | None:
+    value = int(os.environ.get(name, default))
+    if value < 0:
+        raise ValueError(f"{name} must be zero or a positive integer")
+    return value or None
 
 
 def _first_existing(*candidates: str | Path | None) -> Path:
@@ -43,7 +74,9 @@ def _python_runtime() -> Path:
 def _python_prefix() -> Path:
     configured = os.environ.get("SCIENTIFIC_AGENT_PYTHON_PREFIX")
     runtime = _python_runtime()
-    inferred = runtime.parent.parent if runtime.parent.name == "bin" else Path(sys.prefix)
+    inferred = (
+        runtime.parent.parent if runtime.parent.name == "bin" else Path(sys.prefix)
+    )
     return _first_existing(configured, inferred, sys.prefix)
 
 
@@ -60,7 +93,9 @@ def _python_packages() -> Path:
 def _r_library() -> Path:
     configured = os.environ.get("SCIENTIFIC_AGENT_R_LIBRARY")
     candidates = sorted((Path.home() / "R").glob("*-linux-gnu-library/*"), reverse=True)
-    return _first_existing(configured, *candidates, Path("/usr/local/lib/R/site-library"))
+    return _first_existing(
+        configured, *candidates, Path("/usr/local/lib/R/site-library")
+    )
 
 
 @dataclass(frozen=True)
@@ -68,9 +103,12 @@ class ModelEndpoint:
     base_url: str
     model: str
     api_key: str
-    max_tokens: int
+    max_tokens: int | None
     temperature: float
     top_p: float
+    enable_thinking: bool | None = None
+    native_json_schema: bool = True
+    request_timeout_seconds: int | None = None
 
 
 @dataclass(frozen=True)
@@ -110,9 +148,7 @@ class SandboxSettings:
     max_memory_bytes: int = int(
         os.environ.get("SCIENTIFIC_AGENT_MAX_MEMORY_BYTES", str(8 * 1024**3))
     )
-    max_processes: int = int(
-        os.environ.get("SCIENTIFIC_AGENT_MAX_PROCESSES", "32")
-    )
+    max_processes: int = int(os.environ.get("SCIENTIFIC_AGENT_MAX_PROCESSES", "32"))
     max_file_bytes: int = int(
         os.environ.get("SCIENTIFIC_AGENT_MAX_FILE_BYTES", str(64 * 1024**2))
     )
@@ -148,47 +184,119 @@ class EnvironmentSettings:
 
 
 @dataclass(frozen=True)
+class LiteratureSettings:
+    """Configuration for fixed-host PubMed and PMC acquisition tools."""
+
+    ncbi_email: str = field(
+        default_factory=lambda: os.environ.get(
+            "SCIENTIFIC_AGENT_NCBI_EMAIL", ""
+        ).strip()
+    )
+    ncbi_tool: str = field(
+        default_factory=lambda: os.environ.get(
+            "SCIENTIFIC_AGENT_NCBI_TOOL", "evidence_bench"
+        ).strip()
+    )
+    ncbi_api_key: str = field(
+        default_factory=lambda: os.environ.get(
+            "SCIENTIFIC_AGENT_NCBI_API_KEY", ""
+        ).strip()
+    )
+    browser_downloads_dir: Path = field(
+        default_factory=lambda: Path(
+            os.environ.get("SCIENTIFIC_AGENT_BROWSER_DOWNLOADS", "/browser-downloads")
+        ).resolve()
+    )
+    pdftotext: Path = field(
+        default_factory=lambda: _executable(
+            "SCIENTIFIC_AGENT_PDFTOTEXT", "pdftotext", "/usr/bin/pdftotext"
+        )
+    )
+    max_pdf_bytes: int = int(
+        os.environ.get("SCIENTIFIC_AGENT_MAX_ARTICLE_PDF_BYTES", str(64 * 1024**2))
+    )
+    max_archive_bytes: int = int(
+        os.environ.get("SCIENTIFIC_AGENT_MAX_ARTICLE_ARCHIVE_BYTES", str(128 * 1024**2))
+    )
+
+
+@dataclass(frozen=True)
 class Settings:
     sandbox: SandboxSettings = field(default_factory=SandboxSettings)
     environment: EnvironmentSettings = field(default_factory=EnvironmentSettings)
+    literature: LiteratureSettings = field(default_factory=LiteratureSettings)
     qwen: ModelEndpoint = field(
         default_factory=lambda: ModelEndpoint(
-            base_url=os.environ.get(
-                "QWEN_BASE_URL", "http://127.0.0.1:8000/v1"
-            ),
+            base_url=os.environ.get("QWEN_BASE_URL", "http://127.0.0.1:8000/v1"),
             model=os.environ.get("QWEN_MODEL", "Qwen/Qwen3.6-27B"),
             api_key=os.environ.get("QWEN_API_KEY", ""),
-            max_tokens=int(os.environ.get("QWEN_MAX_TOKENS", "16000")),
+            max_tokens=_optional_positive_int_env("QWEN_MAX_TOKENS", "0"),
             temperature=float(os.environ.get("QWEN_TEMPERATURE", "0.6")),
             top_p=float(os.environ.get("QWEN_TOP_P", "0.95")),
+            enable_thinking=_optional_bool_env("QWEN_ENABLE_THINKING"),
+            native_json_schema=_bool_env("QWEN_NATIVE_JSON_SCHEMA", True),
+            request_timeout_seconds=_optional_positive_int_env(
+                "QWEN_REQUEST_TIMEOUT_SECONDS", "7200"
+            ),
         )
     )
     gemma: ModelEndpoint = field(
         default_factory=lambda: ModelEndpoint(
-            base_url=os.environ.get(
-                "GEMMA_BASE_URL", "http://127.0.0.1:8001/v1"
-            ),
+            base_url=os.environ.get("GEMMA_BASE_URL", "http://127.0.0.1:8001/v1"),
             model=os.environ.get("GEMMA_MODEL", "gemma4-12b-it"),
             api_key=os.environ.get("GEMMA_API_KEY", ""),
-            max_tokens=int(os.environ.get("GEMMA_MAX_TOKENS", "12000")),
+            max_tokens=_optional_positive_int_env("GEMMA_MAX_TOKENS", "0"),
             temperature=float(os.environ.get("GEMMA_TEMPERATURE", "1.0")),
             top_p=float(os.environ.get("GEMMA_TOP_P", "0.95")),
+            enable_thinking=_optional_bool_env("GEMMA_ENABLE_THINKING"),
+            native_json_schema=_bool_env("GEMMA_NATIVE_JSON_SCHEMA", True),
+            request_timeout_seconds=_optional_positive_int_env(
+                "GEMMA_REQUEST_TIMEOUT_SECONDS", "7200"
+            ),
         )
     )
     workspace: Path = field(
-        default_factory=lambda: Path(os.environ.get("SCIENTIFIC_AGENT_WORKSPACE", "."))
-        .resolve()
+        default_factory=lambda: Path(
+            os.environ.get("SCIENTIFIC_AGENT_WORKSPACE", ".")
+        ).resolve()
     )
     runs_dir: Path = field(
         default_factory=lambda: Path(
             os.environ.get("SCIENTIFIC_AGENT_RUNS_DIR", str(PROJECT_ROOT / "runs"))
         ).resolve()
     )
-    max_repair_rounds: int = int(os.environ.get("MAX_REPAIR_ROUNDS", "1"))
-    mcp_servers: tuple[str, ...] = ("context7", "brave-search")
+    max_repair_rounds: int = field(
+        default_factory=lambda: int(os.environ.get("MAX_REPAIR_ROUNDS", "4"))
+    )
+    max_research_model_turns: int = field(
+        default_factory=lambda: int(
+            os.environ.get("SCIENTIFIC_AGENT_MAX_RESEARCH_MODEL_TURNS", "64")
+        )
+    )
+    max_research_tool_calls: int = field(
+        default_factory=lambda: int(
+            os.environ.get("SCIENTIFIC_AGENT_MAX_RESEARCH_TOOL_CALLS", "48")
+        )
+    )
+    max_repeated_tool_results: int = field(
+        default_factory=lambda: int(
+            os.environ.get("SCIENTIFIC_AGENT_MAX_REPEATED_TOOL_RESULTS", "2")
+        )
+    )
+    mcp_servers: tuple[str, ...] = DEFAULT_MCP_SERVERS
     chrome_browser_url: str = os.environ.get(
         "CHROME_DEVTOOLS_BROWSER_URL", "http://127.0.0.1:9222"
     )
+
+    def __post_init__(self) -> None:
+        if not 0 <= self.max_repair_rounds <= 8:
+            raise ValueError("max_repair_rounds must be between 0 and 8")
+        if not 1 <= self.max_research_model_turns <= 256:
+            raise ValueError("max_research_model_turns must be between 1 and 256")
+        if not 1 <= self.max_research_tool_calls <= 256:
+            raise ValueError("max_research_tool_calls must be between 1 and 256")
+        if not 1 <= self.max_repeated_tool_results <= 8:
+            raise ValueError("max_repeated_tool_results must be between 1 and 8")
 
 
 _SECRET_NAMES = {"CONTEXT7_API_KEY", "BRAVE_API_KEY", "BRAVE_SEARCH_API_KEY"}

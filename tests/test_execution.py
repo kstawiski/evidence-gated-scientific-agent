@@ -42,6 +42,7 @@ def test_environment_snapshot_resolves_immutable_generation_and_copies_lock(tmp_
 
 def test_remote_preflight_uses_managed_worker_paths(tmp_path, monkeypatch):
     calls = []
+    released = []
 
     def execute(self, language, code, timeout_seconds=120):
         del code, timeout_seconds
@@ -50,6 +51,11 @@ def test_remote_preflight_uses_managed_worker_paths(tmp_path, monkeypatch):
 
     monkeypatch.setenv("SCIENTIFIC_AGENT_DATA_DIR", str(tmp_path))
     monkeypatch.setattr(RemoteAnalysisExecutor, "execute", execute)
+    monkeypatch.setattr(
+        RemoteAnalysisExecutor,
+        "close",
+        lambda self: released.append((self.workspace, self.root)),
+    )
     settings = replace(
         SandboxSettings(),
         worker_url="http://sandbox:8090",
@@ -65,7 +71,41 @@ def test_remote_preflight_uses_managed_worker_paths(tmp_path, monkeypatch):
     assert [item[0] for item in calls] == ["python", "r"]
     assert all(item[1].parts[-1] == "files" for item in calls)
     assert all("runs" in item[2].parts for item in calls)
+    assert len(released) == 1
     assert not any((tmp_path / "workspaces").iterdir())
+
+
+def test_remote_executor_releases_matching_worker_state(tmp_path, monkeypatch):
+    workspace = tmp_path / "workspaces" / "workspace-id" / "files"
+    root = tmp_path / "workspaces" / "workspace-id" / "runs" / "run-1" / "computations"
+    workspace.mkdir(parents=True)
+    root.mkdir(parents=True)
+    calls = []
+
+    class Response:
+        is_error = False
+
+    def post(url, **kwargs):
+        calls.append((url, kwargs))
+        return Response()
+
+    monkeypatch.setattr("scientific_agent.execution.httpx.post", post)
+    executor = RemoteAnalysisExecutor(
+        workspace,
+        root,
+        replace(
+            SandboxSettings(),
+            worker_url="http://sandbox:8090",
+            worker_token="x" * 32,
+        ),
+    )
+    executor.close()
+
+    assert calls[0][0] == "http://sandbox:8090/release"
+    assert calls[0][1]["json"] == {
+        "workspace": str(workspace),
+        "computation_root": str(root),
+    }
 
 
 def test_preflight_probes_advertised_python_and_r_packages(tmp_path, monkeypatch):
@@ -78,6 +118,9 @@ def test_preflight_probes_advertised_python_and_r_packages(tmp_path, monkeypatch
         def execute(self, language, code, **_kwargs):
             seen.append((language, code))
             return {"status": "succeeded"}
+
+        def close(self):
+            pass
 
     monkeypatch.setattr("scientific_agent.execution.AnalysisExecutor", FakeExecutor)
     paths = {}
@@ -97,7 +140,9 @@ def test_preflight_probes_advertised_python_and_r_packages(tmp_path, monkeypatch
 
 
 @pytest.mark.live
-def test_python_and_r_execute_with_recorded_outputs_and_confinement(tmp_path, monkeypatch):
+def test_python_and_r_execute_with_recorded_outputs_and_confinement(
+    tmp_path, monkeypatch
+):
     executor = _executor(tmp_path)
     (executor.workspace / "values.csv").write_text(
         "group,value\nA,1\nA,3\nB,5\nB,7\n",
@@ -199,9 +244,12 @@ def test_sandbox_rejects_timeout_symlink_and_excess_calls(tmp_path):
     assert linked.evidence().successful_calls == 0
 
     budgeted = _executor(tmp_path / "budgeted", max_calls_per_attempt=1)
-    assert budgeted.execute(
-        "python", "open('/output/ok.txt', 'w').write('ok')", 10
-    )["status"] == "succeeded"
+    assert (
+        budgeted.execute("python", "open('/output/ok.txt', 'w').write('ok')", 10)[
+            "status"
+        ]
+        == "succeeded"
+    )
     denied = budgeted.execute("python", "print('second')", 10)
     assert denied["status"] == "policy_denied"
     assert "analysis call budget exhausted" in denied["violations"]

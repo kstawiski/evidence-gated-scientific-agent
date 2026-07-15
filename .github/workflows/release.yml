@@ -10,7 +10,78 @@ permissions:
   packages: write
 
 jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: "0.10.2"
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.18.0"
+          cache: npm
+      - uses: docker/setup-buildx-action@v3
+      - name: Verify release version parity
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import tomllib
+          from pathlib import Path
+
+          expected = os.environ["RELEASE_TAG"].removeprefix("v")
+          package_lock = json.loads(Path("package-lock.json").read_text())
+          versions = {
+              "pyproject.toml": tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"],
+              "package.json": json.loads(Path("package.json").read_text())["version"],
+              "package-lock.json": package_lock["version"],
+              "package-lock.json root package": package_lock["packages"][""]["version"],
+              "CITATION.cff": re.search(r"^version:\s*([^\s]+)", Path("CITATION.cff").read_text(), re.M).group(1),
+              "scientific_agent/__init__.py": re.search(r'^__version__\s*=\s*"([^"]+)"', Path("scientific_agent/__init__.py").read_text(), re.M).group(1),
+          }
+          mismatches = {name: value for name, value in versions.items() if value != expected}
+          compose_tags = set(
+              re.findall(
+                  r"^\s+(?:image|SCIENTIFIC_AGENT_WORKER_IMAGE_ID):\s*"
+                  r"evidence-bench(?:-browser|-packages)?:(\S+)\s*$",
+                  Path("compose.yaml").read_text(),
+                  re.M,
+              )
+          )
+          if compose_tags != {expected}:
+              mismatches["compose.yaml image tags"] = sorted(compose_tags)
+          if mismatches:
+              raise SystemExit(f"release tag {expected!r} does not match {mismatches}")
+          PY
+      - run: uv sync --frozen --extra dev --extra analysis
+      - name: Lint and formatting
+        run: |
+          uvx ruff==0.15.21 check scientific_agent tests evals deploy skills
+          uvx ruff==0.15.21 format --check scientific_agent tests evals deploy skills
+          git diff --check
+      - name: Audit locked runtime dependencies
+        run: >-
+          uv export --python 3.12 --frozen --no-dev --extra analysis
+          --no-emit-project |
+          uvx --python 3.12 pip-audit==2.10.1 -r /dev/stdin
+      - run: npm ci --ignore-scripts
+      - run: npm audit --omit=dev
+      - run: uv run pytest -m "not live"
+      - run: node --check scientific_agent/web/static/app.js
+      - run: shellcheck scripts/*.sh browser/*.sh
+      - run: docker compose config --quiet
+      - name: Build all release containers and verify network boundaries
+        run: |
+          docker compose build
+          bash scripts/container_boundary_smoke.sh
+
   publish:
+    needs: verify
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -34,6 +105,13 @@ jobs:
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
+      - uses: docker/metadata-action@v5
+        id: browser_meta
+        with:
+          images: ghcr.io/${{ github.repository }}-browser
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -50,3 +128,11 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: ${{ steps.packages_meta.outputs.tags }}
           labels: ${{ steps.packages_meta.outputs.labels }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: browser/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.browser_meta.outputs.tags }}
+          labels: ${{ steps.browser_meta.outputs.labels }}

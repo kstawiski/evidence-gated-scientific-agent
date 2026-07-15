@@ -5,15 +5,16 @@ from __future__ import annotations
 import asyncio
 import json
 import urllib.request
-from pathlib import Path
 
-from .config import PROJECT_ROOT, Settings, load_mcp_secrets
+from .config import Settings, load_mcp_secrets
 from .execution import sandbox_preflight
 from .mcp import MCP_TOOL_FILTERS, build_mcp_toolsets, close_mcp_toolsets
 
 
 def _models(base_url: str) -> list[str]:
-    with urllib.request.urlopen(f"{base_url.rstrip('/')}/models", timeout=10) as response:
+    with urllib.request.urlopen(
+        f"{base_url.rstrip('/')}/models", timeout=10
+    ) as response:
         payload = json.load(response)
     return [item["id"] for item in payload.get("data", [])]
 
@@ -72,7 +73,9 @@ async def run_preflight(
             "startup_attempts": attempts,
         }
         if missing:
-            raise RuntimeError(f"MCP {name} missing required tools: {', '.join(missing)}")
+            raise RuntimeError(
+                f"MCP {name} missing required tools: {', '.join(missing)}"
+            )
     return result
 
 

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import os
+import signal
 import shutil
 import stat
 import subprocess
 import tempfile
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -63,6 +65,7 @@ class AnalysisExecutor:
     settings: SandboxSettings
     environment_dir: Path | None = None
     history_dir: Path | None = None
+    cancel_event: threading.Event | None = None
     _records: list[ComputationRecord] = field(default_factory=list)
 
     def __post_init__(self) -> None:
@@ -86,9 +89,13 @@ class AnalysisExecutor:
         return [*common, self.settings.rscript, self.settings.r_library, Path("/etc/R")]
 
     def _validate_runtime(self, language: Language) -> None:
-        missing = [str(path) for path in self._required_paths(language) if not path.exists()]
+        missing = [
+            str(path) for path in self._required_paths(language) if not path.exists()
+        ]
         if missing:
-            raise RuntimeError(f"sandbox runtime paths are missing: {', '.join(missing)}")
+            raise RuntimeError(
+                f"sandbox runtime paths are missing: {', '.join(missing)}"
+            )
 
     def _bwrap_command(
         self,
@@ -352,15 +359,15 @@ class AnalysisExecutor:
         environment_artifacts: list[ArtifactRef] = []
         workspace_packages: Path | None = None
 
-        status: Literal["succeeded", "failed", "timed_out", "policy_denied"]
+        status: Literal[
+            "succeeded", "failed", "timed_out", "cancelled", "policy_denied"
+        ]
         exit_code: int | None = None
         violations: list[str] = []
         if not code.strip():
             violations.append("code must not be empty")
         if len(code_bytes) > self.settings.max_code_bytes:
-            violations.append(
-                f"code exceeds {self.settings.max_code_bytes} byte limit"
-            )
+            violations.append(f"code exceeds {self.settings.max_code_bytes} byte limit")
         if len(self._records) >= self.settings.max_calls_per_attempt:
             violations.append("analysis call budget exhausted")
         try:
@@ -378,6 +385,7 @@ class AnalysisExecutor:
 
         timeout_seconds = max(1, min(timeout_seconds, self.settings.max_wall_seconds))
         timed_out = False
+        cancelled = False
         output_artifacts: list[ArtifactRef] = []
         if violations:
             status = "policy_denied"
@@ -394,21 +402,43 @@ class AnalysisExecutor:
                 timeout_seconds,
             )
             with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
-                try:
-                    completed = subprocess.run(
-                        command,
-                        stdin=subprocess.DEVNULL,
-                        stdout=stdout,
-                        stderr=stderr,
-                        timeout=timeout_seconds + 2,
-                        check=False,
-                    )
-                    exit_code = completed.returncode
-                except subprocess.TimeoutExpired:
-                    timed_out = True
+                process = subprocess.Popen(
+                    command,
+                    stdin=subprocess.DEVNULL,
+                    stdout=stdout,
+                    stderr=stderr,
+                    start_new_session=True,
+                )
+                deadline = time.monotonic() + timeout_seconds + 2
+                while process.poll() is None:
+                    if self.cancel_event is not None and self.cancel_event.is_set():
+                        cancelled = True
+                        break
+                    if time.monotonic() >= deadline:
+                        timed_out = True
+                        break
+                    time.sleep(0.05)
+                if cancelled or timed_out:
+                    try:
+                        os.killpg(process.pid, signal.SIGTERM)
+                    except ProcessLookupError:
+                        pass
+                    try:
+                        process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        try:
+                            os.killpg(process.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        process.wait(timeout=2)
+                else:
+                    process.wait()
+                exit_code = process.returncode
             output_artifacts, output_violations = self._inspect_outputs(output_dir)
             violations.extend(output_violations)
-            if timed_out:
+            if cancelled:
+                status = "cancelled"
+            elif timed_out:
                 status = "timed_out"
             elif exit_code == 0 and not violations:
                 status = "succeeded"
@@ -495,7 +525,9 @@ class AnalysisExecutor:
         }
 
     def evidence(self) -> ComputationEvidence:
-        successful = [record for record in self._records if record.status == "succeeded"]
+        successful = [
+            record for record in self._records if record.status == "succeeded"
+        ]
         artifacts = [
             artifact
             for record in successful
@@ -507,6 +539,9 @@ class AnalysisExecutor:
             records=list(self._records),
             artifacts=artifacts,
         )
+
+    def close(self) -> None:
+        """Release executor-scoped resources (none for in-process execution)."""
 
 
 def build_analysis_tools(executor: AnalysisExecutor):
@@ -616,6 +651,7 @@ def sandbox_preflight(settings: SandboxSettings, workspace: Path | None = None) 
             timeout_seconds=15,
         )
     finally:
+        executor.close()
         if temporary_root is not None:
             temporary_root.cleanup()
         if managed_base is not None:
@@ -637,6 +673,8 @@ class AnalysisRunner(Protocol):
 
     def evidence(self) -> ComputationEvidence: ...
 
+    def close(self) -> None: ...
+
 
 @dataclass
 class RemoteAnalysisExecutor:
@@ -645,6 +683,7 @@ class RemoteAnalysisExecutor:
     workspace: Path
     root: Path
     settings: SandboxSettings
+    cancel_event: threading.Event | None = None
     _evidence: ComputationEvidence = field(default_factory=ComputationEvidence)
 
     def __post_init__(self) -> None:
@@ -658,18 +697,52 @@ class RemoteAnalysisExecutor:
         timeout_seconds: int = 120,
     ) -> dict:
         timeout = max(1, min(timeout_seconds, self.settings.max_wall_seconds))
-        response = httpx.post(
-            f"{self.settings.worker_url}/execute",
-            headers={"Authorization": f"Bearer {self.settings.worker_token}"},
-            json={
-                "workspace": str(self.workspace),
-                "computation_root": str(self.root),
-                "language": language,
-                "code": code,
-                "timeout_seconds": timeout,
-            },
-            timeout=timeout + 15,
+        request_id = str(uuid.uuid4())
+        finished = threading.Event()
+
+        def cancel_remote() -> None:
+            if self.cancel_event is None:
+                return
+            while not finished.is_set():
+                if not self.cancel_event.wait(timeout=0.1):
+                    continue
+                try:
+                    response = httpx.post(
+                        f"{self.settings.worker_url}/cancel",
+                        headers={
+                            "Authorization": f"Bearer {self.settings.worker_token}"
+                        },
+                        json={"request_id": request_id},
+                        timeout=5,
+                    )
+                    if response.status_code in {200, 202}:
+                        return
+                except httpx.HTTPError:
+                    pass
+                finished.wait(timeout=0.2)
+
+        watcher = threading.Thread(
+            target=cancel_remote,
+            name=f"sandbox-cancel-{request_id[:8]}",
+            daemon=True,
         )
+        watcher.start()
+        try:
+            response = httpx.post(
+                f"{self.settings.worker_url}/execute",
+                headers={"Authorization": f"Bearer {self.settings.worker_token}"},
+                json={
+                    "request_id": request_id,
+                    "workspace": str(self.workspace),
+                    "computation_root": str(self.root),
+                    "language": language,
+                    "code": code,
+                    "timeout_seconds": timeout,
+                },
+                timeout=timeout + 15,
+            )
+        finally:
+            finished.set()
         if response.is_error:
             try:
                 detail = response.json().get("detail", "worker request failed")
@@ -685,12 +758,33 @@ class RemoteAnalysisExecutor:
     def evidence(self) -> ComputationEvidence:
         return self._evidence
 
+    def close(self) -> None:
+        response = httpx.post(
+            f"{self.settings.worker_url}/release",
+            headers={"Authorization": f"Bearer {self.settings.worker_token}"},
+            json={
+                "workspace": str(self.workspace),
+                "computation_root": str(self.root),
+            },
+            timeout=10,
+        )
+        if response.is_error:
+            try:
+                detail = response.json().get("detail", "worker release failed")
+            except ValueError:
+                detail = "worker returned a non-JSON release error"
+            raise RuntimeError(
+                f"sandbox worker release returned HTTP {response.status_code}: {detail}"
+            )
+
 
 def create_analysis_executor(
     workspace: Path,
     root: Path,
     settings: SandboxSettings,
+    *,
+    cancel_event: threading.Event | None = None,
 ) -> AnalysisRunner:
     if settings.worker_url:
-        return RemoteAnalysisExecutor(workspace, root, settings)
-    return AnalysisExecutor(workspace, root, settings)
+        return RemoteAnalysisExecutor(workspace, root, settings, cancel_event)
+    return AnalysisExecutor(workspace, root, settings, cancel_event=cancel_event)

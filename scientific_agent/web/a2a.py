@@ -62,9 +62,7 @@ def build_agent_card(public_url: str) -> AgentCard:
         ],
         input_modes=["text/plain", "application/octet-stream"],
         output_modes=["text/markdown", "application/json"],
-        security_requirements=[
-            SecurityRequirement(schemes={"bearer": StringList()})
-        ],
+        security_requirements=[SecurityRequirement(schemes={"bearer": StringList()})],
     )
     return AgentCard(
         name="Evidence Bench",
@@ -103,13 +101,18 @@ def _message_metadata(context: RequestContext) -> dict[str, Any]:
     return metadata
 
 
-def _run_options(context: RequestContext) -> tuple[bool, tuple[str, ...]]:
+def _run_options(
+    context: RequestContext,
+    default_mcp_servers: tuple[str, ...],
+) -> tuple[bool, tuple[str, ...]]:
     metadata = _message_metadata(context)
     enable_code = metadata.get("enable_code", False)
     if not isinstance(enable_code, bool):
         raise ValueError("metadata.enable_code must be a boolean")
-    requested = metadata.get("mcp_servers", [])
-    if not isinstance(requested, list) or any(not isinstance(item, str) for item in requested):
+    requested = metadata.get("mcp_servers", list(default_mcp_servers))
+    if not isinstance(requested, list) or any(
+        not isinstance(item, str) for item in requested
+    ):
         raise ValueError("metadata.mcp_servers must be a list of strings")
     unknown = set(requested) - ALLOWED_MCP_SERVERS
     if unknown:
@@ -125,14 +128,15 @@ class EvidenceBenchExecutor(AgentExecutor):
         store: WorkspaceStore,
         service: TaskService,
         max_upload_bytes: int,
+        default_mcp_servers: tuple[str, ...] = (),
     ):
         self.store = store
         self.service = service
         self.max_upload_bytes = max_upload_bytes
+        self.default_mcp_servers = default_mcp_servers
+        self._task_runs: dict[str, str] = {}
 
-    async def execute(
-        self, context: RequestContext, event_queue: EventQueue
-    ) -> None:
+    async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         if context.message is None or not context.task_id or not context.context_id:
             raise ValueError("A2A message, task ID, and context ID are required")
         task = context.current_task
@@ -143,10 +147,12 @@ class EvidenceBenchExecutor(AgentExecutor):
 
         objective = context.get_user_input().strip()
         if not objective:
-            await updater.reject(new_text_message("A scientific objective is required."))
+            await updater.reject(
+                new_text_message("A scientific objective is required.")
+            )
             return
         try:
-            enable_code, mcp_servers = _run_options(context)
+            enable_code, mcp_servers = _run_options(context, self.default_mcp_servers)
             workspace = self.store.get_or_create_external_workspace(
                 context.context_id,
                 f"A2A {context.context_id[:12]}",
@@ -154,7 +160,9 @@ class EvidenceBenchExecutor(AgentExecutor):
             for part in context.message.parts:
                 if part.WhichOneof("content") != "raw":
                     if part.WhichOneof("content") == "url":
-                        raise ValueError("URL file parts are not fetched; send raw bytes")
+                        raise ValueError(
+                            "URL file parts are not fetched; send raw bytes"
+                        )
                     continue
                 if not part.filename:
                     raise ValueError("raw file parts require a filename")
@@ -170,7 +178,11 @@ class EvidenceBenchExecutor(AgentExecutor):
             run = self.service.submit(
                 workspace["id"], objective, enable_code, mcp_servers
             )
-            detail = await self.service.wait(run["id"])
+            self._task_runs[task.id] = run["id"]
+            try:
+                detail = await self.service.wait(run["id"])
+            finally:
+                self._task_runs.pop(task.id, None)
         except (ValueError, FileExistsError, RuntimeError) as exc:
             await updater.reject(new_text_message(str(exc)))
             return
@@ -201,15 +213,21 @@ class EvidenceBenchExecutor(AgentExecutor):
         message = new_text_message(
             json.dumps(summary, sort_keys=True), media_type="application/json"
         )
-        if detail["status"] in SUCCESS_STATES:
+        if detail["status"] == "cancelled":
+            await updater.cancel(message)
+        elif detail["status"] in SUCCESS_STATES:
             await updater.complete(message)
         else:
             await updater.failed(message)
 
-    async def cancel(
-        self, context: RequestContext, event_queue: EventQueue
-    ) -> None:
-        del context, event_queue
-        raise TaskNotCancelableError(
-            message="Scientific runs cannot yet be canceled after execution begins."
-        )
+    async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
+        if not context.task_id or not context.context_id:
+            raise TaskNotCancelableError(message="A2A task context is required.")
+        run_id = self._task_runs.get(context.task_id)
+        if run_id is None:
+            raise TaskNotCancelableError(
+                message="The scientific run is not active or is already terminal."
+            )
+        self.service.cancel(run_id)
+        updater = TaskUpdater(event_queue, context.task_id, context.context_id)
+        await updater.cancel(new_text_message("Scientific run cancellation requested."))

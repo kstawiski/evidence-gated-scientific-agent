@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 from google.adk.tools.mcp_tool import McpToolset
 from google.adk.tools.mcp_tool.mcp_session_manager import StdioConnectionParams
@@ -39,11 +38,15 @@ def _base_env() -> dict[str, str]:
     return {name: os.environ[name] for name in keep if name in os.environ}
 
 
-def build_mcp_toolsets(settings: Settings, names: tuple[str, ...] | None = None) -> list[McpToolset]:
-    selected = names or settings.mcp_servers
+def build_mcp_toolsets(
+    settings: Settings, names: tuple[str, ...] | None = None
+) -> list[McpToolset]:
+    selected = settings.mcp_servers if names is None else names
     unknown = set(selected) - set(MCP_TOOL_FILTERS)
     if unknown:
         raise ValueError(f"unknown MCP servers: {', '.join(sorted(unknown))}")
+    if not selected:
+        return []
     secrets = load_mcp_secrets()
     toolsets: list[McpToolset] = []
     for name in selected:
@@ -73,7 +76,9 @@ def build_mcp_toolsets(settings: Settings, names: tuple[str, ...] | None = None)
         toolsets.append(
             McpToolset(
                 connection_params=StdioConnectionParams(
-                    server_params=StdioServerParameters(command=command, args=args, env=env),
+                    server_params=StdioServerParameters(
+                        command=command, args=args, env=env
+                    ),
                     timeout=30,
                 ),
                 tool_filter=MCP_TOOL_FILTERS[name],

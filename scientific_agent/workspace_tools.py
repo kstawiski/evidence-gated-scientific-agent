@@ -34,7 +34,10 @@ def build_workspace_tools(root: Path):
                 item.name + ("/" if item.is_dir() else "")
                 for item in sorted(target.iterdir(), key=lambda item: item.name)
             ]
-            return {"path": str(target.relative_to(workspace)), "entries": entries[:1000]}
+            return {
+                "path": str(target.relative_to(workspace)),
+                "entries": entries[:1000],
+            }
         except Exception as exc:  # surface a structured, non-fatal tool error
             return {"error": str(exc)}
 
@@ -48,7 +51,10 @@ def build_workspace_tools(root: Path):
             target = resolve(path)
             size = target.stat().st_size
             if size > MAX_READ_BYTES:
-                return {"error": f"file exceeds {MAX_READ_BYTES} byte read limit", "bytes": size}
+                return {
+                    "error": f"file exceeds {MAX_READ_BYTES} byte read limit",
+                    "bytes": size,
+                }
             return {
                 "path": str(target.relative_to(workspace)),
                 "content": target.read_text(encoding="utf-8", errors="replace"),
@@ -66,7 +72,11 @@ def build_workspace_tools(root: Path):
         try:
             target = resolve(path)
             rx = re.compile(pattern)
-            files = [target] if target.is_file() else [p for p in target.rglob("*") if p.is_file()]
+            files = (
+                [target]
+                if target.is_file()
+                else [p for p in target.rglob("*") if p.is_file()]
+            )
             hits: list[str] = []
             for file in files:
                 if file.stat().st_size > MAX_READ_BYTES:

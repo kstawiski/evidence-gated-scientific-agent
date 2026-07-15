@@ -14,16 +14,25 @@ def _model(
     max_tokens: int | None = None,
     timeout: int = 180,
 ) -> LiteLlm:
-    return LiteLlm(
+    selected_max_tokens = endpoint.max_tokens
+    if selected_max_tokens is not None and max_tokens is not None:
+        selected_max_tokens = min(selected_max_tokens, max_tokens)
+    kwargs = dict(
         model=f"openai/{endpoint.model.removeprefix('openai/')}",
         api_base=endpoint.base_url,
         api_key=endpoint.api_key or "no-auth-needed",
-        max_tokens=endpoint.max_tokens if max_tokens is None else max_tokens,
         temperature=endpoint.temperature if temperature is None else temperature,
         top_p=endpoint.top_p,
-        timeout=timeout,
+        timeout=endpoint.request_timeout_seconds or timeout,
         max_retries=1,
     )
+    if selected_max_tokens is not None:
+        kwargs["max_tokens"] = selected_max_tokens
+    if endpoint.enable_thinking is not None:
+        kwargs["extra_body"] = {
+            "chat_template_kwargs": {"enable_thinking": endpoint.enable_thinking}
+        }
+    return LiteLlm(**kwargs)
 
 
 def qwen_model(

@@ -15,8 +15,9 @@
    private/non-HTTP browser targets fail closed.
 9. Claim–source referential integrity plus URL/date matching against actual MCP
    output, independent of the claim type selected by Qwen.
-10. Independent Gemma report audit with controller retrieval evidence and at
-    most one repair round.
+10. Independent Gemma report and multimodal display audit with controller
+    evidence and a configurable, bounded repair/re-audit loop (four rounds by
+    default).
 11. Append-only event log, private normalized MCP evidence artifacts, exact run
     configuration, and SHA-256 artifact manifest.
 12. Explicit `--enable-code` authorization for typed Python and R tools backed by
@@ -27,8 +28,8 @@
 14. Computation records containing source/log/output hashes, and deterministic
     rejection of computed claims that cite anything except a successful generated
     output artifact.
-15. Authenticated browser workbench, isolated persistent workspaces, uploads,
-    run history, artifact downloads, and provenance bundles.
+15. Optionally authenticated browser workbench, isolated persistent workspaces,
+    uploads, run history, artifact downloads, and provenance bundles.
 16. Standards-based A2A 1.0 Agent Card and JSON-RPC execution using the official
     Python SDK.
 17. On-demand per-workspace PyPI, CRAN, and Bioconductor environments built by a
@@ -38,18 +39,27 @@
 19. Per-attempt rejected-draft provenance, cumulative evidence reuse during repair,
     and fail-soft preservation when an independent critic or later run stage is
     unavailable.
+20. Controller-rendered IMRaD-style Markdown reports with registered, captioned,
+    embedded figures and tables, deterministic four-significant-digit table and
+    raster-DPI gates, and changed-byte Gemma re-audit.
+21. Real-time visible model/tool events, a full-screen monitor, bounded in-browser
+    preview for every UTF-8 text artifact, immediate artifact access, and
+    cooperative cancellation.
+22. A2A streaming and cancellation plus audited follow-up report revisions that
+    preserve the immutable parent run.
 
 ## Explicitly deferred
 
 - Arbitrary host shell commands, Git mutation, operating-system package
   installation, workspace writes, and database calls.
-- Domain validators for RNA-seq, variants, survival analysis, and figures.
+- Domain-specific validators for RNA-seq, variants, and survival analysis beyond
+  the implemented generic data, evidence, table, and figure gates.
 - Clean-environment computational reruns.
-- Visual Gemma audit of generated figures.
 - Human approval UI for irreversible or decision-critical actions.
-- Per-person accounts/roles and OIDC; the current trusted-lab deployment uses one
-  Basic Auth account plus an independent A2A bearer token.
-- Automatic task routing into the local-scientist lane.
+- Per-person accounts/roles and OIDC; browser authentication is optional for a
+  trusted private network, while independent A2A and worker tokens remain
+  mandatory.
+- Automatic task routing into the `umed-task` lane.
 
 ## Implemented execution-tool gate
 

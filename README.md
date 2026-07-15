@@ -3,23 +3,84 @@
 Evidence Bench is a self-hosted computational-science agent with a browser UI,
 isolated workspaces, sandboxed Python and R, MCP research tools, complete run
 provenance, and an A2A 1.0 interface. It can run as a standalone Docker service or
-as the local-scientist backend for a delegation skill.
+as the explicit `umed-task` backend for a delegation skill. The historical
+`local-scientist` route is a deprecated compatibility alias.
 
 - Qwen3.6-27B is the primary planner, tool user, analyst, and report writer.
-- Gemma 4 12B independently plans and audits the master plan and report.
+- A separately served Gemma 4 instruct model independently plans and audits the
+  master plan and report. Its endpoint and exact model are deployment settings
+  (`GEMMA_BASE_URL` and `GEMMA_MODEL`), so the critic need not run on the
+  application host or use the example model from `.env.example`.
 - Deterministic Python code controls routing, tool policy, plan linting,
   claim–source validation, repair limits, and provenance.
 - Agreement between models never overrides a failed deterministic check.
+
+Gemma is a text critic in the released workflow. For figures, a confined
+sandbox worker extracts bounded OCR text and word geometry, and deterministic
+code checks rendered labels against machine-readable results before Gemma
+reviews those records. No raster bytes are supplied to the display critic and
+the system does not claim pixel-level or multimodal review; missing or
+insufficient OCR makes display approval inconclusive.
 
 Each browser or A2A workspace keeps its inputs, run history, generated tables and
 figures, claim ledger, source records, model review, logs, and SHA-256 manifest
 together. Workspaces cannot read or modify one another. Python/R see their input
 workspace read-only and can write only to a bounded per-call output directory.
+A workspace allows only one queued or active run at a time, so its inputs and
+protocol stay locked — and immutable — for the duration of that run.
+
+While a run is active, visible non-thought output from Qwen and Gemma,
+controller artifacts, and registered figures/tables become available as soon
+as they are written,
+and a polled event log reports phase changes and tool-call outcomes in real
+time. The provenance rail includes a readable live tail plus a near-full-screen
+console, and generated UTF-8 text artifacts can be previewed in the browser
+while they are still growing; complete-file downloads remain available.
+Events and live artifacts never expose model reasoning/chain-of-thought,
+prompts, tool-call arguments, or credentials. A run can be cancelled
+cooperatively at any time, which preserves partial artifacts as explicitly
+incomplete rather than reporting a false result. Once a run has a completed,
+audited report, a follow-up request starts a new Qwen→Gemma audited child
+revision against it; the parent report and its evidence are immutable and are
+never overwritten. The UI leaves Python/R disabled for each new follow-up by
+default, which is appropriate for writing, caption, and interpretation changes;
+users explicitly enable code only when a reanalysis or sensitivity analysis
+requires new computation. Cancelling a revision preserves it as a separate,
+immutable partial record and does not alter its parent. See
+[`docs/WEB_AND_A2A.md`](docs/WEB_AND_A2A.md#run-lifecycle-live-observability-cancellation-and-revisions)
+for the events/cancel/follow-up/display APIs.
+
+Every report is a standards-derived **exploratory** scientific article —
+Abstract, Introduction, Methods, Results, Discussion, and Conclusions, with
+figures/tables registered only from exact successful computation artifacts —
+never a claim of peer review, science lock, manuscript readiness, or
+submission readiness. See
+[`docs/REPORTING_STANDARD.md`](docs/REPORTING_STANDARD.md) for the article
+and evidence-gating contract.
 
 The web workbench also provides reviewed workflow starters, a “reuse protocol”
 action, immutable input and environment manifests, and a downloadable provenance
 bundle. See [lessons adopted from Open Science Desktop](docs/UPSTREAM_LESSONS.md)
 for the design boundary and explicit non-goals.
+
+Compose includes its own persistent Chromium service; it never connects to a
+user's personal browser or CDP endpoint. Qwen reaches its unpublished DevTools
+port through a fixed-target gateway, while lab users can open the same live browser inside the workbench to
+clear bot checks or complete publisher interactions. Only the passwordless
+noVNC view is published, so bind it exclusively to a trusted LAN/Tailnet. The
+browser is isolated from application, worker, and model networks and has only
+public-web egress through a private-address-denying proxy. Its profile and downloads persist below `EVIDENCE_BENCH_BROWSER_PATH`, and
+the application receives the downloads directory read-only at
+`/browser-downloads`. See
+[`docs/WEB_AND_A2A.md`](docs/WEB_AND_A2A.md#managed-interactive-research-browser).
+
+Biomedical and health-science runs also have a typed PubMed quality gate. Qwen
+must record a PubMed search, acquire relevant PMID records, and cite locally
+stored Markdown evidence; legitimate open-access PDFs are verified and stored
+when available, while missing PDFs remain explicit. Users can manually obtain
+otherwise accessible papers in the managed browser and ask the agent to verify
+and import the exact download. See
+[`docs/LITERATURE_ACQUISITION.md`](docs/LITERATURE_ACQUISITION.md).
 
 ## Run the web service with Docker
 
@@ -32,6 +93,12 @@ cp .env.example .env
 # Edit .env: set independent WEB_PASSWORD and A2A_TOKEN values and model URLs.
 # For a trusted private network with no browser login, set WEB_AUTH_ENABLED=false
 # and remove WEB_USERNAME / WEB_PASSWORD.
+# To share the managed browser on that same trusted network, set
+# BROWSER_BIND_ADDRESS and optionally BROWSER_NOVNC_PORT.
+# A host serving both a private LAN and Tailnet may bind WEB_BIND_ADDRESS and
+# BROWSER_BIND_ADDRESS to 0.0.0.0 only when its firewall exposes those ports
+# exclusively on the intended trusted interfaces. Keep BROWSER_PUBLIC_URL empty
+# so the embedded browser follows the hostname used to open the workbench.
 docker compose up --build -d
 curl http://127.0.0.1:8080/healthz
 ```
@@ -39,24 +106,82 @@ curl http://127.0.0.1:8080/healthz
 Open <http://127.0.0.1:8080>. By default, sign in with `WEB_USERNAME` /
 `WEB_PASSWORD`. When `WEB_AUTH_ENABLED=false`, the browser and REST API require
 no login; A2A and internal worker tokens remain enforced.
-The safe Compose default publishes only on loopback. Put the service behind TLS
-before changing `WEB_BIND_ADDRESS` to a LAN or public interface.
+The safe Compose default publishes only on loopback. Bind directly only on a
+trusted private LAN/Tailnet; use an authenticated TLS reverse proxy for any
+publicly reachable interface.
 
 The service exposes:
 
 - `GET /.well-known/agent-card.json` — public A2A 1.0 Agent Card;
 - `POST /a2a` — JSON-RPC A2A endpoint using `Authorization: Bearer <A2A_TOKEN>`;
+- `POST /api/workspaces/{id}/runs`, `GET /api/runs/{run_id}` — start and poll a run;
+- `GET /api/runs/{run_id}/events` — polled live event log for the active or
+  finished run;
+- `GET /api/runs/{run_id}/artifact-preview?path=...` — bounded UTF-8 preview
+  for live or final text artifacts (up to 512 KiB, with explicit head/tail
+  truncation for larger files);
+- `POST /api/runs/{run_id}/cancel` — cooperative cancellation;
+- `POST /api/runs/{run_id}/follow-ups` — start an audited Qwen→Gemma child
+  revision against a completed report, with a per-revision `enable_code`
+  override;
+- `GET`, `POST /api/runs/{run_id}/discussion` — read or continue an
+  evidence-bounded Gemma explanation thread for a completed report; a reply may
+  propose, but never automatically starts, an audited Qwen→Gemma revision;
+- `GET /api/runs/{run_id}/artifacts`, `.../displays/{id}/image`,
+  `.../displays/{id}/table`, `.../references/{source_id}/pdf`, `.../bundle` —
+  live and final artifact/display access plus inline preview of verified cited
+  papers;
 - `/api/docs` — authenticated OpenAPI documentation;
 - `/healthz` — unauthenticated container health check.
 
 See [`docs/WEB_AND_A2A.md`](docs/WEB_AND_A2A.md) for A2A examples, deployment
-details, workspace semantics, and threat boundaries.
+details, workspace semantics, run-lifecycle APIs, and threat boundaries, and
+[`docs/REPORTING_STANDARD.md`](docs/REPORTING_STANDARD.md) for the report
+contract.
+
+## Lab agent skill
+
+[`skills/evidence-bench`](skills/evidence-bench/SKILL.md) is a portable skill for
+Claude and Codex agents on the UMED lab LAN/Tailnet. Its dependency-free client
+creates isolated workspaces, uploads inputs, submits work with Python/R and all
+three research MCPs enabled by default, streams controller events, cancels bad
+runs, lets s8-Gemma explain a completed report and draft a revision brief, starts
+audited follow-up revisions, and downloads provenance bundles. It
+uses the internal service at `http://10.20.102.122:8070` and requires no browser
+username or password.
+
+Install the folder as `evidence-bench` under either agent's skill directory:
+
+```bash
+# Claude Code
+cp -R skills/evidence-bench ~/.claude/skills/evidence-bench
+
+# Codex
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+cp -R skills/evidence-bench "${CODEX_HOME:-$HOME/.codex}/skills/evidence-bench"
+```
+
+Then ask the agent to use `$evidence-bench`, or run the bundled client directly:
+
+```bash
+python3 ~/.claude/skills/evidence-bench/scripts/evidence_bench.py run \
+  --workspace-name "Welch analysis" \
+  --objective "Analyze the uploaded data and produce an evidence-linked report." \
+  --file data.csv --wait --download-dir ./evidence-bench-result
+```
+
+This optional lab profile is intentionally deployment-specific. The container,
+A2A protocol, application configuration, and public integration sample remain
+generic and configurable for other installations.
 
 The current milestone supports evidence retrieval, real computation, and
 workspace-scoped package installation. It
 can retrieve current sources through Brave Search, retrieve library documentation
-through Context7, optionally inspect public web pages through a shared Chrome
-DevTools service, and read bounded files inside one assigned workspace. With the
+through Context7, inspect relevant public web pages through the service-owned
+Chrome DevTools endpoint, and read bounded files inside one assigned workspace.
+All three research connections are enabled by default when configured; the
+researcher prompt directs Qwen to use the connection relevant to the question
+rather than calling tools mechanically. With the
 explicit `--enable-code` flag, Qwen can run complete Python and R analysis scripts
 through typed tools in an offline bubblewrap sandbox. Inputs are mounted read-only;
 only a per-call output directory is writable, and generated files are hashed and
@@ -72,6 +197,19 @@ the selected generation read-only and remains offline. Direct URLs, VCS/path
 requirements, package-manager flags, and arbitrary shell/package sources are
 rejected. Exact versions, an installed-tree hash, repository, generation, and lock
 hash used by each computation are retained in provenance.
+
+Immutable generations are governed by separate per-generation, cumulative
+per-workspace, and cumulative deployment-wide logical-byte quotas. Quota
+admission is serialized; an update is rejected before copying its predecessor
+when capacity is already insufficient. During installation, the worker polls the
+staging package tree and terminates the installer process group when the strictest
+generation, workspace, or deployment-wide allowance is observed to be exceeded;
+failed staging generations are removed. Polling can permit transient overshoot
+during one 100 ms polling interval plus directory-scan and process-termination
+latency, so the residual overshoot is time-bounded rather than a fixed byte count.
+Deleting a workspace also invokes the package worker's authenticated cleanup
+endpoint and removes all of that workspace's Python and R generations without
+touching retained workspaces.
 
 The model still cannot invoke an arbitrary host shell, mutate or delete raw input
 data, use Git, install operating-system packages, or contact the network from
@@ -118,12 +256,67 @@ Python dependencies are pinned to the versions tested on the fleet. In
 particular, this project does not permit the compromised LiteLLM 1.82.7 or
 1.82.8 releases described in ADK's 2026 security advisory.
 
-Role-specific output budgets are intentionally smaller than the model serving
-ceilings. A live fleet test showed that thinking-enabled Gemma could consume an
-entire 1.8k-token budget before emitting JSON. Narrow Gemma planner/auditor calls
-therefore disable hidden thinking and use strict schemas; Qwen planning and
-synthesis retain thinking. Tool research and report formatting have separate
-budgets so retrieval cannot be hidden inside a schema-only response.
+Thinking is enabled for both model roles by the recommended serving aliases.
+`*_ENABLE_THINKING=inherit` omits backend-specific template controls and relies
+on that stable endpoint contract; direct backends can explicitly use `true` or
+`false`. `QWEN_MAX_TOKENS=0` and
+`GEMMA_MAX_TOKENS=0` omit an explicit client output ceiling, allowing compatible
+proxies to use the context remaining after the prompt, tools, and final answer.
+Positive values impose deployment-specific ceilings. Native JSON-schema decoding
+is used when it is compatible with the endpoint's reasoning mode. If a server
+cannot combine the two, set that role's `*_NATIVE_JSON_SCHEMA=false`: Evidence
+Bench then asks for JSON in the ordinary final channel and applies the same local
+Pydantic validation and bounded repair policy. It never stores or streams the
+provider's `reasoning_content` field. While a request is live, it examines only a
+bounded in-memory suffix for sustained contiguous sentence/fragment repetition.
+A match must cover at least 2 KiB and recur at two consecutive byte-based
+checkpoints; this avoids treating ordinary repeated schema fields as a loop and
+does not depend on provider chunk sizes. A detected loop closes the model stream
+and uses the single bounded schema-repair retry. Emitting a second complete
+top-level JSON value is also a deterministic structured-output loop: exactly one
+value is permitted, so the stream is closed without waiting for further copies.
+Likewise, one syntactically complete but schema-invalid value is closed
+immediately and sent to the bounded repair path; appending a correction would
+itself violate the one-value contract.
+The raw reasoning suffix is immediately discarded and never becomes scientific
+evidence.
+If the repair sample also repeats, the planning transition is recorded as
+`inconclusive` with a `plan-critic-unavailable` finding and research does not
+begin. Critic failure can never be converted into approval.
+Maximum reasoning remains operationally bounded by cooperative cancellation,
+no-progress detection, and per-call wall time. The example deployment allows up
+to 7,200 seconds per model transition through `QWEN_REQUEST_TIMEOUT_SECONDS` and
+`GEMMA_REQUEST_TIMEOUT_SECONDS`. This is a finite, cancellable wall-time safety
+limit rather than a token or reasoning budget. The two-hour ceiling accommodates
+maximum-thinking critics near a 150K context window; the UI/A2A cancellation path
+remains responsive throughout. Plan review itself uses a fixed five-criterion
+contract so unrestricted reasoning does not become an open-ended review scope.
+
+Model transport is also bounded. Connection failures and HTTP 429, 500, 502, 503,
+and 504 responses receive at most three total attempts with bounded backoff. The
+500 retry covers gateways that map an upstream inference-host restart to an
+internal-server error; retries remain bounded and never change the requested model. A
+streamed request is retried only before it has emitted any answer or reasoning
+chunk, preventing a
+partly observed response from being silently replayed. Exhausted retries fail
+the current scientific transition closed; they do not manufacture critic
+approval while an independently hosted model is restarting.
+When a streaming gateway omits or delays its terminal `[DONE]` event, Evidence
+Bench closes the stream as soon as the final channel contains exactly one value
+that passes the required Pydantic schema. This happens only after the model has
+emitted its answer and does not cap the preceding reasoning budget.
+
+Tool observations are independently context-bounded and do not reduce the model
+reasoning allowance. A single model-visible result is capped at 64 KiB and all
+tool observations in one research attempt at 256 KiB. When a result would cross
+either boundary, the complete permitted response is preserved as a hashed run
+artifact and the model receives compact metadata plus a bounded text preview.
+Browser screenshot base64 is never injected as text. This prevents Chrome or MCP
+payloads from consuming the context intended for reasoning and the final report.
+If an ADK research turn nevertheless ends after successful controller-recorded
+retrieval or computation, a bounded evidence preview is passed to reporting and
+all ordinary deterministic/critic gates still apply; a turn with no successful
+evidence fails immediately.
 
 ## Local development
 
@@ -168,14 +361,54 @@ Python, R, output capture, network and environment isolation, read-only inputs,
 timeouts, symlink rejection, and call budgets.
 The deployed, case-specific scientific gates are documented in
 [`evals/README.md`](evals/README.md).
-The v0.3.0 release candidate passed all three deployed gates: 11/11 on a planted
-Python/R effect analysis, 9/9 on corrupted-input handling, and 9/9 on an
-authenticated A2A retrieval-and-grounding task.
+The v0.4.0 deployed PubMed/full-text gate passed 17/17 checks, including typed
+search/acquisition, verified local Markdown and PDF evidence, exact scientific
+extraction, a repair triggered by the independent critic, and final
+deterministic and Gemma passes. Live deployment probes also verified cooperative
+cancellation, persistent service-owned Chromium with internal-only CDP and
+passwordless trusted-network noVNC, private-target egress denial, and isolated
+installation/loading of one package each from PyPI, CRAN, and Bioconductor. The
+compact scored record is
+[`v0.4.0-pubmed-fulltext.json`](evals/results/v0.4.0-pubmed-fulltext.json). The
+final v0.4.0 planted-effect gate passed **18/18** on 2026-07-15 in workspace
+`187c0fe5-2967-4bbd-a297-f7a9423274be`, using image digest
+`sha256:4f055eb3a5515b49257fad69e701dd3d46ec07fdf28c430b09293e66c4a2021c`.
+Parent run `5428105d-8979-4bf1-8dd1-76f9fedccee2` independently recovered and
+reconciled the planted +5 effect in Python and R; Qwen and Gemma streamed, live
+artifacts were accessible, and deterministic, Gemma report, and
+OCR/geometry/table display checks passed. The accepted code-disabled report
+revision, `b5bbf30c-15bd-42f2-bb65-b06519a94a9c`, produced no new result
+outputs, preserved the parent immutably, and passed final manual caption/prose
+inspection. An earlier nominally supported revision with inverted provenance
+was rejected and was not counted. Its compact scored record is
+[`v0.4.0-known-effect.json`](evals/results/v0.4.0-known-effect.json).
+
+The v0.4.0 A2A live gate also passed on 2026-07-15 with functional image
+`sha256:e95760b378f4923142e499899ebb481687c0a71012aee480556458a6d2a6f726`.
+Task `44702ea7-72d8-4545-853e-82fd926e0831`, backed by run
+`0c69fa4f-459b-419f-81a8-47737f732ce6`, streamed submitted, working, and
+completed states plus `report.md` and `run-summary.json`, and finished
+scientifically supported. Scientific MCP probe run
+`fa5e58b9-92b4-4bfb-82f3-fd0e14dd279d` in workspace
+`6e08b205-4d2b-49fb-a0ec-5bbbea735c4a` exercised Brave Search, Context7, and
+the typed PubMed tools; a blocking PubMed-title mismatch was repaired from
+stored acquisition evidence before Gemma passed the report. See the
+[`v0.4.0 A2A live record`](evals/results/v0.4.0-a2a-live.json).
+
+One protocol limitation remains explicit: v0.4.0 uses the SDK
+`InMemoryTaskStore`, so A2A `GetTask` snapshots and subscription state do not
+survive a web-process restart even though Evidence Bench workspaces, runs, and
+provenance do. The issue-first contribution proposal is open in
+[`a2aproject/a2a-samples#639`](https://github.com/a2aproject/a2a-samples/issues/639);
+a maintainer has invited a small draft pull request with pytest and recommended
+stable A2A 1.0, both of which this implementation already uses. See
+[`evals/README.md`](evals/README.md) for the release-gate ledger.
 
 ## Run the CLI
 
-The default enables Context7 and Brave Search. Chrome is explicit because the
-fleet browser is shared external state.
+The default enables Context7, Brave Search, and the service-owned Chrome DevTools
+connection. Use `--mcp ''` to opt out of every MCP, or pass an explicit subset.
+Browser navigation remains policy-limited to public HTTP(S) destinations.
 
 ```bash
 uv run scientific-agent run \
@@ -191,9 +424,17 @@ uv run scientific-agent run \
 ```
 
 `--mode simple` is the default for bounded retrieval, calculation, and evidence
-extraction: one lean Qwen plan/execution path, deterministic validation, and one
-final Gemma audit. It does not run dual plans or retry merely because the critic
-disagrees. Use `--mode full` for genuinely multi-stage scientific design.
+extraction: one lean Qwen plan, deterministic plan lint, a fixed five-criterion
+Gemma plan audit, and independent Gemma audits of the final article and displays,
+followed by another audit after every repair. It does not ask Gemma to generate a
+redundant long-form plan, but a concrete blocking critic finding enters the
+same bounded Qwen repair → deterministic validation → Gemma re-audit loop;
+unsupported disagreement alone is not a blocker. Use
+`--mode full` for genuinely multi-stage scientific design.
+Research model/tool budgets are cumulative across repair rounds. Exhausting a
+budget stops further evidence gathering, but an existing report repair continues
+in existing-evidence-only mode and remains subject to deterministic validation
+and Gemma review. It never becomes a generic success or bypasses the gate.
 
 The base Python runtime exposes NumPy, pandas, SciPy, statsmodels, scikit-learn,
 and matplotlib. The base R runtime exposes ggplot2, dplyr, survival, data.table,
@@ -204,8 +445,10 @@ must write outputs below `/output`. Code-enabled preflight
 imports the full Python/R analysis set inside the sandbox and fails before model
 execution if the host installation is incomplete. Each call is isolated, offline,
 resource-bounded, and capped by a per-attempt call budget.
-Full mode allows 12 calls per attempt so ordinary Python/R corrections remain
-usable; simple mode caps itself at four calls and 120 seconds per call. Tool
+Full mode allows 12 calls for initial analysis so ordinary Python/R corrections
+remain usable; simple mode caps initial analysis at four calls, while repair
+rounds allow up to eight calls and 120 seconds per call. Display-only repair reuses prior numeric evidence and
+must not repeat valid estimation, reconciliation, or controller provenance. Tool
 responses expose the remaining count and exhaustion fails closed.
 
 Each run creates a mode-0700 directory under `runs/` containing the typed plan,
@@ -215,6 +458,15 @@ append-only tool event log, retrieval/computation records, and SHA-256 manifest.
 Rejected drafts are retained under `attempts/attempt-N` together with the exact
 deterministic findings and Gemma review that triggered repair; successful evidence
 is carried forward so a citation-only repair does not force redundant analysis.
+Full and simple modes run up to `MAX_REPAIR_ROUNDS` repair/re-audit cycles (four
+by default; accepted range 0–8). Fixable report and display defects remain blocking. Properly stated
+inherent design limitations may pass only as nonblocking comments; exhausting
+the automatic budget writes `repair_exhausted.json` and returns
+`requires_human_decision`, never a validated result.
+Reader-facing tables are limited to four significant digits while exact values
+remain in machine-readable artifacts. The report cannot infer observational,
+randomized, experimental, synthetic, or representative design from filename,
+balance, effect size, or data cleanliness; missing design metadata stays explicit.
 Partial files from failed scripts are retained under `rejected_output` for audit,
 but they are not exposed at the normal `/prior/.../output` evidence path and cannot
 support claims.
@@ -233,9 +485,10 @@ medical decisions. See
 ## Public release
 
 The project is Apache-2.0 licensed and includes generic CI, multi-architecture
-GHCR release automation for both runtime and package-builder images,
-contribution/security policies, an A2A 1.0 Agent Card, and no secret or
-deployment-specific endpoint in tracked configuration. Tagging `v0.3.0` in a
+GHCR release automation for runtime, package-builder, and managed-browser images,
+contribution/security policies, an A2A 1.0 Agent Card, and no secrets in tracked
+configuration. The optional lab skill documents its explicitly authorized
+private deployment endpoint; runtime configuration remains portable. Tagging `v0.4.0` in a
 public GitHub repository builds and publishes the corresponding containers. A
 ready-to-adapt upstream contribution dossier lives in
 [`docs/A2A_ECOSYSTEM_SUBMISSION.md`](docs/A2A_ECOSYSTEM_SUBMISSION.md).

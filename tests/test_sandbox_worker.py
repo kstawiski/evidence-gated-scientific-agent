@@ -183,13 +183,24 @@ def test_worker_rejects_pdf_symlink_and_outside_path(tmp_path):
         state.confined_pdf_path(_pdf_request(outside))
 
 
-def test_pdf_parser_command_has_one_input_one_output_and_no_network(tmp_path):
+def test_pdf_parser_command_has_one_input_one_output_and_no_network(
+    tmp_path, monkeypatch
+):
     state, workspace, _ = _state(tmp_path)
     pdf = workspace / "references" / "pdfs" / "article.pdf"
     output = tmp_path / "parser-output"
     pdf.parent.mkdir(parents=True)
     output.mkdir()
     pdf.write_bytes(b"%PDF-1.7\nfixture")
+
+    original_exists = Path.exists
+
+    def runtime_exists(path: Path) -> bool:
+        if path in {Path("/usr/bin/bwrap"), Path("/usr/bin/pdftotext")}:
+            return True
+        return original_exists(path)
+
+    monkeypatch.setattr(Path, "exists", runtime_exists)
 
     command = state._pdf_bwrap_command(pdf.resolve(), output.resolve())
     sandbox = command[command.index("--") + 1 :]

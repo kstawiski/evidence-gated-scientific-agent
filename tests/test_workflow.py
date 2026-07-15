@@ -1835,7 +1835,13 @@ def test_presentation_only_repair_does_not_require_new_research():
                 code="unregistered_report_artifact",
                 message="Register the existing figure.",
                 location="/run/output/figures/effect.png",
-            )
+            ),
+            LintFinding(
+                code="non_display_artifact_in_reader_facing_folder",
+                message="Move machine JSON below output/data.",
+                location="/run/output/tables/results.json",
+                blocking=False,
+            ),
         ],
     )
     assert _is_presentation_only_repair(

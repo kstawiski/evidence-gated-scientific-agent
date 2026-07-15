@@ -104,6 +104,7 @@ PRESENTATION_ONLY_FINDINGS = {
     "duplicate_source_id",
     "figure_alt_text_missing",
     "model_supplied_display_number",
+    "non_display_artifact_in_reader_facing_folder",
     "source_artifact_not_generated",
     "unknown_evidence_ref",
     "unregistered_report_artifact",

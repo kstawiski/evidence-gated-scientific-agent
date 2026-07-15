@@ -304,6 +304,12 @@ under the same logical /output/figures or /output/tables path so the controller 
 supersede the defective display. Correct layout, encoding, labels, denominators,
 values, and scientific display precision together. Merely registering or
 redescribing a defective display is not a repair.
+When a repair creates a successful replacement at the same logical reader-output
+path, the historical version remains provenance while the replacement becomes the
+mandatory display candidate. An unrelated newer artifact never supersedes an
+older figure or table. Register only valid figures and CSV/TSV tables. Never
+register JSON as a table; write full-precision JSON below /output/data and a
+separately rounded CSV/TSV below /output/tables.
 In a repair research packet, address every deterministic finding code and every
 critic blocking finding_id explicitly. Mark each as fixed (with the successful
 replacement artifact path or exact report correction), inherent_unfixable (with

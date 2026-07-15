@@ -74,6 +74,14 @@ arbitrary images or inline data.
   logical `/output/figures` or `/output/tables` folder. Uploaded inputs, archive
   extraction copies, TIFF/PDF source files, intermediate visual-review rasters,
   and controller audits remain evidence artifacts rather than report displays.
+- Computation history is append-only. A successful repair supersedes only an
+  earlier artifact at the same logical reader-output path; unrelated figures and
+  tables remain mandatory display candidates. Older versions remain browsable
+  provenance and may still be selected explicitly. JSON is never a table display:
+  full precision belongs below `/output/data`, with a rounded CSV/TSV counterpart
+  below `/output/tables`. A misplaced non-display artifact is preserved and
+  reported as a nonblocking path-hygiene finding rather than creating an
+  impossible registration demand.
 - **Figures** must be PNG, JPEG, or WebP (`FIGURE_MEDIA_TYPES`), 1 byte–20 MB,
   with dimensions between 240×160 and 20,000×20,000, and the file extension
   must match the actual encoded format (`inspect_figure`). When raster DPI

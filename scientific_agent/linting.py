@@ -12,7 +12,9 @@ from typing import Any
 
 from .literature import LiteratureError, load_acquired_article_record
 from .reporting import (
+    FIGURE_MEDIA_TYPES,
     MIN_REPORTED_FIGURE_DPI,
+    TABLE_DELIMITERS,
     caption_has_number_prefix,
     extract_figure_ocr,
     excessive_table_precision,
@@ -1175,17 +1177,38 @@ def validate_report(
     display_paths = {
         os.path.normpath(display.artifact_path) for display in report.displays
     }
-    # Computation evidence is append-only. A repair may therefore generate a
-    # corrected artifact at the same logical /output path in a later attempt.
-    # Keep the earlier version in provenance, but require the report to register
-    # only the latest version rather than making a bad display impossible to
-    # supersede.
+    # Computation evidence is append-only. A repair may generate a corrected
+    # display at the same logical /output path in a later attempt. Keep every
+    # historical version in provenance, but require registration only for the
+    # latest valid display candidate at each logical key. An unrelated newer file
+    # cannot make an older figure or table disappear.
     final_outputs_by_key: dict[str, Path] = {}
     for artifact in computation.artifacts if computation else []:
         path = Path(artifact.path)
         key = logical_report_output_key(path)
-        if key is not None:
-            final_outputs_by_key[key] = path
+        if key is None:
+            continue
+        output_kind = key.split("/", 1)[0]
+        suffix = path.suffix.casefold()
+        is_display_candidate = (
+            output_kind == "figures" and suffix in FIGURE_MEDIA_TYPES
+        ) or (output_kind == "tables" and suffix in TABLE_DELIMITERS)
+        if not is_display_candidate:
+            findings.append(
+                LintFinding(
+                    code="non_display_artifact_in_reader_facing_folder",
+                    location=str(path),
+                    message=(
+                        "This artifact cannot be embedded as a report display. "
+                        "Keep full-precision JSON and diagnostics below /output/data "
+                        "or /output/validation, and create a PNG/JPEG/WebP figure or "
+                        "rounded CSV/TSV table when a reader-facing display is needed."
+                    ),
+                    blocking=False,
+                )
+            )
+            continue
+        final_outputs_by_key[key] = path
     final_outputs = list(final_outputs_by_key.values())
     for path in final_outputs:
         if os.path.normpath(str(path)) not in display_paths:

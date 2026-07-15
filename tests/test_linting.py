@@ -1133,6 +1133,300 @@ def test_group_table_accepts_neutral_overall_estimate_column(tmp_path):
     }
 
 
+def test_same_logical_display_key_supersedes_historical_version(tmp_path):
+    old_root = (
+        tmp_path / "computations" / "attempt-1" / "exec-001" / "output" / "tables"
+    )
+    new_root = (
+        tmp_path / "computations" / "attempt-3" / "exec-001" / "output" / "tables"
+    )
+    old_root.mkdir(parents=True)
+    new_root.mkdir(parents=True)
+    raw_json = old_root / "primary_analysis_results.json"
+    raw_table = old_root / "results.csv"
+    clean_table = new_root / "results.csv"
+    raw_json.write_text('{"estimate": 5.000000000000001}\n', encoding="utf-8")
+    raw_table.write_text("Metric,Value\nEstimate,5.000000000000001\n", encoding="utf-8")
+    clean_table.write_text(
+        "Metric,Control group,Treatment group,Estimate\n"
+        "Mean change,0.05,5.05,\n"
+        "Primary difference,,,5.00\n",
+        encoding="utf-8",
+    )
+    artifacts = [
+        ArtifactRef(
+            path=str(path),
+            sha256=sha256_file(path),
+            description="sandbox-generated analysis artifact",
+        )
+        for path in (raw_json, raw_table, clean_table)
+    ]
+    computation = ComputationEvidence(
+        successful_calls=2,
+        records=[
+            ComputationRecord(
+                execution_id=f"exec-{index:03d}",
+                language="python",
+                code_sha256=str(index) * 64,
+                started_at="2026-07-15T00:00:00Z",
+                duration_seconds=1,
+                exit_code=0,
+                status="succeeded",
+                stdout_path=str(tmp_path / f"stdout-{index}.txt"),
+                stderr_path=str(tmp_path / f"stderr-{index}.txt"),
+                artifacts=(artifacts[:2] if index == 1 else artifacts[2:]),
+            )
+            for index in (1, 3)
+        ],
+        artifacts=artifacts,
+    )
+    report = article_report(
+        results="Table 1 reports the corrected presentation generation.",
+        displays=[
+            ReportDisplay(
+                display_id="corrected-table",
+                kind="table",
+                title="Corrected results",
+                caption="Rounded group summaries and the primary difference.",
+                artifact_path=str(clean_table),
+            )
+        ],
+    )
+
+    validation = validate_report(report, computation=computation)
+
+    assert validation.passed
+    assert "unregistered_report_artifact" not in {
+        finding.code for finding in validation.findings
+    }
+    assert any(
+        finding.code == "non_display_artifact_in_reader_facing_folder"
+        and not finding.blocking
+        for finding in validation.findings
+    )
+
+
+def test_latest_presentation_attempt_still_requires_all_its_outputs_registered(
+    tmp_path,
+):
+    root = tmp_path / "computations" / "attempt-3" / "exec-001" / "output" / "tables"
+    root.mkdir(parents=True)
+    displayed = root / "results.csv"
+    omitted = root / "omitted.csv"
+    displayed.write_text("Metric,Estimate\nDifference,5.00\n", encoding="utf-8")
+    omitted.write_text("Metric,Estimate\nSensitivity,5.04\n", encoding="utf-8")
+    artifacts = [
+        ArtifactRef(
+            path=str(path),
+            sha256=sha256_file(path),
+            description="sandbox-generated analysis artifact",
+        )
+        for path in (displayed, omitted)
+    ]
+    computation = ComputationEvidence(
+        successful_calls=1,
+        records=[
+            ComputationRecord(
+                execution_id="exec-001",
+                language="python",
+                code_sha256="a" * 64,
+                started_at="2026-07-15T00:00:00Z",
+                duration_seconds=1,
+                exit_code=0,
+                status="succeeded",
+                stdout_path=str(tmp_path / "stdout.txt"),
+                stderr_path=str(tmp_path / "stderr.txt"),
+                artifacts=artifacts,
+            )
+        ],
+        artifacts=artifacts,
+    )
+    report = article_report(
+        results="Table 1 reports the primary estimate.",
+        displays=[
+            ReportDisplay(
+                display_id="results",
+                kind="table",
+                title="Results",
+                caption="Primary treatment difference.",
+                artifact_path=str(displayed),
+            )
+        ],
+    )
+
+    validation = validate_report(report, computation=computation)
+
+    assert "unregistered_report_artifact" in {
+        finding.code for finding in validation.findings
+    }
+
+
+def test_new_current_run_output_does_not_hide_distinct_parent_output(tmp_path):
+    parent = (
+        tmp_path
+        / "runs"
+        / "parent"
+        / "computations"
+        / "attempt-9"
+        / "exec-001"
+        / "output"
+        / "tables"
+        / "parent.csv"
+    )
+    current = (
+        tmp_path
+        / "runs"
+        / "current"
+        / "computations"
+        / "attempt-1"
+        / "exec-001"
+        / "output"
+        / "tables"
+        / "current.csv"
+    )
+    for path, value in ((parent, "4.90"), (current, "5.00")):
+        path.parent.mkdir(parents=True)
+        path.write_text(f"Metric,Estimate\nDifference,{value}\n", encoding="utf-8")
+    artifacts = [
+        ArtifactRef(
+            path=str(path),
+            sha256=sha256_file(path),
+            description="sandbox-generated analysis artifact",
+        )
+        for path in (parent, current)
+    ]
+    computation = ComputationEvidence(
+        successful_calls=2,
+        records=[
+            ComputationRecord(
+                execution_id=f"exec-{index:03d}",
+                language="python",
+                code_sha256=str(index) * 64,
+                started_at="2026-07-15T00:00:00Z",
+                duration_seconds=1,
+                exit_code=0,
+                status="succeeded",
+                stdout_path=str(tmp_path / f"stdout-{index}.txt"),
+                stderr_path=str(tmp_path / f"stderr-{index}.txt"),
+                artifacts=[artifact],
+            )
+            for index, artifact in enumerate(artifacts, start=1)
+        ],
+        artifacts=artifacts,
+    )
+    report = article_report(
+        results="Table 1 reports the current-run estimate.",
+        displays=[
+            ReportDisplay(
+                display_id="current-results",
+                kind="table",
+                title="Current results",
+                caption="Current-run primary treatment difference.",
+                artifact_path=str(current),
+            )
+        ],
+    )
+
+    validation = validate_report(report, computation=computation)
+
+    assert any(
+        finding.code == "unregistered_report_artifact"
+        and finding.location == str(parent)
+        for finding in validation.findings
+    )
+
+
+def test_json_in_latest_tables_folder_is_nonblocking_path_hygiene(tmp_path):
+    machine_json = (
+        tmp_path
+        / "computations"
+        / "attempt-4"
+        / "exec-001"
+        / "output"
+        / "tables"
+        / "primary_results.json"
+    )
+    machine_json.parent.mkdir(parents=True)
+    machine_json.write_text('{"estimate": 5.0}\n', encoding="utf-8")
+
+    validation = validate_report(
+        article_report(), computation=_display_computation(tmp_path, machine_json)
+    )
+
+    assert validation.passed
+    assert any(
+        finding.code == "non_display_artifact_in_reader_facing_folder"
+        and finding.location == str(machine_json)
+        and not finding.blocking
+        for finding in validation.findings
+    )
+    assert "unregistered_report_artifact" not in {
+        finding.code for finding in validation.findings
+    }
+
+
+def test_unversioned_reader_output_remains_mandatory_with_versioned_repairs(tmp_path):
+    versioned = (
+        tmp_path
+        / "computations"
+        / "attempt-3"
+        / "exec-001"
+        / "output"
+        / "tables"
+        / "results.csv"
+    )
+    legacy = tmp_path / "output" / "tables" / "legacy.csv"
+    for path, label in ((versioned, "Difference"), (legacy, "Legacy")):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(f"Metric,Estimate\n{label},5.00\n", encoding="utf-8")
+    artifacts = [
+        ArtifactRef(
+            path=str(path),
+            sha256=sha256_file(path),
+            description="sandbox-generated analysis artifact",
+        )
+        for path in (legacy, versioned)
+    ]
+    computation = ComputationEvidence(
+        successful_calls=1,
+        records=[
+            ComputationRecord(
+                execution_id="exec-001",
+                language="python",
+                code_sha256="a" * 64,
+                started_at="2026-07-15T00:00:00Z",
+                duration_seconds=1,
+                exit_code=0,
+                status="succeeded",
+                stdout_path=str(tmp_path / "stdout.txt"),
+                stderr_path=str(tmp_path / "stderr.txt"),
+                artifacts=artifacts,
+            )
+        ],
+        artifacts=artifacts,
+    )
+    report = article_report(
+        results="Table 1 reports the versioned result.",
+        displays=[
+            ReportDisplay(
+                display_id="versioned-results",
+                kind="table",
+                title="Versioned results",
+                caption="Primary treatment difference.",
+                artifact_path=str(versioned),
+            )
+        ],
+    )
+
+    validation = validate_report(report, computation=computation)
+
+    assert any(
+        finding.code == "unregistered_report_artifact"
+        and finding.location == str(legacy)
+        for finding in validation.findings
+    )
+
+
 def test_figure_caption_cannot_claim_absent_r_squared_annotation(tmp_path, monkeypatch):
     figure = tmp_path / "output" / "figures" / "effect.png"
     figure.parent.mkdir(parents=True)

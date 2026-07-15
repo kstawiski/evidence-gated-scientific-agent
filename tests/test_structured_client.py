@@ -661,7 +661,8 @@ async def test_repetitive_stream_uses_bounded_schema_repair_attempt():
             ]
         else:
             repaired_payload = json.loads(body["messages"][1]["content"])
-            assert "invalid_previous_output" in repaired_payload
+            assert "invalid_previous_output" not in repaired_payload
+            assert "fresh independent" in repaired_payload["retry_instruction"]
             lines = [
                 'data: {"choices":[{"delta":{"content":"{\\"value\\":\\"recovered\\"}"},"finish_reason":"stop"}]}'
             ]

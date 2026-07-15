@@ -80,13 +80,35 @@ def _metadata_artifact_for_source(
     source: SourceRecord,
     retrieval: RetrievalEvidence | None,
 ) -> Path:
-    if not source.citekey:
-        raise LiteratureError("PubMed source has no acquisition citekey")
-    candidates: dict[str, Path] = {}
+    metadata_artifacts: dict[str, Path] = {}
     for value in retrieval.artifacts if retrieval else []:
         path = Path(value)
-        if path.name == f"{source.citekey}.json" and path.parent.name == "metadata":
-            candidates[str(path.resolve())] = path
+        if path.suffix.lower() == ".json" and path.parent.name == "metadata":
+            metadata_artifacts[str(path.resolve())] = path
+
+    candidates = {
+        resolved: path
+        for resolved, path in metadata_artifacts.items()
+        if source.citekey and path.name == f"{source.citekey}.json"
+    }
+    if not candidates and source.pmid:
+        for resolved, path in metadata_artifacts.items():
+            try:
+                if (
+                    not path.is_file()
+                    or path.is_symlink()
+                    or path.stat().st_size > 1024 * 1024
+                ):
+                    continue
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                article = payload.get("article")
+                if (
+                    isinstance(article, dict)
+                    and str(article.get("pmid")) == source.pmid
+                ):
+                    candidates[resolved] = path
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                continue
     if len(candidates) != 1:
         raise LiteratureError(
             "PubMed source must map to exactly one retrieved acquisition metadata file"

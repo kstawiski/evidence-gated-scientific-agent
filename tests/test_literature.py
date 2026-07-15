@@ -15,6 +15,7 @@ from scientific_agent.literature import (
     _default_pdf_text,
     _parse_pubmed_xml,
     build_acquired_article_audit,
+    load_acquired_article_record,
 )
 from scientific_agent.policy import ToolPolicy, default_allowed_tools
 from scientific_agent.provenance import EventLedger
@@ -653,6 +654,42 @@ def _acquisition_metadata(
         encoding="utf-8",
     )
     return path
+
+
+def test_acquisition_metadata_resolves_by_pmid_when_model_citekey_is_missing_or_wrong(
+    tmp_path: Path,
+):
+    markdown = tmp_path / "lovelace.md"
+    markdown.write_text(
+        "# Verified article\n\nThe controlled study reported a treatment effect.\n",
+        encoding="utf-8",
+    )
+    report = _literature_report(markdown)
+    metadata = _acquisition_metadata(tmp_path, markdown)
+    retrieval = RetrievalEvidence(
+        successful_calls=1,
+        tools=["acquire_pubmed_article"],
+        urls=["https://pubmed.ncbi.nlm.nih.gov/12345678/"],
+        retrieval_dates=["2026-07-14"],
+        artifacts=[str(markdown), str(metadata)],
+    )
+
+    for citekey in (None, "model-invented-citekey"):
+        source = report.sources[0].model_copy(update={"citekey": citekey})
+        acquired, resolved_metadata, acquired_markdown = load_acquired_article_record(
+            source, retrieval
+        )
+
+        assert acquired["article"]["pmid"] == "12345678"
+        assert resolved_metadata == metadata.resolve()
+        assert "controlled study" in acquired_markdown
+
+        validation = validate_report(
+            report.model_copy(update={"sources": [source]}), retrieval=retrieval
+        )
+        codes = {finding.code for finding in validation.findings}
+        assert "pubmed_acquisition_metadata_invalid" not in codes
+        assert "pubmed_acquisition_metadata_mismatch" in codes
 
 
 def test_local_literature_paths_are_linted_materialized_and_linked(tmp_path: Path):

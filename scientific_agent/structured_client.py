@@ -297,6 +297,7 @@ async def request_structured(
     ) as client:
         for attempt in range(repair_attempts + 1):
             repair_notice_emitted = False
+            repetition_detected = False
             request_body = {
                 "model": endpoint.model,
                 "messages": [
@@ -494,6 +495,7 @@ async def request_structured(
                             repair_notice_emitted = True
                         except Exception:
                             pass
+                        repetition_detected = True
                         break
                 visible_tail = visible_boundary.finish()
                 if visible_tail:
@@ -520,15 +522,27 @@ async def request_structured(
                         )
                     except Exception:
                         pass
-                user_payload = {
-                    "original_input": original_input,
-                    "invalid_previous_output": last_content[-8000:],
-                    "repair_instruction": (
-                        f"Return one complete value matching {schema_name}. "
-                        "Correct the schema violation shown below; emit JSON only.\n"
-                        f"VALIDATION ERROR:\n{last_error}"
-                    ),
-                }
+                if repetition_detected:
+                    user_payload = {
+                        "original_input": original_input,
+                        "retry_instruction": (
+                            "The preceding sample was terminated by deterministic "
+                            "no-progress detection. Start a fresh independent "
+                            f"reasoning sample and return one complete {schema_name} "
+                            "value; emit JSON only. Do not continue or imitate the "
+                            "terminated sample."
+                        ),
+                    }
+                else:
+                    user_payload = {
+                        "original_input": original_input,
+                        "invalid_previous_output": last_content[-8000:],
+                        "repair_instruction": (
+                            f"Return one complete value matching {schema_name}. "
+                            "Correct the schema violation shown below; emit JSON only.\n"
+                            f"VALIDATION ERROR:\n{last_error}"
+                        ),
+                    }
 
     raise RuntimeError(
         f"endpoint produced no valid {schema_name} after {repair_attempts + 1} "

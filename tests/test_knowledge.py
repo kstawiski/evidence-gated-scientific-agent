@@ -68,6 +68,18 @@ def test_ingest_search_snapshot_and_polish_diacritics(tmp_path):
     assert passage["chunk_sha256"]
 
 
+def test_trailing_whitespace_does_not_create_suffix_chunks(tmp_path):
+    lib = library(tmp_path)
+    document = ingest_text(
+        lib,
+        "Trailing newline",
+        "# Evidence\n\nOne short paragraph ends with a newline.\n",
+    )
+
+    assert document["chunk_count"] == 1
+    assert len(lib.chunks(document["id"])) == 1
+
+
 def test_snapshot_remains_searchable_after_new_generation_and_delete(tmp_path):
     lib = library(tmp_path)
     first = ingest_text(lib, "Protocol", "Original protocol specifies alpha 0.05.")

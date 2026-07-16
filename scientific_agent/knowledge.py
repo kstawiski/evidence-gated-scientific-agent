@@ -273,7 +273,7 @@ def chunk_text(text: str) -> list[dict[str, Any]]:
             }
         )
         ordinal += 1
-        if end >= length:
+        if target >= length:
             break
         next_start = max(start + 1, end - CHUNK_OVERLAP_CHARS)
         while next_start < end and not text[next_start].isspace():

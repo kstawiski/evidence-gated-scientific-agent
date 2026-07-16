@@ -36,6 +36,12 @@ from ..orchestrator import run_scientific_task
 from ..provenance import sha256_file
 from ..reporting import FIGURE_MEDIA_TYPES
 from .a2a import ALLOWED_MCP_SERVERS, EvidenceBenchExecutor, build_agent_card
+from .integrations import IntegrationArchive, build_a2a_archive, build_skill_archive
+from .model_status import (
+    ModelStatusMonitor,
+    ModelStatusTarget,
+    validate_status_base_url,
+)
 from .service import Runner, TaskService, web_visible_artifact
 from .settings import WebSettings
 from .store import ACTIVE_RUN_STATES, WorkspaceStore
@@ -182,11 +188,27 @@ def _validate_mcp_servers(names: list[str]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(names))
 
 
+def _integration_response(archive: IntegrationArchive) -> Response:
+    """Serve one fixed archive with an independently verifiable digest."""
+
+    return Response(
+        content=archive.content,
+        media_type="application/zip",
+        headers={
+            "Cache-Control": "private, max-age=3600",
+            "Content-Disposition": f'attachment; filename="{archive.filename}"',
+            "ETag": f'"sha256:{archive.sha256}"',
+            "X-Checksum-SHA256": archive.sha256,
+        },
+    )
+
+
 def create_app(
     web_settings: WebSettings | None = None,
     agent_settings: Settings | None = None,
     runner: Runner = run_scientific_task,
     discussion_runner=discuss_report,
+    model_status_monitor: ModelStatusMonitor | None = None,
 ) -> FastAPI:
     web = web_settings or WebSettings()
     scientific_settings = agent_settings or Settings()
@@ -210,6 +232,32 @@ def create_app(
         scientific_settings,
         max_workers=web.max_workers,
         runner=runner,
+    )
+    skill_archive = build_skill_archive(__version__)
+    a2a_archive = build_a2a_archive(
+        __version__, web.public_url, enabled=web.a2a_enabled
+    )
+    status_monitor = model_status_monitor or ModelStatusMonitor(
+        (
+            ModelStatusTarget(
+                role="executor",
+                model=scientific_settings.qwen.model,
+                provider="vllm",
+                base_url=validate_status_base_url(
+                    web.qwen_status_base_url, "QWEN_STATUS_BASE_URL"
+                ),
+            ),
+            ModelStatusTarget(
+                role="critic",
+                model=scientific_settings.gemma.model,
+                provider="llama_cpp",
+                base_url=validate_status_base_url(
+                    web.gemma_status_base_url, "GEMMA_STATUS_BASE_URL"
+                ),
+            ),
+        ),
+        timeout_seconds=web.model_status_timeout_seconds,
+        cache_seconds=web.model_status_cache_seconds,
     )
 
     @asynccontextmanager
@@ -283,6 +331,52 @@ def create_app(
             },
             "max_upload_bytes": web.max_upload_bytes,
         }
+
+    @app.get("/api/model-status")
+    async def model_status() -> dict:
+        return await asyncio.to_thread(status_monitor.snapshot)
+
+    @app.get("/api/integrations")
+    async def integration_catalog() -> dict:
+        return {
+            "version": __version__,
+            "a2a_enabled": web.a2a_enabled,
+            "agent_card_url": "/.well-known/agent-card.json",
+            "downloads": [
+                {
+                    "id": "skill",
+                    "label": "Codex / Claude skill",
+                    "url": "/api/integrations/skill",
+                    "filename": skill_archive.filename,
+                    "bytes": len(skill_archive.content),
+                    "sha256": skill_archive.sha256,
+                    "setup": (
+                        "Extract the evidence-bench directory into your agent's "
+                        "skills directory, then invoke $evidence-bench."
+                    ),
+                },
+                {
+                    "id": "a2a",
+                    "label": "A2A 1.0 starter",
+                    "url": "/api/integrations/a2a",
+                    "filename": a2a_archive.filename,
+                    "bytes": len(a2a_archive.content),
+                    "sha256": a2a_archive.sha256,
+                    "setup": (
+                        "Extract the archive, read connection.json, set A2A_TOKEN "
+                        "from the lab administrator, and run a2a_client.py."
+                    ),
+                },
+            ],
+        }
+
+    @app.get("/api/integrations/skill")
+    async def download_skill_integration() -> Response:
+        return _integration_response(skill_archive)
+
+    @app.get("/api/integrations/a2a")
+    async def download_a2a_integration() -> Response:
+        return _integration_response(a2a_archive)
 
     @app.get("/api/workspaces")
     async def list_workspaces() -> list[dict]:

@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from .model_status import validate_status_base_url
+
 
 def _flag(name: str, default: bool) -> bool:
     value = os.environ.get(name)
@@ -50,6 +52,20 @@ class WebSettings:
     browser_novnc_port: int = field(
         default_factory=lambda: int(os.environ.get("BROWSER_NOVNC_PORT", "6080"))
     )
+    qwen_status_base_url: str = field(
+        default_factory=lambda: os.environ.get("QWEN_STATUS_BASE_URL", "").strip()
+    )
+    gemma_status_base_url: str = field(
+        default_factory=lambda: os.environ.get("GEMMA_STATUS_BASE_URL", "").strip()
+    )
+    model_status_timeout_seconds: float = field(
+        default_factory=lambda: float(
+            os.environ.get("MODEL_STATUS_TIMEOUT_SECONDS", "2")
+        )
+    )
+    model_status_cache_seconds: float = field(
+        default_factory=lambda: float(os.environ.get("MODEL_STATUS_CACHE_SECONDS", "3"))
+    )
 
     @property
     def database_path(self) -> Path:
@@ -80,6 +96,12 @@ class WebSettings:
             raise ValueError("WEB_MAX_UPLOAD_BYTES must be positive")
         if not 1 <= self.browser_novnc_port <= 65535:
             raise ValueError("BROWSER_NOVNC_PORT must be between 1 and 65535")
+        validate_status_base_url(self.qwen_status_base_url, "QWEN_STATUS_BASE_URL")
+        validate_status_base_url(self.gemma_status_base_url, "GEMMA_STATUS_BASE_URL")
+        if not 0.1 <= self.model_status_timeout_seconds <= 5:
+            raise ValueError("MODEL_STATUS_TIMEOUT_SECONDS must be between 0.1 and 5")
+        if not 1 <= self.model_status_cache_seconds <= 60:
+            raise ValueError("MODEL_STATUS_CACHE_SECONDS must be between 1 and 60")
         if self.browser_public_url:
             parsed = urlsplit(self.browser_public_url)
             if (

@@ -12,3 +12,5 @@ delegated_tasks/
 web-data/
 .evidence-bench/
 *.log
+core
+core.*

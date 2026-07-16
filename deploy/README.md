@@ -55,6 +55,22 @@ The unit complements Compose's `restart: unless-stopped`: systemd reconciles the
 whole project after boot, while Docker restarts individual failed containers.
 Keep the owner-only `.env` alongside the checkout and never copy it into an image.
 
+## Multiple isolated instances on one host
+
+Use a separate checkout, mode-0600 `.env`, Compose project name, published web
+and noVNC ports, and all three persistent paths for every instance. For example:
+
+```bash
+docker compose -p evidence-bench-prod --env-file .env config --quiet
+docker compose -p evidence-bench-prod --env-file .env up -d
+```
+
+Do not point two projects at the same data, environment, or browser directory.
+The A2A, sandbox-worker, and package-worker tokens must also be generated per
+instance. A private instance can therefore be upgraded or stopped without
+interrupting the shared lab service, and a lab workspace cannot appear in the
+private workspace index.
+
 Do not mount the Docker socket or a host home directory into either service.
 
 For durable bind mounts, set these values in the private `.env`:

@@ -17,7 +17,7 @@ from urllib.parse import quote, urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 
-DEFAULT_BASE_URL = "http://10.20.102.122:8070"
+DEFAULT_BASE_URL = "http://10.20.102.122"
 DEFAULT_MCPS = ("context7", "brave-search", "chrome-devtools")
 TERMINAL_STATES = {
     "supported",

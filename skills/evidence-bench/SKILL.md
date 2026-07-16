@@ -24,7 +24,10 @@ python3 <skill-dir>/scripts/evidence_bench.py run \
   --download-dir ./evidence-bench-result
 ```
 
-The default service is `http://10.20.102.122:8070`. Override it only for an explicitly supplied deployment with `EVIDENCE_BENCH_URL` or `--base-url`.
+The default lab service is `http://10.20.102.122` (port 80). Override it only
+for an explicitly supplied deployment with `EVIDENCE_BENCH_URL` or
+`--base-url`. Port 8070 is a separate private instance and is not the shared
+lab endpoint.
 
 Defaults are intentional:
 
@@ -76,7 +79,7 @@ Enable computation for a follow-up with `--enable-code`; leave it off for writin
 2. Report the workspace ID and run ID immediately after submission when the task may take time.
 3. Monitor events. Cancel only when the user asks or when the workflow is clearly proceeding on the wrong task; a slow maximum-thinking phase is not by itself a failure.
 4. If deterministic validation or Gemma raises a fixable issue, allow the bounded repair loop to run. Never rewrite a non-success state as consensus.
-5. Return the final scientific status, report path, bundle path, unresolved limitations, and the browser URL `http://10.20.102.122:8070`.
+5. Return the final scientific status, report path, bundle path, unresolved limitations, and the managed browser URL `http://10.20.102.122:6081`.
 6. Use the web interface for real-time artifact previews, model-visible output, cancellation, and manual access to the service-owned research browser.
 7. Use `discuss` for explanation and critique. A Gemma discussion answer is advisory and cannot replace the audited follow-up workflow.
 

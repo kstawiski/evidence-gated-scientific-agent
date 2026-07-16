@@ -56,6 +56,10 @@ scientific-agent-environment-worker = "scientific_agent.environment_worker:main"
 [tool.hatch.build.targets.wheel]
 packages = ["scientific_agent"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"skills/evidence-bench" = "scientific_agent/web/release_assets/evidence-bench"
+"integrations/a2a" = "scientific_agent/web/release_assets/a2a"
+
 [tool.pytest.ini_options]
 addopts = "-q"
 testpaths = ["tests"]

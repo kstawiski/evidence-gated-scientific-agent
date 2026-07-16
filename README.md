@@ -144,6 +144,10 @@ The service exposes:
 - `GET`, `POST /api/runs/{run_id}/discussion` — read or continue an
   evidence-bounded Gemma explanation thread for a completed report; a reply may
   propose, but never automatically starts, an audited Qwen→Gemma revision;
+- `GET /api/integrations` — filenames, sizes, setup hints, and SHA-256 digests
+  for the WebUI's agent downloads;
+- `GET /api/integrations/skill`, `GET /api/integrations/a2a` — deterministic,
+  credential-free Codex/Claude skill and A2A 1.0 starter archives;
 - `GET /api/runs/{run_id}/artifacts`, `.../displays/{id}/image`,
   `.../displays/{id}/table`, `.../references/{source_id}/pdf`, `.../bundle` —
   live and final artifact/display access plus inline preview of verified cited
@@ -164,8 +168,18 @@ creates isolated workspaces, uploads inputs, submits work with Python/R and all
 three research MCPs enabled by default, streams controller events, cancels bad
 runs, lets s8-Gemma explain a completed report and draft a revision brief, starts
 audited follow-up revisions, and downloads provenance bundles. It
-uses the internal service at `http://10.20.102.122:8070` and requires no browser
+uses the lab production service at `http://10.20.102.122` and requires no browser
 username or password.
+
+The lab production deployment is isolated from the owner's private task
+service: it has separate containers, workspaces, package environments, browser
+profile, worker tokens, and persistent storage. Port 8070 is intentionally not
+the lab skill's default.
+
+The WebUI's **Skill + A2A downloads** control provides the same installable
+skill as a versioned ZIP and a dependency-free A2A starter containing the exact
+deployment URLs. Both downloads expose their archive SHA-256 and include an
+inner `SHA256SUMS`; the A2A bearer token is intentionally never bundled.
 
 Install the folder as `evidence-bench` under either agent's skill directory:
 

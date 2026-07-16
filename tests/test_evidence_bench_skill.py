@@ -37,7 +37,7 @@ def test_skill_client_defaults_to_the_lab_service_and_all_mcps():
     parser = module.build_parser()
     args = parser.parse_args(["run", "--objective", "test objective"])
 
-    assert args.base_url == "http://10.20.102.122:8070"
+    assert args.base_url == "http://10.20.102.122"
     assert module.DEFAULT_MCPS == (
         "context7",
         "brave-search",
@@ -50,7 +50,7 @@ def test_skill_client_rejects_credentials_in_service_url():
     module = _client_module()
 
     with pytest.raises(module.ClientError, match="credentials"):
-        module.Client("http://user:password@10.20.102.122:8070")
+        module.Client("http://user:password@10.20.102.122")
 
 
 def test_skill_client_rejects_symlink_upload(tmp_path):

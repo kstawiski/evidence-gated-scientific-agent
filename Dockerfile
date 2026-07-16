@@ -81,6 +81,8 @@ FROM runtime-deps AS app-base
 
 COPY README.md ./
 COPY scientific_agent ./scientific_agent
+COPY integrations/a2a ./integrations/a2a
+COPY skills/evidence-bench ./skills/evidence-bench
 RUN uv sync --frozen --no-dev --extra analysis \
     && rm -rf /root/.cache/uv
 
@@ -136,6 +138,8 @@ FROM package-deps AS environment-worker
 
 COPY README.md ./
 COPY scientific_agent ./scientific_agent
+COPY integrations/a2a ./integrations/a2a
+COPY skills/evidence-bench ./skills/evidence-bench
 RUN uv sync --frozen --no-dev --extra analysis \
     && rm -rf /root/.cache/uv
 

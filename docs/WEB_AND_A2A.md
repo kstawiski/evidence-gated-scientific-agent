@@ -1,5 +1,26 @@
 # Standalone web service and A2A integration
 
+## WebUI agent downloads
+
+The sidebar's **Skill + A2A downloads** control offers two versioned archives:
+
+- `GET /api/integrations/skill` packages the installable `evidence-bench`
+  Codex/Claude skill;
+- `GET /api/integrations/a2a` packages a dependency-free A2A 1.0 client, setup
+  guide, and deployment-specific `connection.json`.
+
+`GET /api/integrations` returns each archive's fixed URL, filename, byte size,
+SHA-256, and concise setup hint. Every ZIP is assembled in sorted order with
+fixed timestamps from an explicit source-file allowlist. Archive paths are not
+user-controlled, symlinks are rejected, and each archive contains an inner
+`SHA256SUMS` covering its component files. The HTTP response also exposes the
+complete digest in `X-Checksum-SHA256` and a SHA-256 `ETag`.
+
+The A2A starter records only public connection metadata. It never contains the
+`A2A_TOKEN`, model credentials, MCP credentials, worker tokens, or browser
+credentials. Users obtain the independent A2A bearer token from the deployment
+administrator and supply it through their local environment.
+
 ## Workspace model
 
 A workspace is the unit of isolation and scientific provenance. Uploaded inputs
@@ -11,6 +32,40 @@ under an analysis.
 
 The metadata database uses SQLite WAL mode. On service restart, unfinished runs
 are marked `interrupted`; they are never silently reported as successful.
+
+## Local model load and queue status
+
+The WebUI refreshes `GET /api/model-status` every five seconds while visible
+(less often in a background tab). The endpoint reports only the configured
+executor/critic alias, role, reachability, active and queued request counts,
+optional slot occupancy, and Qwen context-cache usage. It never returns a
+backend address, response body, exception, credential, prompt, or model output.
+
+Monitoring is optional and configured only by the service operator:
+
+```dotenv
+QWEN_STATUS_BASE_URL=http://host.docker.internal:9004
+GEMMA_STATUS_BASE_URL=http://gemma-inference.internal:8080
+MODEL_STATUS_TIMEOUT_SECONDS=2
+MODEL_STATUS_CACHE_SECONDS=3
+```
+
+`QWEN_STATUS_BASE_URL` expects vLLM Prometheus metrics
+(`vllm:num_requests_running`, `vllm:num_requests_waiting`, and optionally
+`vllm:kv_cache_usage_perc`). `GEMMA_STATUS_BASE_URL` expects llama.cpp metrics
+(`llamacpp:requests_processing`, `llamacpp:requests_deferred`) and optionally
+`/slots` for total capacity. A deferred/waiting count is an authoritative
+current queue; a fully occupied llama.cpp slot set means Gemma's next step may
+wait. vLLM can continuously batch work, so an active Qwen request with zero
+waiting requests is described as busy with a clear queue rather than saturated.
+
+These values are trusted startup configuration, not request parameters. The
+application appends only fixed `/metrics` and `/slots` paths, rejects credentials,
+paths, queries, and fragments in configured origins, disables proxy inheritance
+and redirects for probes, caps each response at 512 KiB, and bounds timeouts to
+five seconds. Leave either origin empty when the backend does not expose the
+expected interface; analysis still works and the UI labels monitoring as
+unconfigured.
 
 ## Independent model endpoint and review boundary
 

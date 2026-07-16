@@ -49,9 +49,13 @@ cannot inject an MCP key into argv/logs, and cannot report success for
 The standalone browser/API deployment also ships a thin agent skill at
 `skills/evidence-bench/`. Lab members can copy that folder to
 `~/.claude/skills/evidence-bench` or `${CODEX_HOME:-~/.codex}/skills/evidence-bench`.
-Its stdlib client targets `http://10.20.102.122:8070`, where the browser and REST
+Its stdlib client targets `http://10.20.102.122` on port 80, where the REST
 API are passwordless on the trusted network. It does not use or embed the A2A
 bearer token.
+
+This shared route must use a distinct Compose project, data directory, package
+environment directory, browser profile, and worker tokens. The owner's private
+`umed-task` deployment on port 8070 is not a fallback for lab requests.
 
 The skill is distinct from automatic `/delegate` routing: invocation is explicit,
 the service creates a persistent isolated workspace, and the calling agent polls

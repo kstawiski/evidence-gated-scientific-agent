@@ -53,3 +53,14 @@ def test_container_smoke_is_isolated_from_the_production_compose_project():
     assert 'if [ "$project_name" = evidence-bench ]' in smoke
     assert "BROWSER_BIND_ADDRESS=127.0.0.1" in smoke
     assert "mktemp -d" in smoke
+
+
+def test_wheel_and_container_include_webui_integration_sources():
+    project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
+    forced = project["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
+    dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+
+    assert forced["skills/evidence-bench"].endswith("release_assets/evidence-bench")
+    assert forced["integrations/a2a"].endswith("release_assets/a2a")
+    assert "COPY skills/evidence-bench ./skills/evidence-bench" in dockerfile
+    assert "COPY integrations/a2a ./integrations/a2a" in dockerfile

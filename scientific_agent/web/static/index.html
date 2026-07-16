@@ -40,12 +40,31 @@
         </form>
         <nav class="workspace-list" id="workspace-list" aria-live="polite"></nav>
         <div class="sidebar-foot">
-          <span>A2A 1.0 endpoint</span>
+          <span>Connect your agent</span>
+          <button id="integration-downloads-button" type="button">Skill + A2A downloads ↓</button>
           <a href="/.well-known/agent-card.json" target="_blank" rel="noreferrer">Agent Card ↗</a>
         </div>
       </aside>
 
       <main id="main" class="workspace-main" tabindex="-1">
+        <section id="model-queue-panel" class="model-queue-panel" aria-labelledby="model-queue-heading">
+          <header>
+            <div><span class="eyebrow">Shared inference rack</span><h2 id="model-queue-heading">Local model load</h2></div>
+            <div><strong id="model-queue-summary" role="status" aria-live="polite">Checking model capacity…</strong><time id="model-queue-updated">—</time></div>
+          </header>
+          <div class="model-queue-lanes">
+            <article id="model-status-executor" data-state="checking">
+              <i aria-hidden="true"></i>
+              <div><span>Qwen · executor</span><strong id="model-status-executor-name">—</strong></div>
+              <div><b id="model-status-executor-state">Checking</b><small id="model-status-executor-load">Reading the shared queue…</small></div>
+            </article>
+            <article id="model-status-critic" data-state="checking">
+              <i aria-hidden="true"></i>
+              <div><span>Gemma · critic + vision</span><strong id="model-status-critic-name">—</strong></div>
+              <div><b id="model-status-critic-state">Checking</b><small id="model-status-critic-load">Reading the shared queue…</small></div>
+            </article>
+          </div>
+        </section>
         <section class="empty-state" id="empty-state">
           <div class="empty-orbit" aria-hidden="true"><i></i><i></i><i></i></div>
           <span class="eyebrow">Start a scientific workspace</span>
@@ -252,6 +271,40 @@
         <div class="research-browser-frame-wrap">
           <iframe id="research-browser-frame" title="Interactive Evidence Bench research browser" referrerpolicy="no-referrer" allow="clipboard-read; clipboard-write"></iframe>
         </div>
+      </section>
+    </dialog>
+    <dialog id="integration-downloads-dialog" class="integration-downloads-dialog">
+      <section>
+        <header>
+          <div><span class="eyebrow">Agent integrations</span><h2>Use Evidence Bench from Codex, Claude, or A2A</h2></div>
+          <button id="integration-downloads-close" class="icon-button" type="button" aria-label="Close agent downloads">×</button>
+        </header>
+        <p>Each archive is generated from a fixed allowlist and includes SHA-256 checksums. Credentials are never bundled.</p>
+        <div class="integration-download-grid">
+          <article>
+            <span class="integration-kind">Codex / Claude</span>
+            <h3>Evidence Bench skill</h3>
+            <p>Extract the <code>evidence-bench</code> directory into your agent's skills directory, then invoke <code>$evidence-bench</code>.</p>
+            <pre>unzip evidence-bench-skill-*.zip -d ~/.codex/skills
+# or: -d ~/.claude/skills</pre>
+            <a id="skill-integration-download" class="primary-button" href="/api/integrations/skill" download>Download skill .zip</a>
+            <small>SHA-256 <code id="skill-integration-checksum">Loading…</code></small>
+          </article>
+          <article>
+            <span class="integration-kind">A2A 1.0 / JSON-RPC</span>
+            <h3>A2A starter</h3>
+            <p>Includes a dependency-free client, deployment-specific connection file, setup guide, and checksums. Ask the administrator for the separate A2A token.</p>
+            <pre>unzip evidence-bench-a2a-*.zip
+cd evidence-bench-a2a
+sha256sum -c SHA256SUMS</pre>
+            <a id="a2a-integration-download" class="primary-button" href="/api/integrations/a2a" download>Download A2A .zip</a>
+            <small>SHA-256 <code id="a2a-integration-checksum">Loading…</code></small>
+          </article>
+        </div>
+        <footer>
+          <span id="integration-a2a-status">Checking A2A endpoint…</span>
+          <a href="/.well-known/agent-card.json" target="_blank" rel="noreferrer">Inspect Agent Card ↗</a>
+        </footer>
       </section>
     </dialog>
     <div class="toast-region" id="toast-region" aria-live="polite"></div>

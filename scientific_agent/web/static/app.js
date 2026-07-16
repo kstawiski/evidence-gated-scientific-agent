@@ -26,6 +26,10 @@ const state = {
   discussionRunId: null,
   discussionLoading: false,
   discussionSending: false,
+  integrations: null,
+  modelStatus: null,
+  modelStatusTimer: null,
+  modelStatusLoading: false,
 };
 
 const el = (id) => document.getElementById(id);
@@ -102,7 +106,10 @@ function activeSummary(workspace = state.workspace) {
 }
 
 async function loadConfig() {
-  state.config = await api("/api/config");
+  [state.config, state.integrations] = await Promise.all([
+    api("/api/config"),
+    api("/api/integrations"),
+  ]);
   el("app-version").textContent = `v${state.config.version}`;
   el("executor-model").textContent = state.config.models.executor.split("/").pop();
   el("critic-model").textContent = state.config.models.critic.split("/").pop();
@@ -110,7 +117,74 @@ async function loadConfig() {
     input.checked = state.config.default_mcp_servers.includes(input.value) && state.config.mcp[input.value];
   });
   configureResearchBrowser();
+  configureIntegrationDownloads();
   setWorkspaceLocked(workspaceLocked());
+}
+
+function configureIntegrationDownloads() {
+  const byId = new Map((state.integrations?.downloads || []).map((item) => [item.id, item]));
+  for (const [id, anchorId, checksumId] of [
+    ["skill", "skill-integration-download", "skill-integration-checksum"],
+    ["a2a", "a2a-integration-download", "a2a-integration-checksum"],
+  ]) {
+    const item = byId.get(id);
+    if (!item) continue;
+    const anchor = el(anchorId);
+    anchor.href = item.url;
+    anchor.download = item.filename;
+    anchor.title = `${item.filename} · ${formatBytes(item.bytes)}`;
+    el(checksumId).textContent = item.sha256;
+  }
+  el("integration-a2a-status").textContent = state.integrations?.a2a_enabled
+    ? "A2A execution is enabled; its bearer token remains separate."
+    : "This deployment does not currently accept A2A execution.";
+}
+
+function modelLoadText(model) {
+  const parts = [`${model.active_requests} active`, `${model.queued_requests} queued`];
+  if (model.slots_total !== null) parts.push(`${model.slots_busy}/${model.slots_total} slots busy`);
+  if (model.cache_usage_percent !== null) parts.push(`${model.cache_usage_percent}% context cache`);
+  return parts.join(" · ");
+}
+
+function renderModelStatus(payload = state.modelStatus, stale = false) {
+  if (!payload) {
+    el("model-queue-summary").textContent = "Model load is temporarily unavailable";
+    el("model-queue-updated").textContent = "retrying";
+    return;
+  }
+  el("model-queue-summary").textContent = `${payload.summary.message}${stale ? " · last known state" : ""}`;
+  el("model-queue-updated").dateTime = payload.updated_at;
+  el("model-queue-updated").textContent = `updated ${new Intl.DateTimeFormat(undefined, { timeStyle: "medium" }).format(new Date(payload.updated_at))}`;
+  for (const model of payload.models) {
+    const card = el(`model-status-${model.role}`);
+    if (!card) continue;
+    card.dataset.state = model.state;
+    el(`model-status-${model.role}-name`).textContent = model.model.split("/").pop();
+    el(`model-status-${model.role}-state`).textContent = displayStatus(model.state);
+    const detail = model.reachable ? modelLoadText(model) : model.message;
+    el(`model-status-${model.role}-load`).textContent = detail;
+    card.title = model.message;
+  }
+}
+
+function scheduleModelStatus(delay = document.hidden ? 15000 : 5000) {
+  if (state.modelStatusTimer) window.clearTimeout(state.modelStatusTimer);
+  state.modelStatusTimer = window.setTimeout(refreshModelStatus, delay);
+}
+
+async function refreshModelStatus() {
+  if (state.modelStatusLoading) return;
+  state.modelStatusLoading = true;
+  try {
+    state.modelStatus = await api("/api/model-status");
+    renderModelStatus();
+  } catch (_) {
+    renderModelStatus(state.modelStatus, true);
+  } finally {
+    state.modelStatusLoading = false;
+    scheduleModelStatus();
+  }
 }
 
 function configuredBrowserUrl() {
@@ -1229,6 +1303,8 @@ function bindEvents() {
   el("research-browser-button").addEventListener("click", openResearchBrowser);
   el("research-browser-close").addEventListener("click", () => el("research-browser-dialog").close());
   el("research-browser-reconnect").addEventListener("click", reconnectResearchBrowser);
+  el("integration-downloads-button").addEventListener("click", () => el("integration-downloads-dialog").showModal());
+  el("integration-downloads-close").addEventListener("click", () => el("integration-downloads-dialog").close());
   el("cancel-dialog").addEventListener("close", () => { if (el("cancel-dialog").returnValue === "cancel") cancelActiveRun().catch((error) => toast(error.message, "error")); });
   const drop = el("drop-zone");
   ["dragenter", "dragover"].forEach((name) => drop.addEventListener(name, (event) => { event.preventDefault(); if (!workspaceLocked()) drop.classList.add("dragging"); }));
@@ -1251,11 +1327,18 @@ function bindEvents() {
     el("task-form").scrollIntoView({ behavior: "smooth", block: "start" });
     toast("Protocol loaded for review. Starting it remains a separate action.");
   });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) {
+      if (state.modelStatusTimer) window.clearTimeout(state.modelStatusTimer);
+      state.modelStatusTimer = null;
+      refreshModelStatus();
+    }
+  });
 }
 
 async function init() {
   bindEvents();
-  try { await loadConfig(); await loadWorkspaces(); }
+  try { await loadConfig(); refreshModelStatus(); await loadWorkspaces(); }
   catch (error) { toast(error.message, "error"); }
 }
 

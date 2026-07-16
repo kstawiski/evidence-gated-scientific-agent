@@ -381,6 +381,13 @@ def reconciliation_verdict(
 
 
 _WORD = re.compile(r"[a-z0-9]{4,}")
+_ARBITRARY_SEMANTIC_ARM_MAPPING = re.compile(
+    r"\b(?:lexicograph\w*|alphabet\w*|numeric\w*|row|categor\w*)\b"
+    r".{0,120}\b(?:control|treatment|intervention|comparison|reference)\b"
+    r"|\b(?:control|treatment|intervention|comparison|reference)\b"
+    r".{0,120}\b(?:lexicograph\w*|alphabet\w*|numeric\w*|row|categor\w*)\b",
+    re.IGNORECASE,
+)
 _PROTOCOL_TIMING = re.compile(
     r"\b(?:lock(?:ed|ing)?|prespecif(?:ied|ication))\b.{0,100}"
     r"\b(?:before|prior to)\b.{0,100}\b(?:inspect(?:ion|ing)?|outcome|result)",
@@ -687,6 +694,21 @@ def lint_plan(
                     code="irreversible_action",
                     location=location,
                     message="The agent cannot execute irreversible actions.",
+                )
+            )
+        step_text = " ".join([step.objective, *step.methods, *step.stop_conditions])
+        if _ARBITRARY_SEMANTIC_ARM_MAPPING.search(step_text):
+            findings.append(
+                LintFinding(
+                    code="arbitrary_semantic_arm_mapping",
+                    location=location,
+                    message=(
+                        "Semantic control/treatment identity cannot be inferred "
+                        "from lexical, alphabetical, numeric, row, or category "
+                        "order. Predefine accepted normalized role labels and stop "
+                        "for explicit mapping when labels are unrecognized or "
+                        "ambiguous."
+                    ),
                 )
             )
 

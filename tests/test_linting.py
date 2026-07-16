@@ -138,6 +138,21 @@ def test_plan_linter_rejects_duplicate_ids_and_irreversible_action():
     }
 
 
+def test_plan_linter_rejects_order_based_semantic_arm_assignment():
+    plan = good_plan()
+    plan.steps[0].methods = [
+        "Assign the lexicographically smallest group label as control and the "
+        "other as treatment."
+    ]
+
+    report = lint_plan(task(), plan)
+
+    assert "arbitrary_semantic_arm_mapping" in {
+        finding.code for finding in report.findings
+    }
+    assert not report.passed
+
+
 def test_plan_linter_rejects_invented_input_filename_and_accepts_manifest_name():
     planned = good_plan()
     planned.required_data = ["invented_dataset.csv", "uploaded dataset"]

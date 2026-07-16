@@ -1,6 +1,7 @@
 from scientific_agent.prompts import (
     DISPLAY_AUDITOR,
     INPUT_VISUAL_AUDITOR,
+    PLAN_REPAIRER,
     PLAN_AUDITOR,
     PLANNER_A,
     PLANNER_B,
@@ -43,6 +44,12 @@ def test_plan_auditor_preserves_controller_ownership_of_visual_checkpoint():
     assert "controller automatically routes bounded rasters" in PLAN_AUDITOR
     assert "never ask Qwen to interpret pixels" in PLAN_AUDITOR
     assert "not as a model-generated output artifact" in PLAN_AUDITOR
+
+
+def test_planning_prompts_forbid_order_based_semantic_arm_assignment():
+    assert "never assign control or" in SIMPLE_PLANNER
+    assert "Never propose lexical" in PLAN_AUDITOR
+    assert "Never resolve semantic arm identity" in PLAN_REPAIRER
 
 
 def test_input_visual_auditor_requires_exact_schema_and_artifact_paths():

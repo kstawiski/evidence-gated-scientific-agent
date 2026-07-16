@@ -464,13 +464,24 @@ the typed PubMed tools; a blocking PubMed-title mismatch was repaired from
 stored acquisition evidence before Gemma passed the report. See the
 [`v0.4.0 A2A live record`](evals/results/v0.4.0-a2a-live.json).
 
+The final knowledge-grounding gate ran on clean commit `ca09622` on 2026-07-16.
+Across 30 exact, synonym, and Polish queries, Qwen-enriched hybrid retrieval
+achieved Recall@10 1.00 and nDCG@10 0.975, versus lexical Recall@10 0.733 and
+nDCG@10 0.704. The synonym/Polish recall gain was +0.40 (seeded bootstrap 95%
+CI 0.20–0.60), with no exact-query recall loss. Five text and three visual
+no-answer queries returned no false positives; all 122 returned text passages
+audited as exact immutable source slices rather than descriptor prose. Gemma
+ranked each of six structure-dependent scientific figures first. See the
+[`v0.4.0 knowledge-grounding record`](evals/results/v0.4.0-knowledge-grounding.json).
+
 One protocol limitation remains explicit: v0.4.0 uses the SDK
 `InMemoryTaskStore`, so A2A `GetTask` snapshots and subscription state do not
 survive a web-process restart even though Evidence Bench workspaces, runs, and
 provenance do. The issue-first contribution proposal is open in
 [`a2aproject/a2a-samples#639`](https://github.com/a2aproject/a2a-samples/issues/639);
-a maintainer has invited a small draft pull request with pytest and recommended
-stable A2A 1.0, both of which this implementation already uses. See
+a maintainer invited a small A2A 1.0 contribution, now available as
+[`a2aproject/a2a-samples#642`](https://github.com/a2aproject/a2a-samples/pull/642)
+with its lint gate passing. See
 [`evals/README.md`](evals/README.md) for the release-gate ledger.
 
 ## Run the CLI

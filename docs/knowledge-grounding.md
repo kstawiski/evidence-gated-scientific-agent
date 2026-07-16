@@ -165,6 +165,15 @@ the configured capacity queue rather than being misclassified as timed out.
   not clear the incremental gate, lexical retrieval remains authoritative and the
   descriptor layer is not presented as adding value.
 
+The final v0.4.0 live record is
+[`evals/results/v0.4.0-knowledge-grounding.json`](../evals/results/v0.4.0-knowledge-grounding.json).
+It was generated from a clean Git commit after removing semantic answer IDs from
+the indexed corpus. Hybrid Recall@10 was 1.00 and nDCG@10 was 0.975; the
+synonym/Polish recall gain was +0.40 (seeded bootstrap 95% CI 0.20–0.60).
+All 122 returned text passages were verified as exact immutable corpus slices,
+all text and visual no-answer queries remained empty, and Gemma ranked all six
+structure-dependent visual targets first.
+
 Run citations resolve to hash-checked files below that run's provenance directory,
 not the mutable library API. A completed bundle therefore keeps the cited passage
 and metadata offline after the source generation is retired or logically deleted.

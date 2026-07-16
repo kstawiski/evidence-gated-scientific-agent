@@ -1,12 +1,12 @@
 {
   "application_version": "0.4.0",
-  "baseline_document_id": "5ab34b1cfdba4b3db0fb789f6415d8f2",
+  "baseline_document_id": "61b423935527407895456a20c6fb13f3",
   "benchmark_version": 2,
-  "document_id": "f903267ae36a4f9d9dcd129403c92297",
+  "document_id": "8a50089015844a51ae6273372e5380ee",
   "fixture": "evals/cases/knowledge_retrieval.json",
   "fixture_sha256": "af28bfe4638a6f096612cffa9651cd7a5c24f8912378cd7bb4113de5c32a0c83",
-  "generated_at": "2026-07-16T21:23:51.311142+00:00",
-  "git_commit": "66fdb238e511bcfb4928f66e748bf2d337eb6f09",
+  "generated_at": "2026-07-16T21:48:58.671508+00:00",
+  "git_commit": "ca09622875669037d72666334b0e9284c5d7bef1",
   "git_dirty": false,
   "models": {
     "gemma_max_tokens": null,
@@ -16,6 +16,7 @@
     "visual": "s8-gemma"
   },
   "no_answer": {
+    "descriptor_evidence_passages_inspected": 122,
     "descriptor_evidence_violations": 0,
     "false_positive_rate": 0.0,
     "queries": [
@@ -52,8 +53,7 @@
       "hybrid": {
         "methods": [
           "lexical",
-          "lexical+semantic_descriptor",
-          "semantic_descriptor"
+          "lexical+semantic_descriptor"
         ],
         "ndcg_at_10": 1.0,
         "query": "deep inspiration breath hold cardiac dose",
@@ -77,7 +77,6 @@
     {
       "hybrid": {
         "methods": [
-          "lexical",
           "lexical+semantic_descriptor"
         ],
         "ndcg_at_10": 1.0,
@@ -124,9 +123,7 @@
     {
       "hybrid": {
         "methods": [
-          "lexical",
-          "lexical+semantic_descriptor",
-          "semantic_descriptor"
+          "lexical+semantic_descriptor"
         ],
         "ndcg_at_10": 1.0,
         "query": "stereotactic body radiotherapy lung",
@@ -150,7 +147,6 @@
     {
       "hybrid": {
         "methods": [
-          "lexical",
           "lexical+semantic_descriptor"
         ],
         "ndcg_at_10": 1.0,
@@ -178,7 +174,7 @@
           "semantic_descriptor"
         ],
         "ndcg_at_10": 1.0,
-        "query": "stereotaktyczna radioterapia płuca wysokie dawki",
+        "query": "stereotaktyczna radioterapia p\u0142uca wysokie dawki",
         "rank": 1,
         "recall_at_10": 1.0,
         "relevant": "lung-sbrt",
@@ -187,7 +183,7 @@
       "lexical": {
         "methods": [],
         "ndcg_at_10": 0.0,
-        "query": "stereotaktyczna radioterapia płuca wysokie dawki",
+        "query": "stereotaktyczna radioterapia p\u0142uca wysokie dawki",
         "rank": null,
         "recall_at_10": 0.0,
         "relevant": "lung-sbrt",
@@ -221,7 +217,6 @@
     {
       "hybrid": {
         "methods": [
-          "lexical",
           "lexical+semantic_descriptor"
         ],
         "ndcg_at_10": 1.0,
@@ -246,8 +241,7 @@
     {
       "hybrid": {
         "methods": [
-          "lexical",
-          "lexical+semantic_descriptor"
+          "semantic_descriptor"
         ],
         "ndcg_at_10": 1.0,
         "query": "metylacja promotora MGMT glejak temozolomid",
@@ -257,13 +251,11 @@
         "stratum": "polish"
       },
       "lexical": {
-        "methods": [
-          "lexical"
-        ],
-        "ndcg_at_10": 1.0,
+        "methods": [],
+        "ndcg_at_10": 0.0,
         "query": "metylacja promotora MGMT glejak temozolomid",
-        "rank": 1,
-        "recall_at_10": 1.0,
+        "rank": null,
+        "recall_at_10": 0.0,
         "relevant": "gbm-mgmt",
         "stratum": "polish"
       }
@@ -297,57 +289,57 @@
     {
       "hybrid": {
         "methods": [
-          "lexical+semantic_descriptor",
-          "semantic_descriptor"
-        ],
-        "ndcg_at_10": 1.0,
-        "query": "DESeq2 normalization differential expression",
-        "rank": 1,
-        "recall_at_10": 1.0,
-        "relevant": "rnaseq-size-factors",
-        "stratum": "synonym"
-      },
-      "lexical": {
-        "methods": [
-          "lexical"
-        ],
-        "ndcg_at_10": 0.6309297535714575,
-        "query": "DESeq2 normalization differential expression",
-        "rank": 2,
-        "recall_at_10": 1.0,
-        "relevant": "rnaseq-size-factors",
-        "stratum": "synonym"
-      }
-    },
-    {
-      "hybrid": {
-        "methods": [
-          "lexical+semantic_descriptor",
-          "semantic_descriptor"
-        ],
-        "ndcg_at_10": 1.0,
-        "query": "normalizacja RNA-seq różnicowa ekspresja genów",
-        "rank": 1,
-        "recall_at_10": 1.0,
-        "relevant": "rnaseq-size-factors",
-        "stratum": "polish"
-      },
-      "lexical": {
-        "methods": [
-          "lexical"
-        ],
-        "ndcg_at_10": 1.0,
-        "query": "normalizacja RNA-seq różnicowa ekspresja genów",
-        "rank": 1,
-        "recall_at_10": 1.0,
-        "relevant": "rnaseq-size-factors",
-        "stratum": "polish"
-      }
-    },
-    {
-      "hybrid": {
-        "methods": [
           "lexical",
+          "lexical+semantic_descriptor",
+          "semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "DESeq2 normalization differential expression",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "rnaseq-size-factors",
+        "stratum": "synonym"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 0.6309297535714575,
+        "query": "DESeq2 normalization differential expression",
+        "rank": 2,
+        "recall_at_10": 1.0,
+        "relevant": "rnaseq-size-factors",
+        "stratum": "synonym"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical+semantic_descriptor",
+          "semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "normalizacja RNA-seq r\u00f3\u017cnicowa ekspresja gen\u00f3w",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "rnaseq-size-factors",
+        "stratum": "polish"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "normalizacja RNA-seq r\u00f3\u017cnicowa ekspresja gen\u00f3w",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "rnaseq-size-factors",
+        "stratum": "polish"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
           "lexical+semantic_descriptor"
         ],
         "ndcg_at_10": 1.0,
@@ -374,9 +366,9 @@
         "methods": [
           "lexical+semantic_descriptor"
         ],
-        "ndcg_at_10": 1.0,
+        "ndcg_at_10": 0.6309297535714575,
         "query": "Fine Gray regression",
-        "rank": 1,
+        "rank": 2,
         "recall_at_10": 1.0,
         "relevant": "competing-risks",
         "stratum": "synonym"
@@ -385,9 +377,9 @@
         "methods": [
           "lexical"
         ],
-        "ndcg_at_10": 0.6309297535714575,
+        "ndcg_at_10": 0.5,
         "query": "Fine Gray regression",
-        "rank": 2,
+        "rank": 3,
         "recall_at_10": 1.0,
         "relevant": "competing-risks",
         "stratum": "synonym"
@@ -399,7 +391,7 @@
           "semantic_descriptor"
         ],
         "ndcg_at_10": 1.0,
-        "query": "ryzyka konkurujące skumulowana częstość Fine Gray",
+        "query": "ryzyka konkuruj\u0105ce skumulowana cz\u0119sto\u015b\u0107 Fine Gray",
         "rank": 1,
         "recall_at_10": 1.0,
         "relevant": "competing-risks",
@@ -408,7 +400,7 @@
       "lexical": {
         "methods": [],
         "ndcg_at_10": 0.0,
-        "query": "ryzyka konkurujące skumulowana częstość Fine Gray",
+        "query": "ryzyka konkuruj\u0105ce skumulowana cz\u0119sto\u015b\u0107 Fine Gray",
         "rank": null,
         "recall_at_10": 0.0,
         "relevant": "competing-risks",
@@ -419,8 +411,7 @@
       "hybrid": {
         "methods": [
           "lexical",
-          "lexical+semantic_descriptor",
-          "semantic_descriptor"
+          "lexical+semantic_descriptor"
         ],
         "ndcg_at_10": 1.0,
         "query": "inverse probability treatment weights propensity scores",
@@ -445,8 +436,7 @@
       "hybrid": {
         "methods": [
           "lexical",
-          "lexical+semantic_descriptor",
-          "semantic_descriptor"
+          "lexical+semantic_descriptor"
         ],
         "ndcg_at_10": 1.0,
         "query": "IPTW covariate balance",
@@ -470,12 +460,10 @@
     {
       "hybrid": {
         "methods": [
-          "lexical",
-          "lexical+semantic_descriptor",
-          "semantic_descriptor"
+          "lexical+semantic_descriptor"
         ],
         "ndcg_at_10": 1.0,
-        "query": "ważenie odwrotnym prawdopodobieństwem propensity score",
+        "query": "wa\u017cenie odwrotnym prawdopodobie\u0144stwem propensity score",
         "rank": 1,
         "recall_at_10": 1.0,
         "relevant": "propensity-weighting",
@@ -485,9 +473,9 @@
         "methods": [
           "lexical"
         ],
-        "ndcg_at_10": 0.6309297535714575,
-        "query": "ważenie odwrotnym prawdopodobieństwem propensity score",
-        "rank": 2,
+        "ndcg_at_10": 1.0,
+        "query": "wa\u017cenie odwrotnym prawdopodobie\u0144stwem propensity score",
+        "rank": 1,
         "recall_at_10": 1.0,
         "relevant": "propensity-weighting",
         "stratum": "polish"
@@ -496,7 +484,6 @@
     {
       "hybrid": {
         "methods": [
-          "lexical",
           "lexical+semantic_descriptor",
           "semantic_descriptor"
         ],
@@ -522,7 +509,6 @@
     {
       "hybrid": {
         "methods": [
-          "lexical",
           "lexical+semantic_descriptor"
         ],
         "ndcg_at_10": 1.0,
@@ -550,7 +536,7 @@
           "semantic_descriptor"
         ],
         "ndcg_at_10": 1.0,
-        "query": "wielokrotna imputacja brakujące zmienne reguły Rubina",
+        "query": "wielokrotna imputacja brakuj\u0105ce zmienne regu\u0142y Rubina",
         "rank": 1,
         "recall_at_10": 1.0,
         "relevant": "multiple-imputation",
@@ -559,7 +545,7 @@
       "lexical": {
         "methods": [],
         "ndcg_at_10": 0.0,
-        "query": "wielokrotna imputacja brakujące zmienne reguły Rubina",
+        "query": "wielokrotna imputacja brakuj\u0105ce zmienne regu\u0142y Rubina",
         "rank": null,
         "recall_at_10": 0.0,
         "relevant": "multiple-imputation",
@@ -593,7 +579,6 @@
     {
       "hybrid": {
         "methods": [
-          "lexical",
           "lexical+semantic_descriptor"
         ],
         "ndcg_at_10": 1.0,
@@ -621,7 +606,7 @@
           "semantic_descriptor"
         ],
         "ndcg_at_10": 1.0,
-        "query": "podział pacjentów przeciek danych radiomika",
+        "query": "podzia\u0142 pacjent\u00f3w przeciek danych radiomika",
         "rank": 1,
         "recall_at_10": 1.0,
         "relevant": "radiomics-splitting",
@@ -630,7 +615,7 @@
       "lexical": {
         "methods": [],
         "ndcg_at_10": 0.0,
-        "query": "podział pacjentów przeciek danych radiomika",
+        "query": "podzia\u0142 pacjent\u00f3w przeciek danych radiomika",
         "rank": null,
         "recall_at_10": 0.0,
         "relevant": "radiomics-splitting",
@@ -640,7 +625,6 @@
     {
       "hybrid": {
         "methods": [
-          "lexical",
           "lexical+semantic_descriptor"
         ],
         "ndcg_at_10": 1.0,
@@ -665,9 +649,7 @@
     {
       "hybrid": {
         "methods": [
-          "lexical",
-          "lexical+semantic_descriptor",
-          "semantic_descriptor"
+          "lexical+semantic_descriptor"
         ],
         "ndcg_at_10": 1.0,
         "query": "ICI related lung toxicity",
@@ -694,7 +676,7 @@
           "semantic_descriptor"
         ],
         "ndcg_at_10": 1.0,
-        "query": "zapalenie płuc inhibitory punktów kontrolnych immunoterapia",
+        "query": "zapalenie p\u0142uc inhibitory punkt\u00f3w kontrolnych immunoterapia",
         "rank": 1,
         "recall_at_10": 1.0,
         "relevant": "ici-pneumonitis",
@@ -703,7 +685,7 @@
       "lexical": {
         "methods": [],
         "ndcg_at_10": 0.0,
-        "query": "zapalenie płuc inhibitory punktów kontrolnych immunoterapia",
+        "query": "zapalenie p\u0142uc inhibitory punkt\u00f3w kontrolnych immunoterapia",
         "rank": null,
         "recall_at_10": 0.0,
         "relevant": "ici-pneumonitis",
@@ -714,8 +696,7 @@
       "hybrid": {
         "methods": [
           "lexical",
-          "lexical+semantic_descriptor",
-          "semantic_descriptor"
+          "lexical+semantic_descriptor"
         ],
         "ndcg_at_10": 1.0,
         "query": "mean parotid dose late dry mouth",
@@ -739,7 +720,6 @@
     {
       "hybrid": {
         "methods": [
-          "lexical",
           "lexical+semantic_descriptor"
         ],
         "ndcg_at_10": 1.0,
@@ -767,7 +747,7 @@
           "semantic_descriptor"
         ],
         "ndcg_at_10": 0.6309297535714575,
-        "query": "suchość jamy ustnej dawka ślinianki przyusznej",
+        "query": "sucho\u015b\u0107 jamy ustnej dawka \u015blinianki przyusznej",
         "rank": 2,
         "recall_at_10": 1.0,
         "relevant": "parotid-xerostomia",
@@ -776,7 +756,7 @@
       "lexical": {
         "methods": [],
         "ndcg_at_10": 0.0,
-        "query": "suchość jamy ustnej dawka ślinianki przyusznej",
+        "query": "sucho\u015b\u0107 jamy ustnej dawka \u015blinianki przyusznej",
         "rank": null,
         "recall_at_10": 0.0,
         "relevant": "parotid-xerostomia",
@@ -807,24 +787,25 @@
       "queries": 10
     },
     "hybrid": {
-      "ndcg_at_10": 0.9876976584523819,
+      "ndcg_at_10": 0.9753953169047639,
       "recall_at_10": 1.0
     },
     "lexical": {
-      "ndcg_at_10": 0.7297596420238124,
-      "recall_at_10": 0.7666666666666667
+      "ndcg_at_10": 0.7043643251190486,
+      "recall_at_10": 0.7333333333333333
     },
     "synonym_and_polish_recall_gain": {
-      "absolute_difference": 0.35,
+      "absolute_difference": 0.4,
       "bootstrap_95_ci": [
-        0.15,
-        0.55
+        0.2,
+        0.6
       ],
       "queries": 20
     }
   },
-  "text_indexing_seconds": 540.2953145159408,
+  "text_indexing_seconds": 514.8627655531745,
   "thresholds": {
+    "descriptor_evidence_audit_is_nonvacuous": true,
     "descriptor_prose_never_returned_as_evidence": true,
     "exact_recall_regression_at_most_0_01": true,
     "hybrid_ndcg_at_10_at_least_0_75": true,
@@ -841,8 +822,8 @@
   },
   "visual": {
     "assets": 6,
-    "document_id": "a211efbfa619472fa94fb74ab4745d29",
-    "indexing_seconds": 126.28761991602369,
+    "document_id": "5a674967ab564416ae38dd191616a4fa",
+    "indexing_seconds": 137.75191950495355,
     "ndcg_at_5": 1.0,
     "no_answer_false_positive_rate": 0.0,
     "no_answer_queries": [

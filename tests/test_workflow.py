@@ -282,7 +282,9 @@ def test_load_retrieval_compat_reconstructs_legacy_chunk_ordinal(tmp_path):
                 "content_sha256": sha256_file(text_path),
                 "chunk_sha256": chunk["sha256"],
                 "source_url": f"https://bench.test/{passage_id}",
-                "artifact_path": str(parent / "knowledge" / "passages" / f"{passage_id}.md"),
+                "artifact_path": str(
+                    parent / "knowledge" / "passages" / f"{passage_id}.md"
+                ),
                 "artifact_sha256": "d" * 64,
                 "document_filename": "legacy.md",
                 "document_text_path": str(text_path),
@@ -2851,8 +2853,7 @@ async def test_selected_knowledge_visuals_are_bounded_and_sent_only_to_gemma(
     )
     assert len(report.observations) == 20
     assert all(
-        item.source_url in " ".join(report.unreviewed_requests)
-        for item in visuals[20:]
+        item.source_url in " ".join(report.unreviewed_requests) for item in visuals[20:]
     )
     audit = json.loads((run_dir / "gemma_input_visual_review.json").read_text())
     assert audit["visual_critic"] == "Gemma"

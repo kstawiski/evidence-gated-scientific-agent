@@ -1931,11 +1931,7 @@ def validate_report(
                     message="A cited PubMed record requires an explicit acquisition status.",
                 )
             )
-        if (
-            source.pmid
-            and knowledge_match is None
-            and knowledge_visual_match is None
-        ):
+        if source.pmid and knowledge_match is None and knowledge_visual_match is None:
             try:
                 acquired, _, markdown = load_acquired_article_record(source, retrieval)
                 acquired_text_by_source[source.source_id] = markdown.lower()

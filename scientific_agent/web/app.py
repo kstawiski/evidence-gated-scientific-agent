@@ -543,7 +543,9 @@ def create_app(
             "visuals": [
                 {
                     **{key: value for key, value in item.items() if key != "path"},
-                    **public_visual(item["document_id"], {"id": item["visual_id"], **item}),
+                    **public_visual(
+                        item["document_id"], {"id": item["visual_id"], **item}
+                    ),
                 }
                 for item in result["visuals"]
             ],
@@ -635,7 +637,9 @@ def create_app(
         ]
 
     @app.get("/api/knowledge/{document_id}/visuals/{visual_id}/preview")
-    async def preview_knowledge_visual(document_id: str, visual_id: str) -> FileResponse:
+    async def preview_knowledge_visual(
+        document_id: str, visual_id: str
+    ) -> FileResponse:
         assets = knowledge.visual_assets(document_id, visual_id=visual_id)
         if not assets:
             raise KeyError("knowledge visual not found")
@@ -835,9 +839,7 @@ def create_app(
             path,
             media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream",
             headers={
-                "Content-Disposition": (
-                    f"inline; filename*=UTF-8''{quote(path.name)}"
-                ),
+                "Content-Disposition": (f"inline; filename*=UTF-8''{quote(path.name)}"),
                 "Cache-Control": "private, immutable, max-age=31536000",
             },
         )

@@ -405,13 +405,9 @@ class ToolPolicy:
                             for item in result.get("passages", [])
                         ]
                         assert self.knowledge_passages is not None
-                        existing = {
-                            item.passage_id for item in self.knowledge_passages
-                        }
+                        existing = {item.passage_id for item in self.knowledge_passages}
                         self.knowledge_passages.extend(
-                            item
-                            for item in passages
-                            if item.passage_id not in existing
+                            item for item in passages if item.passage_id not in existing
                         )
                     else:
                         visuals = [

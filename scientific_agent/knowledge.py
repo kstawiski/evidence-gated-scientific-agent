@@ -1549,8 +1549,7 @@ class KnowledgeLibrary:
                 ).fetchall()
             }
             submitted_visuals = {
-                item["visual_id"]: item["source_sha256"]
-                for item in normalized_visual
+                item["visual_id"]: item["source_sha256"] for item in normalized_visual
             }
             if observed_visuals != submitted_visuals:
                 raise KnowledgeError(
@@ -1780,8 +1779,7 @@ class KnowledgeLibrary:
                     "Controller",
                 )
             cancelled = connection.execute(
-                "SELECT id, document_id FROM index_jobs "
-                "WHERE status='cancel_requested'"
+                "SELECT id, document_id FROM index_jobs WHERE status='cancel_requested'"
             ).fetchall()
             for row in cancelled:
                 connection.execute(
@@ -2682,9 +2680,7 @@ class KnowledgeRetriever:
         )
         return result
 
-    def search_knowledge_visuals(
-        self, query: str, limit: int = 8
-    ) -> dict[str, Any]:
+    def search_knowledge_visuals(self, query: str, limit: int = 8) -> dict[str, Any]:
         """Resolve visual-descriptor hits to exact run-local raster evidence.
 
         Args:
@@ -2718,10 +2714,15 @@ class KnowledgeRetriever:
             )
             suffix = source.suffix.casefold()
             if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
-                raise KnowledgeError("knowledge visual is not a model-compatible raster")
+                raise KnowledgeError(
+                    "knowledge visual is not a model-compatible raster"
+                )
             destination = visual_dir / f"{knowledge_visual_id}{suffix}"
             if destination.exists():
-                if destination.is_symlink() or sha256_file(destination) != visual["sha256"]:
+                if (
+                    destination.is_symlink()
+                    or sha256_file(destination) != visual["sha256"]
+                ):
                     raise KnowledgeError("run-local knowledge visual collision")
             else:
                 shutil.copy2(source, destination)

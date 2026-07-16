@@ -88,7 +88,10 @@ def _office_candidates(source: Path, scratch: Path) -> list[tuple[Path, str]]:
             archive_members = archive.infolist()
             if len(archive_members) > MAX_ARCHIVE_MEMBERS:
                 return []
-            if sum(item.file_size for item in archive_members) > MAX_ARCHIVE_TOTAL_BYTES:
+            if (
+                sum(item.file_size for item in archive_members)
+                > MAX_ARCHIVE_TOTAL_BYTES
+            ):
                 return []
             if any(
                 item.compress_size
@@ -104,7 +107,10 @@ def _office_candidates(source: Path, scratch: Path) -> list[tuple[Path, str]]:
             total = 0
             for item in members[: MAX_VISUAL_ASSETS * 2]:
                 suffix = Path(item.filename).suffix.casefold()
-                if suffix not in RASTER_SUFFIXES or item.file_size > MAX_ARCHIVE_VISUAL_BYTES:
+                if (
+                    suffix not in RASTER_SUFFIXES
+                    or item.file_size > MAX_ARCHIVE_VISUAL_BYTES
+                ):
                     continue
                 total += item.file_size
                 if total > MAX_ARCHIVE_TOTAL_BYTES:
@@ -223,9 +229,12 @@ def extract_visual_candidates(source: Path, staging: Path) -> list[dict[str, Any
             if total > MAX_VISUAL_TOTAL_BYTES:
                 destination.unlink(missing_ok=True)
                 break
-            visual_id = "kv-" + hashlib.sha256(
-                f"{len(results)}:{normalized['sha256']}:{label}".encode()
-            ).hexdigest()[:24]
+            visual_id = (
+                "kv-"
+                + hashlib.sha256(
+                    f"{len(results)}:{normalized['sha256']}:{label}".encode()
+                ).hexdigest()[:24]
+            )
             results.append(
                 {
                     **normalized,

@@ -530,7 +530,7 @@ def test_browser_ui_uses_structured_dom_without_inner_html():
     assert "/events`)" in script
     assert "scheduleKnowledgePolling" in script
     assert "Qwen text → Gemma actual images only" in script
-    assert 'for (const [index, file] of files.entries())' in script
+    assert "for (const [index, file] of files.entries())" in script
     assert ".run-facts dd { white-space: normal; overflow-wrap: anywhere; }" in style
     assert ".task-panel.is-locked .mcp-options input:disabled + span" in style
 

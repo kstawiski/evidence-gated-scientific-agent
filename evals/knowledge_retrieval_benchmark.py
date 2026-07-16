@@ -81,9 +81,11 @@ def _descriptor_evidence_audit(
         for passage in library.search(query, snapshot, limit)["passages"]:
             passages_inspected += 1
             source_text = passage.get("untrusted_source_text")
-            if forbidden_fields.intersection(passage) or not isinstance(
-                source_text, str
-            ) or source_text not in corpus:
+            if (
+                forbidden_fields.intersection(passage)
+                or not isinstance(source_text, str)
+                or source_text not in corpus
+            ):
                 violations += 1
     return violations, passages_inspected
 
@@ -104,14 +106,34 @@ def _visual_presentation(path: Path, visuals: list[dict]) -> None:
                 draw.line((130, 650, 1_080, 650), fill="black", width=4)
                 draw.line((130, 130, 130, 650), fill="black", width=4)
                 draw.text((470, 690), "Time (months)", fill="black", font_size=28)
-                draw.text((145, 110), "Event-free proportion", fill="black", font_size=25)
+                draw.text(
+                    (145, 110), "Event-free proportion", fill="black", font_size=25
+                )
                 draw.line(
-                    [(150, 180), (350, 180), (350, 260), (590, 260), (590, 390), (810, 390), (810, 520), (1050, 520)],
+                    [
+                        (150, 180),
+                        (350, 180),
+                        (350, 260),
+                        (590, 260),
+                        (590, 390),
+                        (810, 390),
+                        (810, 520),
+                        (1050, 520),
+                    ],
                     fill=color,
                     width=8,
                 )
                 draw.line(
-                    [(150, 180), (280, 180), (280, 330), (500, 330), (500, 470), (740, 470), (740, 590), (1050, 590)],
+                    [
+                        (150, 180),
+                        (280, 180),
+                        (280, 330),
+                        (500, 330),
+                        (500, 470),
+                        (740, 470),
+                        (740, 590),
+                        (1050, 590),
+                    ],
                     fill="gray",
                     width=8,
                 )
@@ -121,21 +143,43 @@ def _visual_presentation(path: Path, visuals: list[dict]) -> None:
                 draw.text((820, 155), "Group 2", fill="gray", font_size=25)
             elif kind == "forest":
                 draw.line((650, 130, 650, 670), fill="gray", width=5)
-                draw.text((525, 690), "Effect estimate (95% CI)", fill="black", font_size=27)
-                for row, (center, spread) in enumerate(((480, 130), (590, 170), (720, 110), (790, 150)), start=1):
+                draw.text(
+                    (525, 690), "Effect estimate (95% CI)", fill="black", font_size=27
+                )
+                for row, (center, spread) in enumerate(
+                    ((480, 130), (590, 170), (720, 110), (790, 150)), start=1
+                ):
                     y = 150 + row * 105
                     draw.text((110, y - 16), f"Study {row}", fill="black", font_size=25)
-                    draw.line((center - spread, y, center + spread, y), fill=color, width=7)
-                    draw.rectangle((center - 11, y - 11, center + 11, y + 11), fill=color)
+                    draw.line(
+                        (center - spread, y, center + spread, y), fill=color, width=7
+                    )
+                    draw.rectangle(
+                        (center - 11, y - 11, center + 11, y + 11), fill=color
+                    )
                 draw.text((585, 100), "Null", fill="gray", font_size=24)
             elif kind == "volcano":
                 draw.line((130, 650, 1_080, 650), fill="black", width=4)
                 draw.line((600, 120, 600, 650), fill="gray", width=3)
                 draw.text((440, 690), "log2 fold change", fill="black", font_size=28)
                 draw.text((145, 110), "-log10 adjusted p", fill="black", font_size=25)
-                points = [(220, 270), (280, 390), (360, 480), (470, 560), (540, 600), (650, 590), (730, 510), (820, 410), (940, 250), (1010, 330)]
+                points = [
+                    (220, 270),
+                    (280, 390),
+                    (360, 480),
+                    (470, 560),
+                    (540, 600),
+                    (650, 590),
+                    (730, 510),
+                    (820, 410),
+                    (940, 250),
+                    (1010, 330),
+                ]
                 for x, y in points:
-                    draw.ellipse((x - 10, y - 10, x + 10, y + 10), fill=color if x < 380 or x > 820 else "gray")
+                    draw.ellipse(
+                        (x - 10, y - 10, x + 10, y + 10),
+                        fill=color if x < 380 or x > 820 else "gray",
+                    )
             elif kind == "flow":
                 boxes = [
                     (410, 110, 790, 200, "Assessed for eligibility"),
@@ -148,24 +192,60 @@ def _visual_presentation(path: Path, visuals: list[dict]) -> None:
                 for left, top, right, bottom, label in boxes:
                     draw.rectangle((left, top, right, bottom), outline=color, width=5)
                     draw.text((left + 20, top + 28), label, fill="black", font_size=24)
-                for line in ((600, 200, 600, 265), (600, 355, 310, 430), (600, 355, 890, 430), (310, 520, 310, 600), (890, 520, 890, 600)):
+                for line in (
+                    (600, 200, 600, 265),
+                    (600, 355, 310, 430),
+                    (600, 355, 890, 430),
+                    (310, 520, 310, 600),
+                    (890, 520, 890, 600),
+                ):
                     draw.line(line, fill=color, width=5)
             elif kind == "agreement":
                 draw.line((130, 650, 1_080, 650), fill="black", width=4)
                 draw.text((500, 690), "Average", fill="black", font_size=28)
                 draw.text((145, 110), "Difference", fill="black", font_size=25)
-                for y, label, width in ((250, "Upper limit", 4), (400, "Mean bias", 6), (550, "Lower limit", 4)):
-                    draw.line((150, y, 1_050, y), fill=color if y == 400 else "gray", width=width)
+                for y, label, width in (
+                    (250, "Upper limit", 4),
+                    (400, "Mean bias", 6),
+                    (550, "Lower limit", 4),
+                ):
+                    draw.line(
+                        (150, y, 1_050, y),
+                        fill=color if y == 400 else "gray",
+                        width=width,
+                    )
                     draw.text((900, y - 35), label, fill="black", font_size=22)
-                for x, y in ((210, 430), (300, 360), (390, 470), (480, 390), (570, 330), (660, 440), (760, 380), (850, 460)):
+                for x, y in (
+                    (210, 430),
+                    (300, 360),
+                    (390, 470),
+                    (480, 390),
+                    (570, 330),
+                    (660, 440),
+                    (760, 380),
+                    (850, 460),
+                ):
                     draw.ellipse((x - 9, y - 9, x + 9, y + 9), fill=color)
             elif kind == "calibration":
                 draw.line((130, 650, 1_080, 650), fill="black", width=4)
                 draw.line((130, 130, 130, 650), fill="black", width=4)
-                draw.text((440, 690), "Predicted probability", fill="black", font_size=28)
+                draw.text(
+                    (440, 690), "Predicted probability", fill="black", font_size=28
+                )
                 draw.text((145, 110), "Observed proportion", fill="black", font_size=25)
                 draw.line((150, 630, 1_030, 160), fill="gray", width=4)
-                draw.line([(150, 620), (320, 560), (500, 470), (690, 350), (860, 280), (1_030, 190)], fill=color, width=8)
+                draw.line(
+                    [
+                        (150, 620),
+                        (320, 560),
+                        (500, 470),
+                        (690, 350),
+                        (860, 280),
+                        (1_030, 190),
+                    ],
+                    fill=color,
+                    width=8,
+                )
                 draw.text((835, 120), "Ideal", fill="gray", font_size=24)
                 draw.text((835, 155), "Model", fill=color, font_size=24)
             image_path = path.parent / f"visual-{index}.png"
@@ -189,7 +269,11 @@ async def _evaluate_visuals(
             semantic_pending=True,
         )
     assets = register_document_visuals(library, document["id"])
-    print("benchmark: indexing six exact visual assets with Gemma", file=sys.stderr, flush=True)
+    print(
+        "benchmark: indexing six exact visual assets with Gemma",
+        file=sys.stderr,
+        flush=True,
+    )
     started = time.monotonic()
     await indexer.index_document(library, document["id"])
     snapshot = library.snapshot([document["id"]])
@@ -209,15 +293,12 @@ async def _evaluate_visuals(
     recall = mean(float(row["rank"] is not None) for row in rows)
     top1 = mean(float(row["rank"] == 1) for row in rows)
     ndcg = mean(
-        0.0 if row["rank"] is None else 1.0 / math.log2(row["rank"] + 1)
-        for row in rows
+        0.0 if row["rank"] is None else 1.0 / math.log2(row["rank"] + 1) for row in rows
     )
     no_answer_rows = []
     for query in case.get("visual_no_answer_queries", []):
         result = library.search_visuals(query, snapshot, 5)
-        no_answer_rows.append(
-            {"query": query, "hits": len(result["visuals"])}
-        )
+        no_answer_rows.append({"query": query, "hits": len(result["visuals"])})
     no_answer_false_positive_rate = mean(
         float(row["hits"] > 0) for row in no_answer_rows
     )
@@ -303,9 +384,7 @@ async def run_benchmark(fixture: Path) -> dict:
                 "passages"
             ]
         )
-        synonym_gain = _bootstrap_difference(
-            lexical, hybrid, {"synonym", "polish"}
-        )
+        synonym_gain = _bootstrap_difference(lexical, hybrid, {"synonym", "polish"})
         exact_delta = _bootstrap_difference(lexical, hybrid, {"exact"})
         summary = {
             "lexical": {
@@ -320,23 +399,14 @@ async def run_benchmark(fixture: Path) -> dict:
             "exact_recall_delta": exact_delta,
         }
         thresholds = {
-            "hybrid_recall_at_10_at_least_0_90": summary["hybrid"][
-                "recall_at_10"
-            ]
+            "hybrid_recall_at_10_at_least_0_90": summary["hybrid"]["recall_at_10"]
             >= 0.90,
-            "hybrid_ndcg_at_10_at_least_0_75": summary["hybrid"]["ndcg_at_10"]
-            >= 0.75,
-            "vocabulary_gap_gain_at_least_0_10": synonym_gain[
-                "absolute_difference"
-            ]
+            "hybrid_ndcg_at_10_at_least_0_75": summary["hybrid"]["ndcg_at_10"] >= 0.75,
+            "vocabulary_gap_gain_at_least_0_10": synonym_gain["absolute_difference"]
             >= 0.10,
-            "vocabulary_gap_gain_ci_excludes_zero": synonym_gain[
-                "bootstrap_95_ci"
-            ][0]
+            "vocabulary_gap_gain_ci_excludes_zero": synonym_gain["bootstrap_95_ci"][0]
             > 0,
-            "exact_recall_regression_at_most_0_01": exact_delta[
-                "absolute_difference"
-            ]
+            "exact_recall_regression_at_most_0_01": exact_delta["absolute_difference"]
             >= -0.01,
             "published_baseline_snapshot_remains_searchable": immutable_baseline_preserved,
         }
@@ -373,12 +443,10 @@ async def run_benchmark(fixture: Path) -> dict:
             descriptor_evidence_passages_inspected > 0
         )
         visual = await _evaluate_visuals(library, indexer, case, Path(raw))
-        thresholds["visual_asset_extraction_complete"] = (
-            visual["assets"] == len(case["visuals"])
+        thresholds["visual_asset_extraction_complete"] = visual["assets"] == len(
+            case["visuals"]
         )
-        thresholds["visual_recall_at_5_at_least_0_85"] = (
-            visual["recall_at_5"] >= 0.85
-        )
+        thresholds["visual_recall_at_5_at_least_0_85"] = visual["recall_at_5"] >= 0.85
         thresholds["visual_top1_accuracy_at_least_0_67"] = (
             visual["top1_accuracy"] >= 2 / 3
         )

@@ -1610,12 +1610,16 @@ def test_run_scoped_visual_tool_and_policy_preserve_exact_descriptor_free_raster
 
     assert len(result["visuals"]) == 1
     visual = KnowledgeVisualEvidence.model_validate(result["visuals"][0])
-    assert not ({"search_text", "descriptor", "visible_terms"} & result["visuals"][0].keys())
+    assert not (
+        {"search_text", "descriptor", "visible_terms"} & result["visuals"][0].keys()
+    )
     copied = Path(visual.artifact_path)
     assert copied.parent == run_dir / "knowledge" / "visuals"
     assert copied.read_bytes() == Path(asset["path"]).read_bytes()
     assert sha256_file(copied) == visual.visual_sha256 == visual.artifact_sha256
-    assert visual.source_url.endswith(f"/knowledge/visuals/{visual.knowledge_visual_id}")
+    assert visual.source_url.endswith(
+        f"/knowledge/visuals/{visual.knowledge_visual_id}"
+    )
 
     gate = ToolPolicy(
         EventLedger(tmp_path / "events.jsonl"),
@@ -1628,7 +1632,9 @@ def test_run_scoped_visual_tool_and_policy_preserve_exact_descriptor_free_raster
     class Tool:
         name = "search_knowledge_visuals"
 
-    assert gate.before_tool(Tool(), {"query": "Kaplan survival", "limit": 4}, None) is None
+    assert (
+        gate.before_tool(Tool(), {"query": "Kaplan survival", "limit": 4}, None) is None
+    )
     assert gate.after_tool(Tool(), {}, None, result) is None
     evidence = gate.retrieval_evidence()
     assert evidence.tools == ["search_knowledge_visuals"]

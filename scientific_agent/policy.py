@@ -15,7 +15,11 @@ from typing import Any, Callable
 from urllib.parse import urlparse
 
 from .provenance import EventLedger, utc_now
-from .schemas import KnowledgePassageEvidence, RetrievalEvidence
+from .schemas import (
+    KnowledgePassageEvidence,
+    KnowledgeVisualEvidence,
+    RetrievalEvidence,
+)
 
 
 READ_ONLY_TOOLS = {
@@ -24,6 +28,7 @@ READ_ONLY_TOOLS = {
     "search_workspace",
     "list_knowledge_sources",
     "search_knowledge",
+    "search_knowledge_visuals",
     "resolve-library-id",
     "query-docs",
     "brave_web_search",
@@ -48,6 +53,7 @@ RETRIEVAL_TOOLS = {
     "acquire_pubmed_article",
     "import_browser_downloaded_pdf",
     "search_knowledge",
+    "search_knowledge_visuals",
 }
 LITERATURE_TOOLS = {
     "search_pubmed",
@@ -126,6 +132,7 @@ class ToolPolicy:
     retrieval_artifacts: list[str] | None = None
     knowledge_snapshot_sha256: str | None = None
     knowledge_passages: list[KnowledgePassageEvidence] | None = None
+    knowledge_visuals: list[KnowledgeVisualEvidence] | None = None
     retrieval_artifact_roots: tuple[Path, ...] = ()
     evidence_dir: Path | None = None
     observer: Callable[[str, str, str], None] | None = None
@@ -145,6 +152,8 @@ class ToolPolicy:
             self.retrieval_artifacts = []
         if self.knowledge_passages is None:
             self.knowledge_passages = []
+        if self.knowledge_visuals is None:
+            self.knowledge_visuals = []
 
     def retrieval_evidence(self) -> RetrievalEvidence:
         return RetrievalEvidence(
@@ -155,6 +164,7 @@ class ToolPolicy:
             artifacts=list(self.retrieval_artifacts or []),
             knowledge_snapshot_sha256=self.knowledge_snapshot_sha256,
             knowledge_passages=list(self.knowledge_passages or []),
+            knowledge_visuals=list(self.knowledge_visuals or []),
         )
 
     def _observe(self, event_type: str, tool_name: str, status: str) -> None:
@@ -380,24 +390,47 @@ class ToolPolicy:
         else:
             returned_artifacts = []
         if name in RETRIEVAL_TOOLS and not reported_error:
-            if name == "search_knowledge":
+            if name in {"search_knowledge", "search_knowledge_visuals"}:
                 try:
                     snapshot_sha = str(result.get("snapshot_sha256") or "")
-                    passages = [
-                        KnowledgePassageEvidence.model_validate(item)
-                        for item in result.get("passages", [])
-                    ]
                     if not re.fullmatch(r"[0-9a-f]{64}", snapshot_sha) or (
                         self.knowledge_snapshot_sha256 is not None
                         and self.knowledge_snapshot_sha256 != snapshot_sha
                     ):
                         raise ValueError("knowledge snapshot mismatch")
                     self.knowledge_snapshot_sha256 = snapshot_sha
-                    assert self.knowledge_passages is not None
-                    existing = {item.passage_id for item in self.knowledge_passages}
-                    self.knowledge_passages.extend(
-                        item for item in passages if item.passage_id not in existing
-                    )
+                    if name == "search_knowledge":
+                        passages = [
+                            KnowledgePassageEvidence.model_validate(item)
+                            for item in result.get("passages", [])
+                        ]
+                        assert self.knowledge_passages is not None
+                        existing = {
+                            item.passage_id for item in self.knowledge_passages
+                        }
+                        self.knowledge_passages.extend(
+                            item
+                            for item in passages
+                            if item.passage_id not in existing
+                        )
+                    else:
+                        visuals = [
+                            KnowledgeVisualEvidence.model_validate(item)
+                            for item in result.get("visuals", [])
+                        ]
+                        if any(
+                            item.snapshot_sha256 != snapshot_sha for item in visuals
+                        ):
+                            raise ValueError("knowledge visual snapshot mismatch")
+                        assert self.knowledge_visuals is not None
+                        existing_visuals = {
+                            item.knowledge_visual_id for item in self.knowledge_visuals
+                        }
+                        self.knowledge_visuals.extend(
+                            item
+                            for item in visuals
+                            if item.knowledge_visual_id not in existing_visuals
+                        )
                 except (TypeError, ValueError) as exc:
                     reported_error = "INVALID_KNOWLEDGE_EVIDENCE"
                     artifact_error = str(exc)

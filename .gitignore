@@ -8,6 +8,7 @@ dist/
 build/
 runs/
 delegated_tasks/
+.reviews/
 .env
 web-data/
 .evidence-bench/

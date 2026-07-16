@@ -9,7 +9,7 @@ import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
 from pathlib import Path
-from typing import Awaitable, Callable
+from typing import TYPE_CHECKING, Awaitable, Callable
 
 from ..config import Settings
 from ..knowledge import KnowledgeLibrary
@@ -17,6 +17,9 @@ from ..orchestrator import run_scientific_task
 from ..provenance import build_manifest, utc_now, write_json
 from ..schemas import RunResult
 from .store import ACTIVE_RUN_STATES, WorkspaceStore
+
+if TYPE_CHECKING:
+    from ..knowledge_indexing import KnowledgeIndexService
 
 
 logger = logging.getLogger(__name__)
@@ -57,12 +60,14 @@ class TaskService:
         max_workers: int,
         runner: Runner = run_scientific_task,
         knowledge_library: KnowledgeLibrary | None = None,
+        knowledge_index_service: "KnowledgeIndexService | None" = None,
         public_url: str = "",
     ):
         self.store = store
         self.base_settings = base_settings
         self.runner = runner
         self.knowledge_library = knowledge_library
+        self.knowledge_index_service = knowledge_index_service
         self.public_url = public_url.rstrip("/")
         self.executor = ThreadPoolExecutor(
             max_workers=max_workers, thread_name_prefix="evidence-bench"
@@ -335,6 +340,7 @@ class TaskService:
                     Path(result.provenance_dir),
                     workspace_id=run["workspace_id"],
                     run_id=run_id,
+                    semantic_pending=self.knowledge_index_service is not None,
                 )
                 new_documents = [
                     item for item in imported if not item.get("deduplicated")
@@ -351,6 +357,11 @@ class TaskService:
                         ),
                         None,
                     )
+                if self.knowledge_index_service is not None:
+                    for document in new_documents:
+                        self.knowledge_index_service.enqueue(
+                            document["id"], "verified_run_article"
+                        )
             except Exception:
                 # Knowledge promotion is a post-analysis convenience. It must never
                 # change or invalidate the completed scientific record.

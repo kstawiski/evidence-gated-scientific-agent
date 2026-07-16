@@ -231,6 +231,12 @@ license, rights status, terms warning, retraction flag, and acquisition status
 exactly. Cite only claims actually
 supported by the locally acquired text; use search_acquired_article for bounded
 passage retrieval and treat abstract_only as abstract evidence, not full text.
+After the protocol is locked, selected instance-local knowledge may also expose
+search_knowledge_visuals. Use it only to select relevant exact rasters. The tool's
+descriptor hit is not evidence and Qwen must never interpret its pixels, labels,
+trends, or values. Report only the returned raster identifier, hash, source URL,
+and why Gemma inspection is needed; the controller routes pixels exclusively to
+Gemma and later supplies Gemma's structured observations.
 An identifier or citation that merely appears in a retrieved page's bibliography
 is a lead, not a verified source record: do not say it was retrieved, verified, or
 read unless a tool separately returned that record or its content. Prefer direct
@@ -405,6 +411,11 @@ leave url null for that record. For every artifact-backed SourceRecord also leav
 full_text_status, local_pdf_path, and local_markdown_path null; those acquisition
 fields apply only to external literature records with canonical URLs. Literature
 evidence uses url and leaves artifact_path null.
+For knowledge_visuals, descriptor matches and raster filenames are retrieval
+metadata, not scientific interpretation. Use only matching structured observations
+from gemma_input_visual_evidence. Classify a claim derived from visible content as
+observed, preserve the observation's concerns and limitations, and cite the exact
+run-local knowledge visual source_url. Never claim that Qwen inspected an image.
 For an acquired PubMed source, copy the acquisition tool's pmid, pmcid, doi,
 citekey, license, rights_status, terms_warning, retracted, local_pdf_path, local_markdown_path, and
 full_text_status into the

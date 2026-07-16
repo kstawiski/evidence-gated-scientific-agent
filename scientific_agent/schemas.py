@@ -90,6 +90,7 @@ class KnowledgePassageEvidence(BaseModel):
     document_id: str
     title: str
     chunk_id: str
+    chunk_ordinal: int = Field(ge=0)
     char_start: int = Field(ge=0)
     char_end: int = Field(ge=0)
     content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -102,6 +103,24 @@ class KnowledgePassageEvidence(BaseModel):
     document_text_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
     document_original_path: str
     document_original_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class KnowledgeVisualEvidence(BaseModel):
+    knowledge_visual_id: str = Field(pattern=r"^kvp-[0-9a-f]{24}$")
+    document_id: str = Field(pattern=r"^[0-9a-f]{32}$")
+    visual_id: str = Field(pattern=r"^kv-[0-9a-f]{24}$")
+    title: str = Field(min_length=1, max_length=300)
+    source_type: str = Field(min_length=1, max_length=80)
+    source_label: str = Field(min_length=1, max_length=300)
+    document_filename: str = Field(min_length=1, max_length=180)
+    document_original_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    visual_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_url: str = Field(min_length=1, max_length=4_096)
+    artifact_path: str = Field(min_length=1, max_length=4_096)
+    artifact_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    snapshot_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    retrieved_at: str
+    retrieval_method: Literal["visual_descriptor"]
 
 
 class TaskSpec(BaseModel):
@@ -583,6 +602,7 @@ class RetrievalEvidence(BaseModel):
         default=None, pattern=r"^[0-9a-f]{64}$"
     )
     knowledge_passages: list[KnowledgePassageEvidence] = Field(default_factory=list)
+    knowledge_visuals: list[KnowledgeVisualEvidence] = Field(default_factory=list)
 
 
 class ComputationRecord(BaseModel):

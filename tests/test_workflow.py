@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 import json
 import threading
 from pathlib import Path
@@ -16,6 +17,7 @@ from scientific_agent.orchestrator import (
     _final_run_status,
     _is_presentation_only_repair,
     _load_ancestor_protocol_artifacts,
+    _load_retrieval_compat,
     _ensure_declared_display_mentions,
     _fallback_evidence_packet,
     _merge_computation_evidence,
@@ -33,6 +35,7 @@ from scientific_agent.orchestrator import (
     ResearchBudgetExceeded,
 )
 from scientific_agent.provenance import EventLedger, sha256_file
+from scientific_agent.knowledge import chunk_text
 from scientific_agent.schemas import (
     ArtifactRef,
     CheckSpec,
@@ -42,6 +45,7 @@ from scientific_agent.schemas import (
     Finding,
     MasterPlan,
     LintFinding,
+    KnowledgeVisualEvidence,
     PLAN_AUDIT_CRITERIA,
     PlanAuditChecklist,
     PlanAuditFinding,
@@ -239,6 +243,61 @@ def test_load_ancestor_protocol_artifacts_preserves_full_revision_lineage(tmp_pa
         "root",
     ]
     assert dates == ("2026-07-13", "2026-07-12", "2026-07-11")
+
+
+def test_load_retrieval_compat_reconstructs_legacy_chunk_ordinal(tmp_path):
+    parent = tmp_path / "runs" / "parent"
+    parent.mkdir(parents=True)
+    text_path = parent / "knowledge" / "documents" / ("a" * 32) / "extracted.md"
+    text_path.parent.mkdir(parents=True)
+    text = "A legacy exact passage about progression-free survival."
+    text_path.write_text(text, encoding="utf-8")
+    chunk = chunk_text(text)[0]
+    document_id = "a" * 32
+    chunk_id = (
+        "kc-"
+        + hashlib.sha256(
+            (
+                f"{document_id}:{chunk['ordinal']}:{chunk['char_start']}:"
+                f"{chunk['char_end']}:{chunk['sha256']}"
+            ).encode()
+        ).hexdigest()[:24]
+    )
+    passage_id = "kp-" + "b" * 24
+    payload = {
+        "successful_calls": 1,
+        "tools": ["search_knowledge"],
+        "urls": [f"https://bench.test/{passage_id}"],
+        "retrieval_dates": ["2026-07-15"],
+        "artifacts": [str(text_path)],
+        "knowledge_snapshot_sha256": "c" * 64,
+        "knowledge_passages": [
+            {
+                "passage_id": passage_id,
+                "document_id": document_id,
+                "title": "Legacy source",
+                "chunk_id": chunk_id,
+                "char_start": chunk["char_start"],
+                "char_end": chunk["char_end"],
+                "content_sha256": sha256_file(text_path),
+                "chunk_sha256": chunk["sha256"],
+                "source_url": f"https://bench.test/{passage_id}",
+                "artifact_path": str(parent / "knowledge" / "passages" / f"{passage_id}.md"),
+                "artifact_sha256": "d" * 64,
+                "document_filename": "legacy.md",
+                "document_text_path": str(text_path),
+                "document_text_sha256": sha256_file(text_path),
+                "document_original_path": str(parent / "knowledge" / "original.md"),
+                "document_original_sha256": "e" * 64,
+            }
+        ],
+    }
+    evidence_path = parent / "retrieval_evidence.json"
+    evidence_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    evidence = _load_retrieval_compat(evidence_path, parent)
+
+    assert evidence.knowledge_passages[0].chunk_ordinal == 0
 
 
 def _plan(label):
@@ -2710,6 +2769,94 @@ async def test_source_images_are_reviewed_only_by_gemma_and_cached_by_hash(
     assert audit["qwen_image_inputs"] == 0
     assert audit["batches_attempted"] == 1
     assert audit["batches_succeeded"] == 1
+
+
+@pytest.mark.anyio
+async def test_selected_knowledge_visuals_are_bounded_and_sent_only_to_gemma(
+    tmp_path, monkeypatch
+):
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    run_dir = tmp_path / "run"
+    visual_dir = run_dir / "knowledge" / "visuals"
+    visual_dir.mkdir(parents=True)
+    visuals = []
+    for index in range(orchestrator_module.MAX_INPUT_VISUALS + 2):
+        knowledge_visual_id = f"kvp-{index:024x}"
+        path = visual_dir / f"{knowledge_visual_id}.png"
+        Image.new("RGB", (32, 24), color=(index, 80, 120)).save(path)
+        digest = sha256_file(path)
+        visuals.append(
+            KnowledgeVisualEvidence(
+                knowledge_visual_id=knowledge_visual_id,
+                document_id=f"{index:032x}",
+                visual_id=f"kv-{index:024x}",
+                title=f"Selected visual {index}",
+                source_type="primary_study",
+                source_label=f"page {index + 1}",
+                document_filename=f"source-{index}.pdf",
+                document_original_sha256="a" * 64,
+                visual_sha256=digest,
+                source_url=(
+                    f"https://bench.test/api/runs/r1/knowledge/visuals/"
+                    f"{knowledge_visual_id}"
+                ),
+                artifact_path=str(path),
+                artifact_sha256=digest,
+                snapshot_sha256="b" * 64,
+                retrieved_at="2026-07-16T12:00:00+00:00",
+                retrieval_method="visual_descriptor",
+            )
+        )
+    settings = Settings(workspace=workspace)
+    calls = []
+
+    async def fake_request(endpoint, **kwargs):
+        calls.append((endpoint, kwargs))
+        return VisualEvidenceReport(
+            observations=[
+                VisualEvidenceObservation(
+                    artifact_path=visual_id,
+                    observed_content="A scientific raster is visible.",
+                    scientific_interpretation=(
+                        "The visible content can inform an evidence-bounded report."
+                    ),
+                )
+                for visual_id in kwargs["payload"]["visual_input_order"]
+            ]
+        )
+
+    monkeypatch.setattr(
+        "scientific_agent.orchestrator.request_structured", fake_request
+    )
+    report = await orchestrator_module._review_input_visual_evidence(
+        settings,
+        _visual_review_planning(),
+        ComputationEvidence(),
+        "Qwen requested Gemma inspection but made no pixel observations.",
+        run_dir,
+        knowledge_visuals=tuple(visuals),
+        live_dir=run_dir / "live",
+    )
+
+    assert calls
+    assert all(call[0] is settings.gemma for call in calls)
+    sent_paths = [path for _, call in calls for path in call["image_paths"]]
+    assert sent_paths == [Path(item.artifact_path) for item in visuals[:20]]
+    assert sum(len(call["payload"]["visual_inputs"]) for _, call in calls) == 20
+    assert all(
+        item["source"] == "selected_knowledge_visual"
+        for _, call in calls
+        for item in call["payload"]["visual_inputs"]
+    )
+    assert len(report.observations) == 20
+    assert all(
+        item.source_url in " ".join(report.unreviewed_requests)
+        for item in visuals[20:]
+    )
+    audit = json.loads((run_dir / "gemma_input_visual_review.json").read_text())
+    assert audit["visual_critic"] == "Gemma"
+    assert audit["qwen_image_inputs"] == 0
 
 
 def _visual_review_planning():

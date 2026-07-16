@@ -331,22 +331,27 @@ sha256sum -c SHA256SUMS</pre>
           <div><span class="eyebrow">Instance-local evidence</span><h2>Knowledge library</h2><p id="knowledge-stats">Loading…</p></div>
           <button id="knowledge-library-close" class="icon-button" type="button" aria-label="Close knowledge library">×</button>
         </header>
+        <div class="knowledge-routing-note">
+          <div><strong>Evidence-preserving semantic retrieval</strong><span id="knowledge-index-summary">Loading index activity…</span></div>
+          <p><b>Qwen</b> describes exact text passages for retrieval. <b>Gemma</b> receives actual extracted images only and describes visible content. These model outputs help find material; the hash-verified source passage or image remains the evidence.</p>
+        </div>
         <div class="knowledge-library-grid">
           <aside>
             <form id="knowledge-upload-form" class="knowledge-card-form">
-              <h3>Add a document</h3>
-              <label>File<input id="knowledge-upload-file" type="file" required></label>
-              <label>Title<input id="knowledge-upload-title" maxlength="300" required></label>
+              <h3>Add documents</h3>
+              <label>Files<input id="knowledge-upload-file" type="file" multiple required></label>
+              <label>Title override (one file only)<input id="knowledge-upload-title" maxlength="300" placeholder="Otherwise derived from filename"></label>
               <label>Source type<select id="knowledge-upload-source-type"><option value="primary_study">Primary study</option><option value="review">Review</option><option value="guideline">Guideline</option><option value="documentation">Documentation</option><option value="dataset">Dataset</option><option value="web_page">Web page</option><option value="other" selected>Other</option></select></label>
               <label>Canonical URL<input id="knowledge-upload-url" type="url" maxlength="2000" placeholder="https://…"></label>
               <label>Tags<input id="knowledge-upload-tags" maxlength="1000" placeholder="oncology, methods"></label>
               <label>Description<textarea id="knowledge-upload-description" rows="3" maxlength="4000"></textarea></label>
-              <button class="primary-button" type="submit">Extract and index</button>
+              <p class="knowledge-form-help">Files are extracted and hashed immediately. Semantic indexing waits behind active scientific runs and may be cancelled without replacing the current published generation.</p>
+              <button class="primary-button" type="submit">Upload and queue indexing</button>
             </form>
             <form id="knowledge-search-form" class="knowledge-card-form">
               <h3>Test retrieval</h3>
-              <label>Lexical query<input id="knowledge-search-query" minlength="2" maxlength="1000" required></label>
-              <button type="submit">Search enabled documents</button>
+              <label>Scientific query<input id="knowledge-search-query" minlength="2" maxlength="1000" required></label>
+              <button type="submit">Search passages and figures</button>
               <div id="knowledge-search-results" class="knowledge-search-results"></div>
             </form>
           </aside>
@@ -355,9 +360,33 @@ sha256sum -c SHA256SUMS</pre>
               <div><label for="knowledge-filter">Filter catalog</label><input id="knowledge-filter" type="search" placeholder="Title, tag, type…"></div>
               <div><label><input id="knowledge-show-retired" type="checkbox"> Show history</label><button id="knowledge-reindex-all" type="button">Reindex enabled</button></div>
             </div>
-            <div id="knowledge-catalog" class="knowledge-catalog" aria-live="polite"></div>
+            <div class="knowledge-management-grid">
+              <div id="knowledge-catalog" class="knowledge-catalog" aria-live="polite"></div>
+              <aside class="knowledge-activity">
+                <section>
+                  <header><div><span class="eyebrow">Live queue</span><h3>Index activity</h3></div><small>Scientific runs have priority</small></header>
+                  <div id="knowledge-jobs" class="knowledge-jobs" aria-live="polite"></div>
+                </section>
+                <section>
+                  <header><div><span class="eyebrow">Exact artifacts</span><h3>Visual gallery</h3></div></header>
+                  <p id="knowledge-visual-help">Choose “Figures” on a document or a visual search result. Every preview is served from the hash-verified stored image.</p>
+                  <div id="knowledge-visual-gallery" class="knowledge-visual-gallery"></div>
+                </section>
+              </aside>
+            </div>
           </main>
         </div>
+      </section>
+    </dialog>
+    <dialog id="knowledge-visual-preview-dialog" class="knowledge-visual-preview-dialog">
+      <section>
+        <header>
+          <div><span class="eyebrow">Hash-verified visual artifact</span><h2 id="knowledge-visual-preview-title">Visual preview</h2></div>
+          <button id="knowledge-visual-preview-close" class="icon-button" type="button" aria-label="Close visual preview">×</button>
+        </header>
+        <p id="knowledge-visual-preview-meta"></p>
+        <div><img id="knowledge-visual-preview-image" alt="Knowledge visual preview"></div>
+        <footer><span>Gemma may describe this exact image for retrieval; inspect the image itself as evidence.</span><a id="knowledge-visual-preview-download" class="download-button" href="#">Open original ↓</a></footer>
       </section>
     </dialog>
     <div class="toast-region" id="toast-region" aria-live="polite"></div>

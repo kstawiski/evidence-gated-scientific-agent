@@ -521,6 +521,16 @@ def test_browser_ui_uses_structured_dom_without_inner_html():
     assert 'document.createElement(local?.markdown ? "button" : "a")' in script
     assert 'request.open("PUT"' in script
     assert 'id="requested-output-options"' in page
+    assert 'id="knowledge-index-summary"' in page
+    assert 'id="knowledge-jobs"' in page
+    assert 'id="knowledge-visual-gallery"' in page
+    assert 'id="knowledge-visual-preview-dialog"' in page
+    assert 'id="knowledge-upload-file" type="file" multiple' in page
+    assert 'api("/api/knowledge/search/visuals"' in script
+    assert "/events`)" in script
+    assert "scheduleKnowledgePolling" in script
+    assert "Qwen text → Gemma actual images only" in script
+    assert 'for (const [index, file] of files.entries())' in script
     assert ".run-facts dd { white-space: normal; overflow-wrap: anywhere; }" in style
     assert ".task-panel.is-locked .mcp-options input:disabled + span" in style
 

@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import signal
 import shutil
 import sqlite3
 import subprocess
@@ -28,12 +29,16 @@ MAX_ARCHIVE_TOTAL_BYTES = 128 * 1024 * 1024
 MAX_COMPRESSION_RATIO = 200
 MAX_SEARCH_LIMIT = 20
 MAX_SEARCH_TERMS = 24
+RRF_K = 60
+MAX_SEMANTIC_TEXT_CHUNKS = 240
 CHUNK_TARGET_CHARS = 1_600
 CHUNK_OVERLAP_CHARS = 240
 EXTRACTOR_VERSION = "evidence-bench-extractor-v1"
 INDEX_VERSION = "fts5-unicode61-diacritics2-chunker-v1"
+SEMANTIC_INDEX_VERSION = "descriptor-fts5-v1"
 DOCUMENT_ID = re.compile(r"^[0-9a-f]{32}$")
 PASSAGE_ID = re.compile(r"^kp-[0-9a-f]{24}$")
+KNOWLEDGE_VISUAL_ID = re.compile(r"^kvp-[0-9a-f]{24}$")
 TOKEN = re.compile(r"[^\W_]{2,}", re.UNICODE)
 SOURCE_TYPES = {
     "primary_study",
@@ -44,6 +49,17 @@ SOURCE_TYPES = {
     "web_page",
     "other",
 }
+DIRECT_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".tif", ".tiff"}
+TEXT_SEARCH_LIMITATIONS = [
+    "Retrieval uses lexical matching over source text and, when available, "
+    "model-generated search descriptors. Descriptors select exact original "
+    "chunks but are not themselves evidence; no hit is not proof of absence."
+]
+VISUAL_SEARCH_LIMITATIONS = [
+    "Visual retrieval uses model-generated descriptors only to select exact "
+    "visual assets; descriptor text is not evidence.",
+    "Returned visual assets require direct inspection; no hit is not proof of absence.",
+]
 DOCUMENT_COLUMNS = (
     "id",
     "generation_group_id",
@@ -182,19 +198,48 @@ def _extract_office(path: Path, suffix: str) -> str:
 
 def _extract_pdf(path: Path, staging: Path) -> str:
     output = staging / "pdftotext.txt"
+    stderr_path = staging / "pdftotext.stderr"
+    command = [
+        "/usr/bin/prlimit",
+        "--as=1073741824",
+        "--nproc=128",
+        "--cpu=180",
+        f"--fsize={MAX_EXTRACTED_BYTES}",
+        "--",
+        "/usr/bin/pdftotext",
+        "-layout",
+        str(path),
+        str(output),
+    ]
     try:
-        completed = subprocess.run(
-            ["/usr/bin/pdftotext", "-layout", str(path), str(output)],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            timeout=180,
-            check=False,
-            env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"},
-        )
-    except (OSError, subprocess.TimeoutExpired) as exc:
+        with stderr_path.open("xb") as stderr_handle:
+            process = subprocess.Popen(
+                command,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=stderr_handle,
+                start_new_session=True,
+                env={"PATH": "/usr/bin:/bin", "LANG": "C.UTF-8"},
+            )
+            try:
+                return_code = process.wait(timeout=185)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.wait(timeout=10)
+                raise KnowledgeError("PDF extraction timed out") from None
+    except KnowledgeError:
+        raise
+    except OSError as exc:
         raise KnowledgeError(f"PDF extraction failed ({type(exc).__name__})") from exc
-    if completed.returncode != 0 or not output.is_file():
+    # Never load or expose unbounded tool diagnostics. RLIMIT_FSIZE bounds the
+    # underlying file; this read cap keeps error handling memory-bounded too.
+    if stderr_path.is_file():
+        with stderr_path.open("rb") as handle:
+            handle.read(8_192)
+    if return_code != 0 or not output.is_file():
         raise KnowledgeError("PDF extraction failed")
     if output.stat().st_size > MAX_EXTRACTED_BYTES:
         raise KnowledgeError("PDF extracted text exceeds the size limit")
@@ -403,7 +448,111 @@ class KnowledgeLibrary:
                 );
                 CREATE INDEX IF NOT EXISTS idx_knowledge_acquisition_document
                     ON acquisition_events(document_id, acquired_at);
+                CREATE TABLE IF NOT EXISTS semantic_descriptors (
+                    id TEXT PRIMARY KEY,
+                    document_id TEXT NOT NULL REFERENCES documents(id),
+                    source_kind TEXT NOT NULL,
+                    chunk_id TEXT REFERENCES chunks(id),
+                    visual_id TEXT,
+                    source_sha256 TEXT NOT NULL,
+                    search_text_sha256 TEXT NOT NULL,
+                    model TEXT NOT NULL,
+                    limitations TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(document_id, source_kind, chunk_id, visual_id)
+                );
+                CREATE VIRTUAL TABLE IF NOT EXISTS semantic_descriptor_fts USING fts5(
+                    search_text,
+                    descriptor_id UNINDEXED,
+                    chunk_id UNINDEXED,
+                    document_id UNINDEXED,
+                    tokenize='unicode61 remove_diacritics 2'
+                );
+                CREATE TABLE IF NOT EXISTS visual_assets (
+                    id TEXT PRIMARY KEY,
+                    document_id TEXT NOT NULL REFERENCES documents(id),
+                    path TEXT NOT NULL,
+                    sha256 TEXT NOT NULL,
+                    source_label TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    UNIQUE(document_id, sha256, source_label)
+                );
+                CREATE TABLE IF NOT EXISTS index_jobs (
+                    id TEXT PRIMARY KEY,
+                    document_id TEXT NOT NULL REFERENCES documents(id),
+                    previous_document_id TEXT REFERENCES documents(id),
+                    operation TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    error_type TEXT,
+                    attempt INTEGER NOT NULL DEFAULT 0,
+                    created TEXT NOT NULL,
+                    updated TEXT NOT NULL,
+                    started TEXT,
+                    finished TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_index_jobs_queue
+                    ON index_jobs(status, created);
+                CREATE TABLE IF NOT EXISTS index_job_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id TEXT NOT NULL REFERENCES index_jobs(id),
+                    status TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    actor TEXT NOT NULL,
+                    created TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_index_job_events
+                    ON index_job_events(job_id, id);
                 """
+            )
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(documents)").fetchall()
+            }
+            migrations = {
+                "published": "INTEGER NOT NULL DEFAULT 1",
+                "semantic_status": "TEXT NOT NULL DEFAULT 'not_requested'",
+                "semantic_index_sha256": "TEXT",
+                "semantic_metadata": "TEXT NOT NULL DEFAULT '{}'",
+                "semantic_updated_at": "TEXT",
+            }
+            for name, declaration in migrations.items():
+                if name not in columns:
+                    connection.execute(
+                        f"ALTER TABLE documents ADD COLUMN {name} {declaration}"
+                    )
+            # Interrupted pre-v0.4 indexing may have left multiple candidates. Keep
+            # the newest inspectable candidate and retire older unpublished rows
+            # before enforcing the single-candidate invariant.
+            pending_groups = connection.execute(
+                "SELECT generation_group_id FROM documents WHERE published=0 "
+                "AND semantic_status='pending' AND retired_at IS NULL "
+                "AND deleted_at IS NULL "
+                "GROUP BY generation_group_id HAVING COUNT(*) > 1"
+            ).fetchall()
+            now = utc_now()
+            for group in pending_groups:
+                stale = connection.execute(
+                    "SELECT id FROM documents WHERE generation_group_id=? "
+                    "AND published=0 AND semantic_status='pending' "
+                    "AND retired_at IS NULL AND deleted_at IS NULL "
+                    "ORDER BY generation DESC, created_at DESC, id DESC",
+                    (group["generation_group_id"],),
+                ).fetchall()[1:]
+                for row in stale:
+                    connection.execute(
+                        "UPDATE documents SET semantic_status='failed', retired_at=?, "
+                        "updated_at=?, etag=etag+1 WHERE id=?",
+                        (now, now, row["id"]),
+                    )
+            connection.execute(
+                "DROP INDEX IF EXISTS idx_knowledge_one_pending_generation"
+            )
+            connection.execute(
+                "CREATE UNIQUE INDEX idx_knowledge_one_pending_generation "
+                "ON documents(generation_group_id) WHERE published=0 "
+                "AND semantic_status='pending' AND retired_at IS NULL "
+                "AND deleted_at IS NULL"
             )
 
     @staticmethod
@@ -424,14 +573,23 @@ class KnowledgeLibrary:
     def _document(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
         value = dict(row)
         value["enabled"] = bool(value["enabled"])
+        value["published"] = bool(value.get("published", 1))
         value["tags"] = json.loads(value["tags"])
-        value["status"] = (
+        value["semantic_metadata"] = json.loads(value.get("semantic_metadata") or "{}")
+        lifecycle_status = (
             "deleted"
             if value["deleted_at"]
             else "retired"
             if value["retired_at"]
             else "ready"
         )
+        if lifecycle_status == "ready" and not value["published"]:
+            lifecycle_status = (
+                "index_failed"
+                if value.get("semantic_status") == "failed"
+                else "indexing"
+            )
+        value["status"] = lifecycle_status
         return value
 
     def list_documents(self, *, include_retired: bool = False) -> list[dict[str, Any]]:
@@ -519,6 +677,7 @@ class KnowledgeLibrary:
         doi: str | None = None,
         rights_status: str | None = None,
         extracted_text_override: str | None = None,
+        semantic_pending: bool = False,
     ) -> dict[str, Any]:
         name = _safe_filename(filename)
         clean_title = " ".join(title.split()).strip()
@@ -543,12 +702,23 @@ class KnowledgeLibrary:
                 raise KnowledgeError("knowledge file is empty")
             staged_source.chmod(0o600)
             if extracted_text_override is None:
-                text, extractor = extract_document(staged_source, staging)
+                if staged_source.suffix.casefold() in DIRECT_IMAGE_SUFFIXES:
+                    if not semantic_pending:
+                        raise KnowledgeError(
+                            "direct images require semantic indexing before publication"
+                        )
+                    text = ""
+                    extractor = "image-metadata-only"
+                else:
+                    text, extractor = extract_document(staged_source, staging)
             else:
                 text = extracted_text_override.replace("\r\n", "\n").replace("\r", "\n")
                 extractor = "controller-verified-markdown"
             encoded = text.encode("utf-8")
-            if not text.strip() or len(encoded) > MAX_EXTRACTED_BYTES:
+            image_metadata_only = extractor == "image-metadata-only"
+            if (not text.strip() and not image_metadata_only) or len(
+                encoded
+            ) > MAX_EXTRACTED_BYTES:
                 raise KnowledgeError("verified extracted text is empty or too large")
             staged_text = staging / "extracted.txt"
             staged_text.write_bytes(encoded)
@@ -561,10 +731,12 @@ class KnowledgeLibrary:
                     """
                     SELECT * FROM documents
                     WHERE retired_at IS NULL AND deleted_at IS NULL
-                      AND (content_sha256=? OR original_sha256=?)
+                      AND (original_sha256=? OR (
+                            content_sha256=? AND extracted_bytes>0 AND ?>0
+                      ))
                     ORDER BY created_at DESC LIMIT 1
                     """,
-                    (content_sha, original_sha),
+                    (original_sha, content_sha, len(encoded)),
                 ).fetchone()
                 if duplicate is not None:
                     result = self._document(duplicate)
@@ -592,10 +764,12 @@ class KnowledgeLibrary:
                         """
                         SELECT id FROM documents
                         WHERE retired_at IS NULL AND deleted_at IS NULL
-                          AND (content_sha256=? OR original_sha256=?)
+                          AND (original_sha256=? OR (
+                                content_sha256=? AND extracted_bytes>0 AND ?>0
+                          ))
                         ORDER BY created_at DESC LIMIT 1
                         """,
-                        (content_sha, original_sha),
+                        (original_sha, content_sha, len(encoded)),
                     ).fetchone()
                     if concurrent_duplicate is not None:
                         concurrent_duplicate_id = str(concurrent_duplicate["id"])
@@ -605,7 +779,7 @@ class KnowledgeLibrary:
                                 """
                                 SELECT * FROM documents
                                 WHERE canonical_key=? AND retired_at IS NULL
-                                  AND deleted_at IS NULL
+                                  AND deleted_at IS NULL AND published=1
                                 ORDER BY generation DESC LIMIT 1
                                 """,
                                 (canonical_key,),
@@ -619,7 +793,7 @@ class KnowledgeLibrary:
                             else uuid.uuid4().hex
                         )
                         generation = int(previous["generation"]) + 1 if previous else 1
-                        if previous is not None:
+                        if previous is not None and not semantic_pending:
                             cursor = connection.execute(
                                 "UPDATE documents SET retired_at=?, updated_at=?, "
                                 "etag=etag+1 WHERE id=? AND retired_at IS NULL",
@@ -629,6 +803,13 @@ class KnowledgeLibrary:
                                 raise KnowledgeError(
                                     "knowledge library changed; retry the upload"
                                 )
+                            connection.execute(
+                                "UPDATE documents SET semantic_status='failed', "
+                                "retired_at=?, updated_at=?, etag=etag+1 "
+                                "WHERE generation_group_id=? AND published=0 "
+                                "AND retired_at IS NULL AND deleted_at IS NULL",
+                                (now, now, group_id),
+                            )
                         self._insert_document(
                             connection,
                             (
@@ -665,6 +846,13 @@ class KnowledgeLibrary:
                                 1,
                             ),
                         )
+                        if semantic_pending:
+                            connection.execute(
+                                "UPDATE documents SET published=0, "
+                                "semantic_status='pending', semantic_updated_at=? "
+                                "WHERE id=?",
+                                (now, document_id),
+                            )
                         for item in chunks:
                             connection.execute(
                                 "INSERT INTO chunks VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -682,6 +870,11 @@ class KnowledgeLibrary:
                                 "INSERT INTO knowledge_fts(content, chunk_id, document_id) VALUES (?, ?, ?)",
                                 (item["content"], item["id"], document_id),
                             )
+            except sqlite3.IntegrityError as exc:
+                shutil.rmtree(destination, ignore_errors=True)
+                raise KnowledgeError(
+                    "a semantic index candidate already exists for this document generation"
+                ) from exc
             except Exception:
                 shutil.rmtree(destination, ignore_errors=True)
                 raise
@@ -726,6 +919,7 @@ class KnowledgeLibrary:
         canonical_url: str | None = None,
         etag: int,
         origin_type: str = "metadata_revision",
+        semantic_pending: bool = False,
     ) -> dict[str, Any]:
         current = self.get_document(document_id, include_retired=False)
         if current["etag"] != etag:
@@ -755,6 +949,7 @@ class KnowledgeLibrary:
                 doi=current["doi"],
                 rights_status=current["rights_status"],
                 extracted_text_override=extracted.read_text(encoding="utf-8"),
+                semantic_pending=semantic_pending,
             )
         if result.get("deduplicated"):
             # Identical content is expected for metadata-only generations. Force a
@@ -769,6 +964,7 @@ class KnowledgeLibrary:
                 canonical_url=canonical_url,
                 etag=etag,
                 origin_type=origin_type,
+                semantic_pending=semantic_pending,
             )
         return result
 
@@ -783,6 +979,7 @@ class KnowledgeLibrary:
         canonical_url: str | None,
         etag: int,
         origin_type: str,
+        semantic_pending: bool = False,
     ) -> dict[str, Any]:
         if current["etag"] != etag:
             raise KnowledgeError("knowledge document changed; reload before editing")
@@ -820,13 +1017,30 @@ class KnowledgeLibrary:
         try:
             with self._connection() as connection:
                 connection.execute("BEGIN IMMEDIATE")
-                cursor = connection.execute(
-                    "UPDATE documents SET retired_at=?, updated_at=?, etag=etag+1 WHERE id=? AND etag=? AND retired_at IS NULL",
-                    (now, now, current["id"], etag),
-                )
-                if cursor.rowcount != 1:
-                    raise KnowledgeError(
-                        "knowledge document changed; reload before editing"
+                if semantic_pending:
+                    observed = connection.execute(
+                        "SELECT etag FROM documents WHERE id=? AND etag=? "
+                        "AND retired_at IS NULL AND deleted_at IS NULL AND published=1",
+                        (current["id"], etag),
+                    ).fetchone()
+                    if observed is None:
+                        raise KnowledgeError(
+                            "knowledge document changed; reload before editing"
+                        )
+                else:
+                    cursor = connection.execute(
+                        "UPDATE documents SET retired_at=?, updated_at=?, etag=etag+1 WHERE id=? AND etag=? AND retired_at IS NULL",
+                        (now, now, current["id"], etag),
+                    )
+                    if cursor.rowcount != 1:
+                        raise KnowledgeError(
+                            "knowledge document changed; reload before editing"
+                        )
+                    connection.execute(
+                        "UPDATE documents SET semantic_status='failed', retired_at=?, "
+                        "updated_at=?, etag=etag+1 WHERE generation_group_id=? "
+                        "AND published=0 AND retired_at IS NULL AND deleted_at IS NULL",
+                        (now, now, current["generation_group_id"]),
                     )
                 values = (
                     new_id,
@@ -870,6 +1084,12 @@ class KnowledgeLibrary:
                     1,
                 )
                 self._insert_document(connection, values)
+                if semantic_pending:
+                    connection.execute(
+                        "UPDATE documents SET published=0, "
+                        "semantic_status='pending', semantic_updated_at=? WHERE id=?",
+                        (now, new_id),
+                    )
                 for item in chunks:
                     connection.execute(
                         "INSERT INTO chunks VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -887,9 +1107,21 @@ class KnowledgeLibrary:
                         "INSERT INTO knowledge_fts(content, chunk_id, document_id) VALUES (?, ?, ?)",
                         (item["content"], item["id"], new_id),
                     )
+        except sqlite3.IntegrityError as exc:
+            shutil.rmtree(destination, ignore_errors=True)
+            raise KnowledgeError(
+                "a semantic index candidate already exists for this document generation"
+            ) from exc
         except Exception:
             shutil.rmtree(destination, ignore_errors=True)
             raise
+        for asset in self.visual_assets(current["id"]):
+            self.register_visual_asset(
+                new_id,
+                Path(asset["path"]),
+                source_label=asset["source_label"],
+                sha256=asset["sha256"],
+            )
         return self.get_document(new_id)
 
     def delete(self, document_id: str, etag: int) -> None:
@@ -908,7 +1140,9 @@ class KnowledgeLibrary:
                     "knowledge document changed; reload before deleting"
                 )
 
-    def reindex(self, document_id: str, etag: int) -> dict[str, Any]:
+    def reindex(
+        self, document_id: str, etag: int, *, semantic_pending: bool = False
+    ) -> dict[str, Any]:
         current = self.get_document(document_id, include_retired=False)
         return self._clone_generation(
             current,
@@ -919,12 +1153,23 @@ class KnowledgeLibrary:
             canonical_url=None,
             etag=etag,
             origin_type="reindex",
+            semantic_pending=semantic_pending,
         )
 
-    def reindex_all(self) -> list[dict[str, Any]]:
+    def reindex_all(
+        self, *, enabled_only: bool = False, semantic_pending: bool = False
+    ) -> list[dict[str, Any]]:
         results = []
         for document in self.list_documents():
-            results.append(self.reindex(document["id"], document["etag"]))
+            if not document["published"] or (enabled_only and not document["enabled"]):
+                continue
+            results.append(
+                self.reindex(
+                    document["id"],
+                    document["etag"],
+                    semantic_pending=semantic_pending,
+                )
+            )
         return results
 
     def chunks(self, document_id: str, limit: int = 200) -> list[dict[str, Any]]:
@@ -935,6 +1180,861 @@ class KnowledgeLibrary:
                 (document_id, min(max(limit, 1), 1_000)),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def semantic_source_chunks(self, document_id: str) -> list[dict[str, Any]]:
+        """Return immutable source chunks that a text indexer may describe.
+
+        Descriptor text is never returned here: the model must be grounded in the
+        exact extracted source, and publication later verifies every source hash.
+        """
+
+        self.get_document(document_id)
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT id, ordinal, content, sha256 FROM chunks "
+                "WHERE document_id=? ORDER BY ordinal",
+                (document_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def register_visual_asset(
+        self,
+        document_id: str,
+        path: Path,
+        *,
+        source_label: str,
+        sha256: str | None = None,
+    ) -> dict[str, Any]:
+        """Copy a controller-extracted image into durable, document-local storage."""
+
+        document = self.get_document(document_id)
+        if document["published"] or document["semantic_status"] != "pending":
+            raise KnowledgeError(
+                "visual registration requires an unpublished pending successor"
+            )
+        source = path.resolve()
+        label = " ".join(source_label.split()).strip()
+        if not label or len(label) > 300:
+            raise KnowledgeError("visual source label must be 1-300 characters")
+        if path.is_symlink() or not source.is_file():
+            raise KnowledgeError("visual asset must be a regular file")
+        observed_hash = sha256_file(source)
+        if sha256 is not None and observed_hash != sha256:
+            raise KnowledgeError("visual asset hash does not match its source")
+        visual_id = (
+            "kv-"
+            + hashlib.sha256(
+                f"{document_id}:{observed_hash}:{label}".encode()
+            ).hexdigest()[:24]
+        )
+        destination_root = self.documents_dir / document_id / "visual-assets"
+        destination_root.mkdir(mode=0o700, exist_ok=True)
+        suffix = source.suffix.casefold()
+        if not re.fullmatch(r"\.[a-z0-9]{1,10}", suffix):
+            suffix = ".bin"
+        destination = destination_root / f"{visual_id}{suffix}"
+        with self._connection() as connection:
+            existing = connection.execute(
+                "SELECT * FROM visual_assets WHERE id=?", (visual_id,)
+            ).fetchone()
+            if existing is not None:
+                return self._visual_asset(existing)
+        temporary = destination.with_suffix(destination.suffix + ".tmp")
+        try:
+            with source.open("rb") as reader, temporary.open("xb") as writer:
+                shutil.copyfileobj(reader, writer, length=1024 * 1024)
+            temporary.chmod(0o600)
+            if sha256_file(temporary) != observed_hash:
+                raise KnowledgeError("visual asset changed while being registered")
+            os.replace(temporary, destination)
+            with self._connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                current = connection.execute(
+                    "SELECT published, semantic_status FROM documents WHERE id=? "
+                    "AND retired_at IS NULL AND deleted_at IS NULL",
+                    (document_id,),
+                ).fetchone()
+                if (
+                    current is None
+                    or bool(current["published"])
+                    or current["semantic_status"] != "pending"
+                ):
+                    raise KnowledgeError(
+                        "visual registration lost its pending-generation precondition"
+                    )
+                connection.execute(
+                    "INSERT OR IGNORE INTO visual_assets "
+                    "(id, document_id, path, sha256, source_label, created_at) "
+                    "VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        visual_id,
+                        document_id,
+                        str(destination.relative_to(self.root)),
+                        observed_hash,
+                        label,
+                        utc_now(),
+                    ),
+                )
+        finally:
+            temporary.unlink(missing_ok=True)
+        return self.visual_assets(document_id, visual_id=visual_id)[0]
+
+    def _visual_asset(self, row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+        item = dict(row)
+        path = (self.root / item["path"]).resolve()
+        if (
+            path.is_symlink()
+            or not path.is_file()
+            or self.root not in path.parents
+            or sha256_file(path) != item["sha256"]
+        ):
+            raise KnowledgeError("visual asset integrity validation failed")
+        return {
+            "id": item["id"],
+            "path": str(path),
+            "sha256": item["sha256"],
+            "source_label": item["source_label"],
+        }
+
+    def visual_assets(
+        self, document_id: str, *, visual_id: str | None = None
+    ) -> list[dict[str, Any]]:
+        self.get_document(document_id)
+        with self._connection() as connection:
+            if visual_id is None:
+                rows = connection.execute(
+                    "SELECT * FROM visual_assets WHERE document_id=? ORDER BY id",
+                    (document_id,),
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM visual_assets WHERE document_id=? AND id=?",
+                    (document_id, visual_id),
+                ).fetchall()
+        return [self._visual_asset(row) for row in rows]
+
+    @staticmethod
+    def _semantic_text(value: Any, field: str, maximum: int) -> str:
+        text = " ".join(str(value or "").split()).strip()
+        if not text or len(text) > maximum or any(ord(char) < 32 for char in text):
+            raise KnowledgeError(f"invalid semantic {field}")
+        return text
+
+    def apply_semantic_index(
+        self,
+        document_id: str,
+        *,
+        text_entries: list[dict[str, Any]],
+        visual_entries: list[dict[str, Any]],
+        metadata: dict[str, Any],
+        expected_etag: int | None = None,
+        expected_previous_document_id: str | None = None,
+        expected_job_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Validate and atomically publish model-generated search descriptors.
+
+        The FTS table receives descriptor search text, but evidence retrieval always
+        resolves its exact chunk ID back to the immutable original source chunk.
+        """
+
+        document = self.get_document(document_id)
+        try:
+            metadata_json = canonical_json(metadata)
+        except (TypeError, ValueError) as exc:
+            raise KnowledgeError("semantic metadata must be JSON serializable") from exc
+        if len(metadata_json.encode("utf-8")) > 64 * 1024:
+            raise KnowledgeError("semantic metadata is too large")
+        chunks = {item["id"]: item for item in self.semantic_source_chunks(document_id)}
+        expected_text_entries = min(len(chunks), MAX_SEMANTIC_TEXT_CHUNKS)
+        if len(text_entries) != expected_text_entries:
+            raise KnowledgeError(
+                "semantic text entries must cover every selected source chunk"
+            )
+        normalized_text: list[dict[str, str]] = []
+        seen_chunks: set[str] = set()
+        for raw in text_entries:
+            chunk_id = str(raw.get("chunk_id") or "")
+            source = chunks.get(chunk_id)
+            if source is None or chunk_id in seen_chunks:
+                raise KnowledgeError("semantic text entry has an invalid chunk ID")
+            if raw.get("source_sha256") != source["sha256"]:
+                raise KnowledgeError("semantic text entry source hash is stale")
+            search_text = self._semantic_text(
+                raw.get("search_text"), "search text", 12_000
+            )
+            model = self._semantic_text(raw.get("model"), "model", 200)
+            seen_chunks.add(chunk_id)
+            normalized_text.append(
+                {
+                    "chunk_id": chunk_id,
+                    "source_sha256": source["sha256"],
+                    "search_text": search_text,
+                    "model": model,
+                }
+            )
+        assets = {item["id"]: item for item in self.visual_assets(document_id)}
+        if not chunks and not assets:
+            raise KnowledgeError(
+                "image-only documents require at least one exact visual asset"
+            )
+        if len(visual_entries) != len(assets):
+            raise KnowledgeError(
+                "semantic visual entries must cover every registered visual asset"
+            )
+        normalized_visual: list[dict[str, str]] = []
+        seen_visuals: set[str] = set()
+        for raw in visual_entries:
+            visual_id = str(raw.get("visual_id") or "")
+            asset = assets.get(visual_id)
+            if asset is None or visual_id in seen_visuals:
+                raise KnowledgeError("semantic visual entry has an invalid visual ID")
+            if raw.get("source_sha256") != asset["sha256"]:
+                raise KnowledgeError("semantic visual entry source hash is stale")
+            search_text = self._semantic_text(
+                raw.get("search_text"), "search text", 12_000
+            )
+            model = self._semantic_text(raw.get("model"), "model", 200)
+            limitations = " ".join(str(raw.get("limitations") or "").split()).strip()
+            if len(limitations) > 4_000:
+                raise KnowledgeError("semantic visual limitations are too large")
+            seen_visuals.add(visual_id)
+            normalized_visual.append(
+                {
+                    "visual_id": visual_id,
+                    "source_sha256": asset["sha256"],
+                    "search_text": search_text,
+                    "model": model,
+                    "limitations": limitations,
+                }
+            )
+        required_metadata = {
+            "text_chunks_indexed",
+            "text_chunks_total",
+            "text_coverage",
+            "visual_assets_indexed",
+            "visual_assets_total",
+            "routing",
+            "text_model",
+            "visual_model",
+        }
+        if not required_metadata.issubset(metadata):
+            raise KnowledgeError("semantic metadata is missing required audit fields")
+        if (
+            metadata["text_chunks_indexed"] != len(normalized_text)
+            or metadata["text_chunks_total"] != len(chunks)
+            or metadata["visual_assets_indexed"] != len(normalized_visual)
+            or metadata["visual_assets_total"] != len(assets)
+        ):
+            raise KnowledgeError("semantic metadata counts do not match source records")
+        expected_coverage = (
+            "complete" if len(normalized_text) == len(chunks) else "partial"
+        )
+        if metadata["text_coverage"] != expected_coverage:
+            raise KnowledgeError("semantic metadata text coverage is inconsistent")
+        expected_routing = {
+            "text": "qwen",
+            "visual": "gemma-only-if-images",
+        }
+        if metadata["routing"] != expected_routing:
+            raise KnowledgeError(
+                "semantic routing must be exactly qwen for text and gemma-only-if-images"
+            )
+        if any(entry["model"] != metadata["text_model"] for entry in normalized_text):
+            raise KnowledgeError("semantic text model metadata is inconsistent")
+        if normalized_visual:
+            if any(
+                entry["model"] != metadata["visual_model"]
+                for entry in normalized_visual
+            ):
+                raise KnowledgeError("semantic visual model metadata is inconsistent")
+        elif metadata["visual_model"] is not None and metadata["visual_model"] != "":
+            raise KnowledgeError(
+                "visual model must be empty when no visuals were indexed"
+            )
+        index_payload = {
+            "version": SEMANTIC_INDEX_VERSION,
+            "document_id": document_id,
+            "content_sha256": document["content_sha256"],
+            "text_entries": normalized_text,
+            "visual_entries": normalized_visual,
+            "metadata": metadata,
+        }
+        index_sha256 = hashlib.sha256(
+            canonical_json(index_payload).encode("utf-8")
+        ).hexdigest()
+        now = utc_now()
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = connection.execute(
+                "SELECT * FROM documents WHERE id=? AND retired_at IS NULL "
+                "AND deleted_at IS NULL",
+                (document_id,),
+            ).fetchone()
+            if (
+                current is None
+                or current["content_sha256"] != document["content_sha256"]
+            ):
+                raise KnowledgeError(
+                    "semantic index candidate changed before publication"
+                )
+            if bool(current["published"]):
+                raise KnowledgeError(
+                    "published knowledge documents cannot be indexed in place; "
+                    "create an unpublished pending successor"
+                )
+            if expected_etag is not None and current["etag"] != expected_etag:
+                raise KnowledgeError("semantic index candidate precondition failed")
+            if (
+                expected_previous_document_id is not None
+                and current["supersedes_id"] != expected_previous_document_id
+            ):
+                raise KnowledgeError("semantic predecessor precondition failed")
+            if expected_job_id is not None:
+                index_job = connection.execute(
+                    "SELECT id FROM index_jobs WHERE id=? AND document_id=? "
+                    "AND status='running'",
+                    (expected_job_id, document_id),
+                ).fetchone()
+                if index_job is None:
+                    raise KnowledgeError(
+                        "semantic index job publication precondition failed"
+                    )
+            if current["semantic_status"] != "pending":
+                raise KnowledgeError("semantic index candidate is not publishable")
+            if current["supersedes_id"] is None:
+                predecessor = connection.execute(
+                    "SELECT id FROM documents WHERE generation_group_id=? "
+                    "AND published=1 AND retired_at IS NULL AND deleted_at IS NULL",
+                    (current["generation_group_id"],),
+                ).fetchone()
+                if predecessor is not None:
+                    raise KnowledgeError(
+                        "semantic index candidate has a stale generation base"
+                    )
+            else:
+                predecessor = connection.execute(
+                    "SELECT id FROM documents WHERE id=? AND generation_group_id=? "
+                    "AND published=1 AND retired_at IS NULL AND deleted_at IS NULL",
+                    (
+                        current["supersedes_id"],
+                        current["generation_group_id"],
+                    ),
+                ).fetchone()
+                if predecessor is None:
+                    raise KnowledgeError(
+                        "semantic index candidate has a stale generation base"
+                    )
+            # Revalidate source rows inside the publication transaction.
+            observed_chunks = {
+                row["id"]: row["sha256"]
+                for row in connection.execute(
+                    "SELECT id, sha256 FROM chunks WHERE document_id=?", (document_id,)
+                ).fetchall()
+            }
+            submitted_chunks = {
+                item["chunk_id"]: item["source_sha256"] for item in normalized_text
+            }
+            if any(
+                observed_chunks.get(chunk_id) != source_sha256
+                for chunk_id, source_sha256 in submitted_chunks.items()
+            ):
+                raise KnowledgeError(
+                    "semantic source chunks changed before publication"
+                )
+            observed_visuals = {
+                row["id"]: row["sha256"]
+                for row in connection.execute(
+                    "SELECT id, sha256 FROM visual_assets WHERE document_id=?",
+                    (document_id,),
+                ).fetchall()
+            }
+            submitted_visuals = {
+                item["visual_id"]: item["source_sha256"]
+                for item in normalized_visual
+            }
+            if observed_visuals != submitted_visuals:
+                raise KnowledgeError(
+                    "semantic visual assets changed before publication"
+                )
+            connection.execute(
+                "DELETE FROM semantic_descriptor_fts WHERE document_id=?",
+                (document_id,),
+            )
+            connection.execute(
+                "DELETE FROM semantic_descriptors WHERE document_id=?", (document_id,)
+            )
+            for entry in normalized_text:
+                descriptor_id = (
+                    "ks-"
+                    + hashlib.sha256(
+                        f"{document_id}:text:{entry['chunk_id']}".encode()
+                    ).hexdigest()[:24]
+                )
+                connection.execute(
+                    "INSERT INTO semantic_descriptors VALUES (?, ?, 'text', ?, NULL, ?, ?, ?, ?, ?)",
+                    (
+                        descriptor_id,
+                        document_id,
+                        entry["chunk_id"],
+                        entry["source_sha256"],
+                        hashlib.sha256(entry["search_text"].encode()).hexdigest(),
+                        entry["model"],
+                        "",
+                        now,
+                    ),
+                )
+                connection.execute(
+                    "INSERT INTO semantic_descriptor_fts "
+                    "(search_text, descriptor_id, chunk_id, document_id) VALUES (?, ?, ?, ?)",
+                    (
+                        entry["search_text"],
+                        descriptor_id,
+                        entry["chunk_id"],
+                        document_id,
+                    ),
+                )
+            for entry in normalized_visual:
+                descriptor_id = (
+                    "ks-"
+                    + hashlib.sha256(
+                        f"{document_id}:visual:{entry['visual_id']}".encode()
+                    ).hexdigest()[:24]
+                )
+                connection.execute(
+                    "INSERT INTO semantic_descriptors VALUES (?, ?, 'visual', NULL, ?, ?, ?, ?, ?, ?)",
+                    (
+                        descriptor_id,
+                        document_id,
+                        entry["visual_id"],
+                        entry["source_sha256"],
+                        hashlib.sha256(entry["search_text"].encode()).hexdigest(),
+                        entry["model"],
+                        entry["limitations"],
+                        now,
+                    ),
+                )
+                connection.execute(
+                    "INSERT INTO semantic_descriptor_fts "
+                    "(search_text, descriptor_id, chunk_id, document_id) "
+                    "VALUES (?, ?, NULL, ?)",
+                    (entry["search_text"], descriptor_id, document_id),
+                )
+            connection.execute(
+                "UPDATE documents SET retired_at=?, updated_at=?, etag=etag+1 "
+                "WHERE generation_group_id=? AND published=1 AND id<>? "
+                "AND retired_at IS NULL AND deleted_at IS NULL",
+                (now, now, current["generation_group_id"], document_id),
+            )
+            cursor = connection.execute(
+                "UPDATE documents SET published=1, semantic_status='ready', "
+                "semantic_index_sha256=?, semantic_metadata=?, index_version=?, "
+                "semantic_updated_at=?, updated_at=?, etag=etag+1 WHERE id=?",
+                (
+                    index_sha256,
+                    metadata_json,
+                    f"{INDEX_VERSION}+{SEMANTIC_INDEX_VERSION}:{index_sha256[:16]}",
+                    now,
+                    now,
+                    document_id,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise KnowledgeError("semantic index publication lost its precondition")
+            if expected_job_id is not None:
+                cursor = connection.execute(
+                    "UPDATE index_jobs SET status='succeeded', message=?, "
+                    "error_type=NULL, updated=?, finished=? WHERE id=? "
+                    "AND document_id=? AND status='running'",
+                    (
+                        "Semantic index published",
+                        now,
+                        now,
+                        expected_job_id,
+                        document_id,
+                    ),
+                )
+                if cursor.rowcount != 1:
+                    raise KnowledgeError(
+                        "semantic index job publication lost its precondition"
+                    )
+                self._append_index_event_tx(
+                    connection,
+                    expected_job_id,
+                    "succeeded",
+                    "Semantic index published",
+                    "Controller",
+                )
+        return self.get_document(document_id)
+
+    def mark_semantic_index_failed(
+        self,
+        document_id: str,
+        message: str = "semantic indexing failed",
+        *,
+        expected_etag: int | None = None,
+    ) -> dict[str, Any]:
+        clean_message = " ".join(message.split()).strip()[:4_000]
+        now = utc_now()
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            cursor = connection.execute(
+                "UPDATE documents SET semantic_status='failed', "
+                "semantic_metadata=?, semantic_updated_at=?, updated_at=?, "
+                "etag=etag+1 WHERE id=? AND published=0 "
+                "AND semantic_status='pending' AND retired_at IS NULL "
+                "AND deleted_at IS NULL AND (? IS NULL OR etag=?)",
+                (
+                    canonical_json({"failure": clean_message}),
+                    now,
+                    now,
+                    document_id,
+                    expected_etag,
+                    expected_etag,
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise KnowledgeError(
+                    "semantic index failure update lost its precondition"
+                )
+        return self.get_document(document_id)
+
+    @staticmethod
+    def _index_job(row: sqlite3.Row | dict[str, Any]) -> dict[str, Any]:
+        return dict(row)
+
+    @staticmethod
+    def _append_index_event_tx(
+        connection: sqlite3.Connection,
+        job_id: str,
+        status: str,
+        message: str,
+        actor: str,
+    ) -> None:
+        connection.execute(
+            "INSERT INTO index_job_events (job_id, status, message, actor, created) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (job_id, status, message, actor, utc_now()),
+        )
+
+    def enqueue_index_job(
+        self,
+        document_id: str,
+        operation: str,
+        previous_document_id: str | None = None,
+    ) -> dict[str, Any]:
+        document = self.get_document(document_id)
+        clean_operation = self._semantic_text(operation, "job operation", 80)
+        if previous_document_id is None:
+            previous_document_id = document.get("supersedes_id")
+        elif not DOCUMENT_ID.fullmatch(previous_document_id):
+            raise KnowledgeError("invalid previous knowledge document ID")
+        job_id = uuid.uuid4().hex
+        now = utc_now()
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            existing = connection.execute(
+                "SELECT * FROM index_jobs WHERE document_id=? "
+                "AND status IN ('queued', 'running', 'cancel_requested') "
+                "ORDER BY created DESC LIMIT 1",
+                (document_id,),
+            ).fetchone()
+            if existing is not None:
+                return self._index_job(existing)
+            connection.execute(
+                "INSERT INTO index_jobs VALUES (?, ?, ?, ?, 'queued', ?, NULL, 0, ?, ?, NULL, NULL)",
+                (
+                    job_id,
+                    document_id,
+                    previous_document_id,
+                    clean_operation,
+                    "Waiting for semantic indexing",
+                    now,
+                    now,
+                ),
+            )
+            self._append_index_event_tx(
+                connection, job_id, "queued", "Semantic index job queued", "Controller"
+            )
+        return self.get_index_job(job_id)
+
+    def recover_index_jobs(self) -> int:
+        """Recover interrupted jobs after a controller restart."""
+
+        now = utc_now()
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            interrupted = connection.execute(
+                "SELECT id FROM index_jobs WHERE status='running'"
+            ).fetchall()
+            for row in interrupted:
+                connection.execute(
+                    "UPDATE index_jobs SET status='queued', message=?, updated=?, "
+                    "started=NULL WHERE id=?",
+                    ("Recovered after controller restart", now, row["id"]),
+                )
+                self._append_index_event_tx(
+                    connection,
+                    row["id"],
+                    "queued",
+                    "Recovered interrupted semantic index job",
+                    "Controller",
+                )
+            cancelled = connection.execute(
+                "SELECT id FROM index_jobs WHERE status='cancel_requested'"
+            ).fetchall()
+            for row in cancelled:
+                connection.execute(
+                    "UPDATE index_jobs SET status='cancelled', message=?, updated=?, "
+                    "finished=? WHERE id=?",
+                    ("Cancelled during controller restart", now, now, row["id"]),
+                )
+                self._append_index_event_tx(
+                    connection,
+                    row["id"],
+                    "cancelled",
+                    "Cancellation completed during recovery",
+                    "Controller",
+                )
+        return len(interrupted) + len(cancelled)
+
+    def claim_next_index_job(self) -> dict[str, Any] | None:
+        now = utc_now()
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute(
+                "SELECT * FROM index_jobs WHERE status='queued' "
+                "ORDER BY created, id LIMIT 1"
+            ).fetchone()
+            if row is None:
+                return None
+            cursor = connection.execute(
+                "UPDATE index_jobs SET status='running', message=?, attempt=attempt+1, "
+                "started=?, finished=NULL, updated=? WHERE id=? AND status='queued'",
+                ("Semantic indexing started", now, now, row["id"]),
+            )
+            if cursor.rowcount != 1:
+                return None
+            self._append_index_event_tx(
+                connection,
+                row["id"],
+                "running",
+                "Semantic indexing started",
+                "Controller",
+            )
+            claimed = connection.execute(
+                "SELECT * FROM index_jobs WHERE id=?", (row["id"],)
+            ).fetchone()
+        return self._index_job(claimed)
+
+    def get_index_job(self, job_id: str) -> dict[str, Any]:
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT * FROM index_jobs WHERE id=?", (job_id,)
+            ).fetchone()
+        if row is None:
+            raise KeyError("knowledge index job not found")
+        return self._index_job(row)
+
+    def list_index_jobs(
+        self, status: str | None = None, limit: int = 100
+    ) -> list[dict[str, Any]]:
+        bounded = min(max(limit, 1), 1_000)
+        with self._connection() as connection:
+            if status is None:
+                rows = connection.execute(
+                    "SELECT * FROM index_jobs ORDER BY created DESC LIMIT ?", (bounded,)
+                ).fetchall()
+            else:
+                rows = connection.execute(
+                    "SELECT * FROM index_jobs WHERE status=? "
+                    "ORDER BY created DESC LIMIT ?",
+                    (status, bounded),
+                ).fetchall()
+        return [self._index_job(row) for row in rows]
+
+    def append_index_event(
+        self,
+        job_id: str,
+        status: str,
+        message: str,
+        actor: str = "Controller",
+    ) -> dict[str, Any]:
+        clean_status = self._semantic_text(status, "event status", 40)
+        clean_message = " ".join(message.split()).strip()[:4_000]
+        clean_actor = self._semantic_text(actor, "event actor", 100)
+        with self._connection() as connection:
+            if (
+                connection.execute(
+                    "SELECT 1 FROM index_jobs WHERE id=?", (job_id,)
+                ).fetchone()
+                is None
+            ):
+                raise KeyError("knowledge index job not found")
+            self._append_index_event_tx(
+                connection, job_id, clean_status, clean_message, clean_actor
+            )
+            row = connection.execute(
+                "SELECT * FROM index_job_events WHERE id=last_insert_rowid()"
+            ).fetchone()
+        return dict(row)
+
+    def list_index_events(self, job_id: str, after_id: int = 0) -> list[dict[str, Any]]:
+        with self._connection() as connection:
+            rows = connection.execute(
+                "SELECT * FROM index_job_events WHERE job_id=? AND id>? "
+                "ORDER BY id LIMIT 1000",
+                (job_id, max(after_id, 0)),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def update_index_job(
+        self,
+        job_id: str,
+        status: str,
+        message: str,
+        actor: str = "Controller",
+        error_type: str | None = None,
+    ) -> dict[str, Any]:
+        valid_statuses = {
+            "running",
+            "cancel_requested",
+            "succeeded",
+            "failed",
+            "cancelled",
+        }
+        if status not in valid_statuses:
+            raise KnowledgeError("invalid knowledge index job status")
+        clean_message = " ".join(message.split()).strip()[:4_000]
+        clean_error = " ".join((error_type or "").split()).strip()[:200] or None
+        now = utc_now()
+        finished = now if status in {"succeeded", "failed", "cancelled"} else None
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = connection.execute(
+                "SELECT status FROM index_jobs WHERE id=?", (job_id,)
+            ).fetchone()
+            if current is None:
+                raise KeyError("knowledge index job not found")
+            transitions = {
+                "running": {"running", "cancel_requested", "succeeded", "failed"},
+                "cancel_requested": {"cancelled"},
+            }
+            if status not in transitions.get(current["status"], set()):
+                raise KnowledgeError(
+                    f"invalid knowledge index job transition: "
+                    f"{current['status']} -> {status}"
+                )
+            cursor = connection.execute(
+                "UPDATE index_jobs SET status=?, message=?, error_type=?, "
+                "updated=?, finished=? WHERE id=? AND status=?",
+                (
+                    status,
+                    clean_message,
+                    clean_error,
+                    now,
+                    finished,
+                    job_id,
+                    current["status"],
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise KnowledgeError("knowledge index job transition lost its race")
+            self._append_index_event_tx(
+                connection, job_id, status, clean_message, actor
+            )
+        return self.get_index_job(job_id)
+
+    def request_cancel_index_job(self, job_id: str) -> dict[str, Any]:
+        now = utc_now()
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            current = connection.execute(
+                "SELECT * FROM index_jobs WHERE id=?", (job_id,)
+            ).fetchone()
+            if current is None:
+                raise KeyError("knowledge index job not found")
+            if current["status"] == "queued":
+                next_status = "cancelled"
+                message = "Cancelled before indexing started"
+                finished = now
+            elif current["status"] == "running":
+                next_status = "cancel_requested"
+                message = "Cancellation requested"
+                finished = None
+            else:
+                return self._index_job(current)
+            cursor = connection.execute(
+                "UPDATE index_jobs SET status=?, message=?, updated=?, finished=? "
+                "WHERE id=? AND status=?",
+                (
+                    next_status,
+                    message,
+                    now,
+                    finished,
+                    job_id,
+                    current["status"],
+                ),
+            )
+            if cursor.rowcount != 1:
+                raise KnowledgeError("knowledge index cancellation lost its race")
+            self._append_index_event_tx(
+                connection, job_id, next_status, message, "Controller"
+            )
+            updated = connection.execute(
+                "SELECT * FROM index_jobs WHERE id=?", (job_id,)
+            ).fetchone()
+        return self._index_job(updated)
+
+    def retry_index_job(self, job_id: str) -> dict[str, Any]:
+        now = utc_now()
+        with self._connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            job = connection.execute(
+                "SELECT * FROM index_jobs WHERE id=? AND status IN ('failed', 'cancelled')",
+                (job_id,),
+            ).fetchone()
+            if job is None:
+                raise KnowledgeError(
+                    "only failed or cancelled index jobs can be retried"
+                )
+            document = connection.execute(
+                "SELECT * FROM documents WHERE id=?", (job["document_id"],)
+            ).fetchone()
+            if document is None or document["retired_at"] or document["deleted_at"]:
+                raise KnowledgeError(
+                    "stale semantic index candidates cannot be retried"
+                )
+            if (
+                not bool(document["published"])
+                and document["semantic_status"] == "failed"
+            ):
+                try:
+                    connection.execute(
+                        "UPDATE documents SET semantic_status='pending', "
+                        "semantic_metadata='{}', semantic_updated_at=?, updated_at=?, "
+                        "etag=etag+1 WHERE id=? AND semantic_status='failed'",
+                        (now, now, document["id"]),
+                    )
+                except sqlite3.IntegrityError as exc:
+                    raise KnowledgeError(
+                        "a newer semantic index candidate is already pending"
+                    ) from exc
+            cursor = connection.execute(
+                "UPDATE index_jobs SET status='queued', message=?, error_type=NULL, "
+                "updated=?, started=NULL, finished=NULL WHERE id=? "
+                "AND status IN ('failed', 'cancelled')",
+                ("Retry queued", now, job_id),
+            )
+            if cursor.rowcount != 1:
+                raise KnowledgeError("knowledge index retry lost its race")
+            self._append_index_event_tx(
+                connection,
+                job_id,
+                "queued",
+                "Semantic index retry queued",
+                "Controller",
+            )
+        return self.get_index_job(job_id)
 
     def acquisition_history(self, document_id: str) -> list[dict[str, Any]]:
         self.get_document(document_id)
@@ -990,7 +2090,8 @@ class KnowledgeLibrary:
         with self._connection() as connection:
             if document_ids is None:
                 rows = connection.execute(
-                    "SELECT * FROM documents WHERE enabled=1 AND retired_at IS NULL AND deleted_at IS NULL ORDER BY id"
+                    "SELECT * FROM documents WHERE enabled=1 AND published=1 "
+                    "AND retired_at IS NULL AND deleted_at IS NULL ORDER BY id"
                 ).fetchall()
             elif not requested:
                 rows = []
@@ -1001,7 +2102,9 @@ class KnowledgeLibrary:
                     raise KnowledgeError("invalid knowledge document selection")
                 placeholders = ",".join("?" for _ in requested)
                 rows = connection.execute(
-                    f"SELECT * FROM documents WHERE id IN ({placeholders}) AND enabled=1 AND retired_at IS NULL AND deleted_at IS NULL ORDER BY id",
+                    f"SELECT * FROM documents WHERE id IN ({placeholders}) "
+                    "AND enabled=1 AND published=1 AND retired_at IS NULL "
+                    "AND deleted_at IS NULL ORDER BY id",
                     requested,
                 ).fetchall()
                 if len(rows) != len(requested):
@@ -1070,12 +2173,14 @@ class KnowledgeLibrary:
         ids = sorted(document_map)
         placeholders = ",".join("?" for _ in ids)
         bounded_limit = min(max(limit, 1), MAX_SEARCH_LIMIT)
+        candidate_limit = min(MAX_SEARCH_LIMIT * 4, max(20, bounded_limit * 4))
         with self._connection() as connection:
-            rows = connection.execute(
+            lexical_rows = connection.execute(
                 f"""
                 SELECT c.*, d.title, d.source_type, d.canonical_url,
                        d.filename, d.original_sha256, d.index_version,
-                       bm25(knowledge_fts) AS rank
+                       bm25(knowledge_fts) AS rank,
+                       'lexical' AS retrieval_method
                 FROM knowledge_fts
                 JOIN chunks c ON c.id=knowledge_fts.chunk_id
                 JOIN documents d ON d.id=c.document_id
@@ -1083,8 +2188,53 @@ class KnowledgeLibrary:
                 ORDER BY rank, c.document_id, c.ordinal
                 LIMIT ?
                 """,
-                (fts_query, *ids, bounded_limit),
+                (fts_query, *ids, candidate_limit),
             ).fetchall()
+            descriptor_rows = connection.execute(
+                f"""
+                SELECT c.*, d.title, d.source_type, d.canonical_url,
+                       d.filename, d.original_sha256, d.index_version,
+                       bm25(semantic_descriptor_fts) AS rank,
+                       'semantic_descriptor' AS retrieval_method
+                FROM semantic_descriptor_fts
+                JOIN semantic_descriptors s
+                  ON s.id=semantic_descriptor_fts.descriptor_id
+                 AND s.source_kind='text'
+                JOIN chunks c ON c.id=semantic_descriptor_fts.chunk_id
+                JOIN documents d ON d.id=c.document_id
+                WHERE semantic_descriptor_fts MATCH ?
+                  AND c.document_id IN ({placeholders})
+                  AND d.semantic_status='ready'
+                ORDER BY rank, c.document_id, c.ordinal
+                LIMIT ?
+                """,
+                (fts_query, *ids, candidate_limit),
+            ).fetchall()
+        row_map: dict[str, dict[str, Any]] = {}
+        for method, method_rows in (
+            ("lexical", lexical_rows),
+            ("semantic_descriptor", descriptor_rows),
+        ):
+            for position, row in enumerate(method_rows, start=1):
+                item = row_map.setdefault(
+                    row["id"],
+                    {
+                        **dict(row),
+                        "_rrf_score": 0.0,
+                        "_methods": set(),
+                    },
+                )
+                item["_rrf_score"] += 1.0 / (RRF_K + position)
+                item["_methods"].add(method)
+        rows = sorted(
+            row_map.values(),
+            key=lambda item: (
+                -item["_rrf_score"],
+                -int("lexical" in item["_methods"]),
+                item["document_id"],
+                item["ordinal"],
+            ),
+        )[:bounded_limit]
         verified_documents: dict[str, str] = {}
         passages = []
         for row in rows:
@@ -1118,11 +2268,14 @@ class KnowledgeLibrary:
                     "filename": row["filename"],
                     "original_sha256": row["original_sha256"],
                     "chunk_id": row["id"],
+                    "chunk_ordinal": row["ordinal"],
                     "char_start": row["char_start"],
                     "char_end": row["char_end"],
                     "content_sha256": selected.content_sha256,
                     "chunk_sha256": chunk_hash,
-                    "rank": row["rank"],
+                    "rank": -row["_rrf_score"],
+                    "rrf_score": row["_rrf_score"],
+                    "retrieval_method": "+".join(sorted(row["_methods"])),
                     "untrusted_source_text": content,
                 }
             )
@@ -1130,9 +2283,84 @@ class KnowledgeLibrary:
             "query": query,
             "terms": terms,
             "passages": passages,
-            "limitations": [
-                "Lexical retrieval can miss synonyms or inflected forms; no hit is not proof of absence."
-            ],
+            "limitations": list(TEXT_SEARCH_LIMITATIONS),
+        }
+
+    def search_visuals(
+        self, query: str, snapshot: dict[str, Any], limit: int = 8
+    ) -> dict[str, Any]:
+        """Search visual descriptors and return only hash-verified source assets."""
+
+        validated = KnowledgeSnapshot.model_validate(snapshot)
+        if validated.deployment_id != self.deployment_id:
+            raise KnowledgeError("knowledge snapshot belongs to another deployment")
+        snapshot_base = validated.model_dump(mode="json", exclude={"snapshot_sha256"})
+        if (
+            hashlib.sha256(canonical_json(snapshot_base).encode()).hexdigest()
+            != validated.snapshot_sha256
+        ):
+            raise KnowledgeError("knowledge snapshot integrity check failed")
+        document_map = {item.document_id: item for item in validated.documents}
+        if not document_map:
+            return {
+                "query": query,
+                "terms": [],
+                "visuals": [],
+                "limitations": ["no knowledge documents were selected"],
+            }
+        fts_query, terms = self._fts_query(query)
+        ids = sorted(document_map)
+        placeholders = ",".join("?" for _ in ids)
+        bounded_limit = min(max(limit, 1), MAX_SEARCH_LIMIT)
+        with self._connection() as connection:
+            rows = connection.execute(
+                f"""
+                SELECT v.*, d.title, d.source_type, d.canonical_url,
+                       d.filename, d.original_sha256, d.index_version,
+                       bm25(semantic_descriptor_fts) AS rank
+                FROM semantic_descriptor_fts
+                JOIN semantic_descriptors s
+                  ON s.id=semantic_descriptor_fts.descriptor_id
+                 AND s.source_kind='visual'
+                JOIN visual_assets v ON v.id=s.visual_id
+                JOIN documents d ON d.id=v.document_id
+                WHERE semantic_descriptor_fts MATCH ?
+                  AND v.document_id IN ({placeholders})
+                  AND d.semantic_status='ready'
+                ORDER BY rank, v.document_id, v.id
+                LIMIT ?
+                """,
+                (fts_query, *ids, bounded_limit),
+            ).fetchall()
+        visuals = []
+        for row in rows:
+            selected = document_map[row["document_id"]]
+            if row["index_version"] != selected.index_version:
+                raise KnowledgeError(
+                    "knowledge index generation changed after snapshot"
+                )
+            exact = self._visual_asset(row)
+            visuals.append(
+                {
+                    "document_id": row["document_id"],
+                    "title": row["title"],
+                    "source_type": row["source_type"],
+                    "canonical_url": row["canonical_url"],
+                    "filename": row["filename"],
+                    "original_sha256": row["original_sha256"],
+                    "visual_id": exact["id"],
+                    "path": exact["path"],
+                    "sha256": exact["sha256"],
+                    "source_label": exact["source_label"],
+                    "rank": row["rank"],
+                    "retrieval_method": "visual_descriptor",
+                }
+            )
+        return {
+            "query": query,
+            "terms": terms,
+            "visuals": visuals,
+            "limitations": list(VISUAL_SEARCH_LIMITATIONS),
         }
 
     def stats(self) -> dict[str, Any]:
@@ -1154,6 +2382,7 @@ class KnowledgeLibrary:
         *,
         workspace_id: str,
         run_id: str,
+        semantic_pending: bool = False,
     ) -> list[dict[str, Any]]:
         """Promote only deterministically validated, run-local article copies."""
 
@@ -1252,6 +2481,7 @@ class KnowledgeLibrary:
                         else None
                     ),
                     extracted_text_override=extracted_text,
+                    semantic_pending=semantic_pending,
                 )
             self._record_acquisition(
                 document["id"],
@@ -1369,6 +2599,7 @@ class KnowledgeRetriever:
                         "document_id",
                         "title",
                         "chunk_id",
+                        "chunk_ordinal",
                         "char_start",
                         "char_end",
                         "content_sha256",
@@ -1423,6 +2654,87 @@ class KnowledgeRetriever:
         )
         return result
 
+    def search_knowledge_visuals(
+        self, query: str, limit: int = 8
+    ) -> dict[str, Any]:
+        """Resolve visual-descriptor hits to exact run-local raster evidence.
+
+        Args:
+            query: A concise scientific visual query.
+            limit: Number of exact visual artifacts to return, from 1 through 20.
+        """
+
+        result = self.library.search_visuals(query, self.snapshot, limit)
+        visual_dir = self.run_dir / "knowledge" / "visuals"
+        visual_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
+        citation_root = self.citation_base_url.rsplit("/", 1)[0]
+        records = []
+        artifacts = []
+        for visual in result["visuals"]:
+            source = Path(visual["path"])
+            if (
+                source.is_symlink()
+                or not source.is_file()
+                or sha256_file(source) != visual["sha256"]
+            ):
+                raise KnowledgeError("knowledge visual changed after snapshot")
+            knowledge_visual_id = (
+                "kvp-"
+                + hashlib.sha256(
+                    (
+                        f"{self.snapshot['snapshot_sha256']}:"
+                        f"{visual['document_id']}:{visual['visual_id']}:"
+                        f"{visual['sha256']}"
+                    ).encode()
+                ).hexdigest()[:24]
+            )
+            suffix = source.suffix.casefold()
+            if suffix not in {".png", ".jpg", ".jpeg", ".webp"}:
+                raise KnowledgeError("knowledge visual is not a model-compatible raster")
+            destination = visual_dir / f"{knowledge_visual_id}{suffix}"
+            if destination.exists():
+                if destination.is_symlink() or sha256_file(destination) != visual["sha256"]:
+                    raise KnowledgeError("run-local knowledge visual collision")
+            else:
+                shutil.copy2(source, destination)
+                destination.chmod(0o600)
+            artifact_sha = sha256_file(destination)
+            if artifact_sha != visual["sha256"]:
+                raise KnowledgeError("run-local knowledge visual copy failed integrity")
+            source_url = f"{citation_root}/visuals/{quote(knowledge_visual_id)}"
+            record = {
+                "knowledge_visual_id": knowledge_visual_id,
+                "document_id": visual["document_id"],
+                "visual_id": visual["visual_id"],
+                "title": visual["title"],
+                "source_type": visual["source_type"],
+                "source_label": visual["source_label"],
+                "document_filename": visual["filename"],
+                "document_original_sha256": visual["original_sha256"],
+                "visual_sha256": visual["sha256"],
+                "source_url": source_url,
+                "artifact_path": str(destination),
+                "artifact_sha256": artifact_sha,
+                "snapshot_sha256": self.snapshot["snapshot_sha256"],
+                "retrieved_at": self.retrieved_at,
+                "retrieval_method": visual["retrieval_method"],
+            }
+            records.append(record)
+            artifacts.append(str(destination))
+        return {
+            "query": result["query"],
+            "terms": result["terms"],
+            "visuals": records,
+            "limitations": result["limitations"],
+            "artifacts": artifacts,
+            "snapshot_sha256": self.snapshot["snapshot_sha256"],
+            "instruction_boundary": (
+                "Descriptor prose is not returned as evidence. Qwen must not "
+                "interpret raster pixels; the controller routes exact artifacts "
+                "to Gemma for structured visual observation."
+            ),
+        }
+
 
 def build_knowledge_tools(
     library: KnowledgeLibrary | None,
@@ -1433,4 +2745,8 @@ def build_knowledge_tools(
     if library is None or snapshot is None or not snapshot.get("documents"):
         return [], None
     retriever = KnowledgeRetriever(library, snapshot, run_dir, citation_base_url)
-    return [retriever.list_knowledge_sources, retriever.search_knowledge], retriever
+    return [
+        retriever.list_knowledge_sources,
+        retriever.search_knowledge,
+        retriever.search_knowledge_visuals,
+    ], retriever

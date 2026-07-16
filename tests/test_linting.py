@@ -167,6 +167,24 @@ def test_plan_linter_rejects_invented_input_filename_and_accepts_manifest_name()
     }
 
 
+def test_plan_linter_accepts_task_named_file_that_the_plan_acquires():
+    acquisition_task = task().model_copy(
+        update={
+            "objective": (
+                "Use the managed browser to import the downloaded paper-42158852.pdf."
+            )
+        }
+    )
+    planned = good_plan()
+    planned.required_data = ["paper-42158852.pdf"]
+    planned.steps[0].inputs = ["paper-42158852.pdf"]
+    planned.steps[0].methods = ["Enumerate browser downloads and import the PDF"]
+
+    report = lint_plan(acquisition_task, planned)
+
+    assert "unknown_plan_input_artifact" not in {item.code for item in report.findings}
+
+
 def test_report_validator_requires_known_evidence():
     report = article_report(
         title="Test report",
@@ -330,6 +348,107 @@ def test_report_validator_rejects_overlapping_inline_citation_anchors():
     assert "overlapping_inline_citation_anchors" in {
         item.code for item in validation.findings
     }
+
+
+def test_report_validator_rejects_inline_citation_on_unrelated_sentence():
+    source = SourceRecord(
+        source_id="s1",
+        title="Mammalian taxonomy",
+        url="https://example.com/taxonomy",
+        source_type="documentation",
+        retrieved_at="2026-07-16T00:00:00Z",
+        supporting_passage="Cats are mammals.",
+    )
+    report = article_report(
+        introduction="The intervention improved overall survival.",
+        claims=[
+            ClaimRecord(
+                claim_id="c1",
+                text="Cats are mammals.",
+                claim_type="literature_supported",
+                evidence_refs=["s1"],
+                status=EvidenceStatus.SUPPORTED,
+            )
+        ],
+        sources=[source],
+        inline_citations=[
+            InlineCitation(
+                citation_id="misplaced-citation",
+                section="introduction",
+                anchor_text="The intervention improved overall survival.",
+                source_ids=["s1"],
+                claim_ids=["c1"],
+            )
+        ],
+    )
+    evidence = RetrievalEvidence(
+        successful_calls=1,
+        tools=["brave_web_search"],
+        urls=["https://example.com/taxonomy"],
+        retrieval_dates=["2026-07-16"],
+    )
+
+    validation = validate_report(report, evidence, require_inline_citations=True)
+
+    assert "inline_citation_claim_anchor_mismatch" in {
+        item.code for item in validation.findings
+    }
+
+
+def test_inline_citation_correspondence_accepts_paraphrase_and_numeric_formatting():
+    source = SourceRecord(
+        source_id="s1",
+        title="Bounded evidence",
+        url="https://example.com/evidence",
+        source_type="documentation",
+        retrieved_at="2026-07-16T00:00:00Z",
+        supporting_passage="The source contains the bounded findings.",
+    )
+    evidence = RetrievalEvidence(
+        successful_calls=1,
+        tools=["brave_web_search"],
+        urls=["https://example.com/evidence"],
+        retrieval_dates=["2026-07-16"],
+    )
+    cases = (
+        (
+            "Mortality was lower in the treated cohort after adjustment.",
+            "Adjusted mortality decreased in the treatment cohort.",
+        ),
+        (
+            "Ten-year event incidence was 10.0%.",
+            "At a decade, outcomes occurred in 10% of participants.",
+        ),
+    )
+
+    for index, (anchor, claim_text) in enumerate(cases):
+        claim = ClaimRecord(
+            claim_id=f"c{index}",
+            text=claim_text,
+            claim_type="literature_supported",
+            evidence_refs=["s1"],
+            status=EvidenceStatus.SUPPORTED,
+        )
+        report = article_report(
+            introduction=anchor,
+            claims=[claim],
+            sources=[source],
+            inline_citations=[
+                InlineCitation(
+                    citation_id=f"valid-citation-{index}",
+                    section="introduction",
+                    anchor_text=anchor,
+                    source_ids=["s1"],
+                    claim_ids=[claim.claim_id],
+                )
+            ],
+        )
+
+        validation = validate_report(report, evidence, require_inline_citations=True)
+
+        assert "inline_citation_claim_anchor_mismatch" not in {
+            item.code for item in validation.findings
+        }
 
 
 def test_requested_pptx_must_exist_and_be_structurally_valid(tmp_path):

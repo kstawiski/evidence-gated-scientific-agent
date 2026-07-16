@@ -592,9 +592,16 @@ def score(
                     for claim in literature_claims
                 )
             )
-            rendered = client.download_artifact(detail["id"], "report.md").decode(
-                "utf-8", errors="replace"
-            )
+            try:
+                rendered = (
+                    client.download_artifact(detail["id"], "report.md").decode(
+                        "utf-8", errors="replace"
+                    )
+                    if "report.md" in manifest_paths
+                    else ""
+                )
+            except (OSError, RuntimeError, urllib.error.HTTPError):
+                rendered = ""
             checks["report_links_local_article"] = bool(
                 article
                 and markdown

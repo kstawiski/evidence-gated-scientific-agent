@@ -449,6 +449,32 @@ _GROUNDING_STOPWORDS = {
     "results",
     "study",
 }
+_CITATION_CORRESPONDENCE_STOPWORDS = _GROUNDING_STOPWORDS | {
+    "after",
+    "also",
+    "among",
+    "before",
+    "between",
+    "during",
+    "following",
+    "from",
+    "have",
+    "only",
+    "source",
+    "that",
+    "their",
+    "these",
+    "this",
+    "those",
+    "using",
+    "were",
+    "with",
+    "without",
+}
+_CITATION_NUMBER = re.compile(
+    r"(?<![\w.])(?P<number>[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)"
+    r"(?:[eE][+-]?\d+)?)(?P<percent>\s*%)?(?!(?:\w|[.,]\d))"
+)
 _NUMERIC_CELL = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
 _PRECISE_LITERATURE_NUMBER = re.compile(
     r"(?<![\w.])(?:0\.\d+|\d+(?:\.\d+)?\s*%)(?![\w.])"
@@ -496,6 +522,30 @@ def _terms(text: str) -> set[str]:
 
 def _grounding_terms(text: str) -> set[str]:
     return _terms(text) - _GROUNDING_STOPWORDS
+
+
+def _citation_correspondence_terms(text: str) -> set[str]:
+    """Return conservative content terms for an anchor-to-claim gross check."""
+
+    decomposed = unicodedata.normalize("NFKD", text.casefold())
+    folded = "".join(
+        character for character in decomposed if not unicodedata.combining(character)
+    )
+    return set(_WORD.findall(folded)) - _CITATION_CORRESPONDENCE_STOPWORDS
+
+
+def _citation_correspondence_numbers(text: str) -> set[str]:
+    """Normalize numerical tokens without treating formatting as disagreement."""
+
+    values: set[str] = set()
+    for match in _CITATION_NUMBER.finditer(text):
+        raw = match.group("number").replace(",", ".")
+        try:
+            normalized = format(Decimal(raw).normalize(), "f")
+        except InvalidOperation:
+            continue
+        values.add(normalized + ("%" if match.group("percent") else ""))
+    return values
 
 
 def _equation_operand(value: str) -> str:
@@ -566,6 +616,21 @@ def lint_plan(
             *(output for step in plan.steps for output in step.outputs),
         ]
     }
+    objective_names = {
+        match.group(1).casefold()
+        for match in _PLANNED_INPUT_FILENAME.finditer(task.objective)
+    }
+    acquisition_text = " ".join(
+        [
+            *plan.required_data,
+            *(step.objective for step in plan.steps),
+            *(method for step in plan.steps for method in step.methods),
+        ]
+    ).casefold()
+    declares_acquisition = any(
+        term in acquisition_text
+        for term in ("acquire", "download", "fetch", "import", "retrieve")
+    )
     declared_inputs = [
         *(
             ("required_data", index, item)
@@ -580,7 +645,11 @@ def lint_plan(
     for field, index, value in declared_inputs:
         for match in _PLANNED_INPUT_FILENAME.finditer(value):
             name = match.group(1).casefold()
-            if name in available_names or name in produced_names:
+            if (
+                name in available_names
+                or name in produced_names
+                or (name in objective_names and declares_acquisition)
+            ):
                 continue
             findings.append(
                 LintFinding(
@@ -1501,17 +1570,28 @@ def validate_report(
         os.path.normpath(path) for path in (retrieval.artifacts if retrieval else [])
     }
     knowledge_passages_by_url: dict[str, tuple[Any, str]] = {}
+    knowledge_visuals_by_url: dict[str, Any] = {}
     knowledge_snapshot_documents: dict[str, tuple[str, str]] = {}
-    snapshot_artifact = next(
+    snapshot_record = next(
         (
-            Path(artifact.path)
+            artifact
             for artifact in controller_artifacts
             if Path(artifact.path).name == "knowledge_snapshot.json"
         ),
         None,
     )
+    snapshot_artifact = (
+        Path(snapshot_record.path) if snapshot_record is not None else None
+    )
     if snapshot_artifact is not None:
         try:
+            if (
+                snapshot_artifact.is_symlink()
+                or not snapshot_artifact.is_file()
+                or hashlib.sha256(snapshot_artifact.read_bytes()).hexdigest()
+                != snapshot_record.sha256
+            ):
+                raise ValueError("snapshot artifact hash mismatch")
             snapshot = json.loads(snapshot_artifact.read_text(encoding="utf-8"))
             expected = snapshot.pop("snapshot_sha256")
             observed = hashlib.sha256(
@@ -1548,43 +1628,98 @@ def validate_report(
             expected_document = knowledge_snapshot_documents.get(passage.document_id)
             if expected_document is None:
                 raise ValueError("passage document is absent from the snapshot")
+            if snapshot_artifact is None:
+                raise ValueError("knowledge snapshot artifact is absent")
+            run_root = snapshot_artifact.parent.resolve()
+
+            def verified_run_file(candidate: Path, expected_sha256: str) -> bytes:
+                resolved = candidate.resolve()
+                if (
+                    candidate.is_symlink()
+                    or not candidate.is_file()
+                    or (resolved != run_root and run_root not in resolved.parents)
+                    or os.path.normpath(str(candidate)) not in retrieval_artifacts
+                ):
+                    raise ValueError("knowledge artifact escaped the run directory")
+                content = candidate.read_bytes()
+                if hashlib.sha256(content).hexdigest() != expected_sha256:
+                    raise ValueError("knowledge artifact hash mismatch")
+                return content
+
             artifact_text = path.read_text(encoding="utf-8")
+            if not artifact_text.startswith("---\n"):
+                raise ValueError("knowledge passage frontmatter is absent")
+            header, separator, body = artifact_text[4:].partition("\n---\n\n")
+            if not separator:
+                raise ValueError("knowledge passage frontmatter is malformed")
+            artifact_record: dict[str, Any] = {}
+            for line in header.splitlines():
+                key, delimiter, encoded_value = line.partition(": ")
+                if not delimiter or key in artifact_record:
+                    raise ValueError("knowledge passage frontmatter is malformed")
+                artifact_record[key] = json.loads(encoded_value)
             marker = "# Exact untrusted source passage\n\n"
-            source_text = artifact_text.split(marker, 1)[1]
+            if not body.startswith(marker):
+                raise ValueError("knowledge passage body is malformed")
+            source_text = body[len(marker) :]
             if source_text.endswith("\n"):
                 source_text = source_text[:-1]
-            valid = bool(
-                passage.content_sha256 == expected_document[1]
-                and normalized in retrieval_artifacts
-                and path.is_file()
-                and not path.is_symlink()
-                and hashlib.sha256(path.read_bytes()).hexdigest()
-                == passage.artifact_sha256
-                and hashlib.sha256(source_text.encode("utf-8")).hexdigest()
-                == passage.chunk_sha256
-                and len(source_text) == passage.char_end - passage.char_start
+            artifact_bytes = verified_run_file(path, passage.artifact_sha256)
+            document_bytes = verified_run_file(
+                Path(passage.document_text_path), passage.document_text_sha256
             )
-            for document_path, document_sha, expected_sha in (
-                (
-                    Path(passage.document_text_path),
-                    passage.document_text_sha256,
-                    expected_document[1],
-                ),
-                (
-                    Path(passage.document_original_path),
-                    passage.document_original_sha256,
-                    expected_document[0],
-                ),
-            ):
-                valid = bool(
-                    valid
-                    and os.path.normpath(str(document_path)) in retrieval_artifacts
-                    and document_path.is_file()
-                    and not document_path.is_symlink()
-                    and document_sha == expected_sha
-                    and hashlib.sha256(document_path.read_bytes()).hexdigest()
-                    == document_sha
+            verified_run_file(
+                Path(passage.document_original_path), passage.document_original_sha256
+            )
+            document_text = document_bytes.decode("utf-8")
+            exact_source_text = document_text[passage.char_start : passage.char_end]
+            exact_chunk_sha256 = hashlib.sha256(
+                exact_source_text.encode("utf-8")
+            ).hexdigest()
+            expected_chunk_id = (
+                "kc-"
+                + hashlib.sha256(
+                    (
+                        f"{passage.document_id}:{passage.chunk_ordinal}:"
+                        f"{passage.char_start}:{passage.char_end}:"
+                        f"{exact_chunk_sha256}"
+                    ).encode()
+                ).hexdigest()[:24]
+            )
+            expected_passage_id = (
+                "kp-"
+                + hashlib.sha256(
+                    (
+                        f"{retrieval.knowledge_snapshot_sha256}:"
+                        f"{passage.document_id}:{expected_chunk_id}:"
+                        f"{exact_chunk_sha256}"
+                    ).encode()
+                ).hexdigest()[:24]
+            )
+            valid = bool(
+                artifact_bytes
+                and passage.content_sha256 == expected_document[1]
+                and passage.document_text_sha256 == expected_document[1]
+                and passage.document_original_sha256 == expected_document[0]
+                and passage.char_end <= len(document_text)
+                and source_text == exact_source_text
+                and passage.chunk_sha256 == exact_chunk_sha256
+                and passage.chunk_id == expected_chunk_id
+                and passage.passage_id == expected_passage_id
+                and artifact_record.get("passage_id") == passage.passage_id
+                and artifact_record.get("document_id") == passage.document_id
+                and artifact_record.get("chunk_id") == passage.chunk_id
+                and artifact_record.get("chunk_ordinal") == passage.chunk_ordinal
+                and artifact_record.get("char_start") == passage.char_start
+                and artifact_record.get("char_end") == passage.char_end
+                and artifact_record.get("chunk_sha256") == passage.chunk_sha256
+                and artifact_record.get("source_url") == passage.source_url
+                and _normalize_url(passage.source_url).endswith(
+                    f"/{passage.passage_id}"
                 )
+                and len(source_text) == passage.char_end - passage.char_start
+                and normalized in retrieval_artifacts
+            )
         except (OSError, UnicodeError, IndexError, TypeError, ValueError):
             valid = False
             source_text = ""
@@ -1611,10 +1746,82 @@ def validate_report(
             )
             continue
         knowledge_passages_by_url[normalized_url] = (passage, source_text)
+    for visual in retrieval.knowledge_visuals if retrieval else []:
+        location = f"knowledge_visuals[{visual.knowledge_visual_id}]"
+        path = Path(visual.artifact_path)
+        normalized = os.path.normpath(visual.artifact_path)
+        try:
+            expected_document = knowledge_snapshot_documents.get(visual.document_id)
+            if expected_document is None:
+                raise ValueError("visual document is absent from the snapshot")
+            if snapshot_artifact is None:
+                raise ValueError("knowledge snapshot artifact is absent")
+            run_root = snapshot_artifact.parent.resolve()
+            resolved = path.resolve()
+            expected_visual_id = (
+                "kvp-"
+                + hashlib.sha256(
+                    (
+                        f"{retrieval.knowledge_snapshot_sha256}:"
+                        f"{visual.document_id}:{visual.visual_id}:"
+                        f"{visual.visual_sha256}"
+                    ).encode()
+                ).hexdigest()[:24]
+            )
+            valid = bool(
+                path.is_absolute()
+                and not path.is_symlink()
+                and path.is_file()
+                and run_root in resolved.parents
+                and resolved.parent == (run_root / "knowledge" / "visuals").resolve()
+                and path.suffix.casefold() in {".png", ".jpg", ".jpeg", ".webp"}
+                and normalized in retrieval_artifacts
+                and hashlib.sha256(path.read_bytes()).hexdigest()
+                == visual.artifact_sha256
+                and visual.artifact_sha256 == visual.visual_sha256
+                and visual.document_original_sha256 == expected_document[0]
+                and visual.snapshot_sha256 == retrieval.knowledge_snapshot_sha256
+                and visual.knowledge_visual_id == expected_visual_id
+                and resolved.name.startswith(f"{visual.knowledge_visual_id}.")
+                and _normalize_url(visual.source_url).endswith(
+                    f"/visuals/{visual.knowledge_visual_id}"
+                )
+            )
+        except (OSError, RuntimeError, TypeError, ValueError):
+            valid = False
+        if not valid:
+            findings.append(
+                LintFinding(
+                    code="knowledge_visual_integrity_failed",
+                    location=location,
+                    message=(
+                        "A knowledge visual citation must resolve to exact "
+                        "hash-checked raster bytes copied into this run's immutable "
+                        "snapshot provenance."
+                    ),
+                )
+            )
+            continue
+        normalized_url = _normalize_url(visual.source_url)
+        if normalized_url in knowledge_visuals_by_url:
+            findings.append(
+                LintFinding(
+                    code="duplicate_knowledge_visual_url",
+                    location=location,
+                    message="Knowledge visual URLs must identify exactly one raster.",
+                )
+            )
+            continue
+        knowledge_visuals_by_url[normalized_url] = visual
     acquired_text_by_source: dict[str, str] = {}
     for index, source in enumerate(report.sources):
         knowledge_match = (
             knowledge_passages_by_url.get(_normalize_url(str(source.url)))
+            if source.url is not None
+            else None
+        )
+        knowledge_visual_match = (
+            knowledge_visuals_by_url.get(_normalize_url(str(source.url)))
             if source.url is not None
             else None
         )
@@ -1638,6 +1845,7 @@ def validate_report(
             and source.source_type in {"primary_study", "review"}
             and source.local_markdown_path is None
             and knowledge_match is None
+            and knowledge_visual_match is None
         ):
             findings.append(
                 LintFinding(
@@ -1655,6 +1863,7 @@ def validate_report(
             source.pmid
             and source.local_markdown_path is None
             and knowledge_match is None
+            and knowledge_visual_match is None
         ):
             findings.append(
                 LintFinding(
@@ -1709,7 +1918,12 @@ def validate_report(
                             message="Local literature PDF failed signature or size checks.",
                         )
                     )
-        if source.pmid and source.full_text_status is None and knowledge_match is None:
+        if (
+            source.pmid
+            and source.full_text_status is None
+            and knowledge_match is None
+            and knowledge_visual_match is None
+        ):
             findings.append(
                 LintFinding(
                     code="pubmed_acquisition_status_missing",
@@ -1717,7 +1931,11 @@ def validate_report(
                     message="A cited PubMed record requires an explicit acquisition status.",
                 )
             )
-        if source.pmid and knowledge_match is None:
+        if (
+            source.pmid
+            and knowledge_match is None
+            and knowledge_visual_match is None
+        ):
             try:
                 acquired, _, markdown = load_acquired_article_record(source, retrieval)
                 acquired_text_by_source[source.source_id] = markdown.lower()
@@ -1968,6 +2186,25 @@ def validate_report(
                         ),
                     )
                 )
+            if claim is not None:
+                anchor_terms = _citation_correspondence_terms(citation.anchor_text)
+                claim_terms = _citation_correspondence_terms(claim.text)
+                anchor_numbers = _citation_correspondence_numbers(citation.anchor_text)
+                claim_numbers = _citation_correspondence_numbers(claim.text)
+                if not (anchor_terms & claim_terms or anchor_numbers & claim_numbers):
+                    findings.append(
+                        LintFinding(
+                            code="inline_citation_claim_anchor_mismatch",
+                            location=location,
+                            message=(
+                                f"Citation anchor has no informative lexical or "
+                                f"numerical correspondence with linked claim "
+                                f"{claim_id}. Place the citation on claim-bearing "
+                                "text or correct the claim link; Gemma remains "
+                                "responsible for semantic entailment review."
+                            ),
+                        )
+                    )
     if require_inline_citations:
         for index, claim in enumerate(report.claims):
             external_refs = {
@@ -2359,6 +2596,10 @@ def validate_report(
                         source.url is not None
                         and _normalize_url(str(source.url)) in knowledge_passages_by_url
                     )
+                    or (
+                        source.url is not None
+                        and _normalize_url(str(source.url)) in knowledge_visuals_by_url
+                    )
                     for source in referenced_sources
                 ):
                     findings.append(
@@ -2378,6 +2619,10 @@ def validate_report(
                 or (
                     source.url is not None
                     and _normalize_url(str(source.url)) in knowledge_passages_by_url
+                )
+                or (
+                    source.url is not None
+                    and _normalize_url(str(source.url)) in knowledge_visuals_by_url
                 )
                 for source in referenced_sources
             ):

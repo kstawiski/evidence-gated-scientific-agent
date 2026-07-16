@@ -40,25 +40,42 @@ post-lock Gemma review performs the scientific interpretation.
 ## Storage and retrieval
 
 - SQLite metadata plus FTS5 lexical search using
-  `unicode61 remove_diacritics 2`. Polish inflection and medical synonyms are
-  addressed by multiple bounded query formulations, and recall@k is measured on
-  a checked-in bilingual gold set; an absent hit is a retrieval limitation, never
-  proof that evidence is absent.
+  `unicode61 remove_diacritics 2` is the deterministic baseline. Qwen adds bounded
+  concepts, abbreviations, English/Polish synonyms, entities, and method terms to
+  a separate descriptor index. Reciprocal-rank fusion combines the two ranked
+  lists and favors lexical evidence on an exact tie. A descriptor hit can select
+  only its hash-bound original chunk; descriptor prose is never returned or cited
+  as evidence.
 - Immutable originals and extracted UTF-8 text under `knowledge/documents/<id>/`.
 - Paragraph-aware, overlapping chunks with stable SHA-256 hashes and offsets.
-- Exact lexical retrieval is the deterministic baseline. Qwen can issue multiple
-  synonym/phrase searches through a typed read-only tool; no opaque embedding
-  score is presented as scientific evidence.
+- Qwen receives at most 24 approximately 1,600-character chunks per call and 240
+  stratified chunks per document. Coverage is recorded as complete or partial;
+  missing coverage is visible and never described as proof of absence.
+- Gemma receives only actual uploaded or deterministically extracted raster bytes,
+  at most two images per call. It produces visible/OCR retrieval terms and image
+  limitations. Visual search returns a hash-verified source image for direct human
+  inspection; neither its descriptor nor an OCR guess is textual scientific
+  evidence. Qwen never receives image pixels.
+- After protocol lock, a scientific run may call the typed
+  `search_knowledge_visuals` tool. The controller copies each selected exact
+  raster into that run, recomputes its hash, and records a local citation URL.
+  Gemma reviews those bounded run-local pixels together with other visual
+  evidence; Qwen receives only Gemma's structured observations. Descriptor prose
+  is not returned to either model as evidence, and the combined visual review is
+  capped at 20 images with omissions reported explicitly.
 - TXT, Markdown, CSV/TSV, JSON/YAML, PDF, DOCX, PPTX, and XLSX are accepted through
   bounded, fixed-code extractors. Unsupported or failed extraction is explicit.
-- Document generations are immutable. Metadata edits and re-indexing create a new
-  generation and retire the prior generation; existing runs keep using the exact
-  generation they selected.
+- Document generations are immutable. Metadata edits and re-indexing create one
+  unpublished candidate generation. The prior published generation remains
+  selectable until the candidate is completely indexed and atomically published;
+  a failed, cancelled, stale, or superseded candidate cannot replace it.
 - Logical deletion removes a document from new runs and search while retaining
   immutable bytes needed by existing provenance. Re-imported changed content gets
   a new document ID.
 - PubMed papers successfully acquired and validated during a run are auto-imported
-  after completion. The controller copies the verified PDF/Markdown, deduplicates
+  after completion and queued for the same Qwen text/Gemma raster indexing. The
+  completed scientific run does not wait for that background job. The controller
+  copies the verified PDF/Markdown, deduplicates
   identical content/original hashes, groups changed content by PMID or DOI into a
   new immutable generation, and preserves access/rights metadata. Every successful
   acquisition is recorded once per source and run, including its workspace, run,
@@ -75,8 +92,10 @@ The Knowledge Library dialog supports:
 3. source download, extracted-text preview, chunk inspection, and verified run
    import history;
 4. metadata edit and enable/disable;
-5. deterministic re-index of one or all documents;
-6. retrieval test showing exact ranked passages and offsets;
+5. asynchronous re-index of one or all enabled documents with queue position,
+   model routing, progress events, cancellation, and retry;
+6. lexical/Qwen-hybrid retrieval tests showing exact ranked passages, offsets,
+   method, and limitations, plus a separate Gemma visual-search gallery;
 7. logical deletion with a provenance-retention warning;
 8. per-run document selection, defaulting to all enabled documents.
 
@@ -87,6 +106,9 @@ Every search is filtered to the snapshot's exact document-generation IDs and
 index versions, then re-verifies text and chunk hashes before returning a hit.
 FTS and metadata changes commit in one SQLite transaction; a crash cannot expose a
 partially indexed generation. Optimistic revision tokens reject clobbering edits.
+Index jobs are persistent and restart-recoverable. They pause before and between
+model batches while an audited scientific run is active, and busy local models use
+the configured capacity queue rather than being misclassified as timed out.
 
 ## Security and privacy
 
@@ -95,7 +117,9 @@ partially indexed generation. Optimistic revision tokens reject clobbering edits
 - Archive-based formats are read without extracting paths to disk.
 - Archive member count, total uncompressed bytes, individual member bytes, and
   compression ratio are bounded before content is decoded.
-- PDF conversion uses a fixed `pdftotext` invocation with no shell.
+- PDF text conversion and page rasterization use fixed commands with no shell,
+  process groups, wall/CPU/address-space/process/file-size limits, bounded outputs,
+  and forced termination on limit breach.
 - Search is parameterized and FTS query terms are controller-generated.
 - Retrieved text is carried only in an `untrusted_source_text` JSON field, never
   concatenated with controller instructions. Source text is escaped as data and
@@ -130,6 +154,16 @@ partially indexed generation. Optimistic revision tokens reject clobbering edits
   leave a partially searchable active generation.
 - Retrieval evaluation reports recall@k for English/Polish spelling, diacritics,
   inflection, abbreviations, and medical synonyms.
+- The checked-in live benchmark must report hybrid Recall@10 at least 0.90,
+  nDCG@10 at least 0.75, at least +0.10 absolute Recall@10 on synonym/Polish
+  queries with a seeded bootstrap interval excluding zero, no more than 0.01
+  exact-query recall regression, and zero text no-answer/adversarial false
+  positives. The visual gate uses scientific structures without naming the chart
+  type in the title and requires Recall@5 at least 0.85, top-1 accuracy at least
+  0.67, nDCG@5 at least 0.75, and zero visual no-answer false positives. Generated
+  descriptor prose must never be returned as evidence. If Qwen enrichment does
+  not clear the incremental gate, lexical retrieval remains authoritative and the
+  descriptor layer is not presented as adding value.
 
 Run citations resolve to hash-checked files below that run's provenance directory,
 not the mutable library API. A completed bundle therefore keeps the cited passage

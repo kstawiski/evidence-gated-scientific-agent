@@ -455,6 +455,15 @@ class WorkspaceStore:
             ).fetchone()
         return row is not None
 
+    def has_any_active_run(self) -> bool:
+        """Return whether scientific work should retain local-model priority."""
+
+        with self._connection() as connection:
+            row = connection.execute(
+                "SELECT 1 FROM runs WHERE status IN ('queued','running','cancel_requested') LIMIT 1"
+            ).fetchone()
+        return row is not None
+
     def create_run(
         self,
         workspace_id: str,

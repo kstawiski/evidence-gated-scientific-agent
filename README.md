@@ -147,10 +147,18 @@ The service exposes:
   version, enable/disable, reindex, and test-search the instance-local knowledge
   library, including exact chunk and verified run-acquisition history; run
   submission snapshots the selected immutable generations;
+- `GET /api/knowledge/jobs`, `.../jobs/{id}/events`, `POST
+  .../jobs/{id}/{cancel|retry}` — inspect and control persistent background Qwen
+  text/Gemma visual indexing without making the current published generation
+  unavailable;
+- `POST /api/knowledge/search/visuals`, `GET
+  /api/knowledge/{document_id}/visuals` — search and preview hash-verified images
+  that Gemma indexed from actual uploaded or deterministically extracted pixels;
 - `GET /api/runs/{run_id}/knowledge/passages/{passage_id}` and
-  `.../knowledge/documents/{document_id}/{text|original}` — inspect the exact
-  cited passage, full extracted text, and immutable original preserved in that
-  run;
+  `.../knowledge/documents/{document_id}/{text|original}`, plus
+  `.../knowledge/visuals/{knowledge_visual_id}` — inspect the exact cited
+  passage, full extracted text, immutable original, or hash-verified raster
+  preserved in that run;
 - `GET /api/runs/{run_id}/events`, `.../events/stream` — cursor-based event log
   plus an SSE live stream with polling fallback;
 - `GET /api/workspaces/{id}/file-preview?filename=...` — bounded UTF-8 preview

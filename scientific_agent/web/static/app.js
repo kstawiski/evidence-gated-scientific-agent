@@ -30,10 +30,15 @@ const state = {
   modelStatus: null,
   modelStatusTimer: null,
   modelStatusLoading: false,
-  knowledge: { stats: {}, documents: [] },
+  knowledge: { stats: {}, documents: [], jobs: [] },
   knowledgeSelection: new Set(),
   knowledgeKnownIds: new Set(),
   knowledgeSelectionInitialized: false,
+  knowledgeJobEvents: new Map(),
+  knowledgePollTimer: null,
+  knowledgePollLoading: false,
+  knowledgeVisuals: [],
+  knowledgeVisualTitle: "",
 };
 
 const el = (id) => document.getElementById(id);
@@ -148,18 +153,47 @@ function initializeKnowledgeSelection(selectNew = false) {
 }
 
 async function loadKnowledge(includeRetired = false, selectNew = false) {
-  state.knowledge = await api(`/api/knowledge?include_retired=${includeRetired ? "true" : "false"}`);
+  const catalog = await api(`/api/knowledge?include_retired=${includeRetired ? "true" : "false"}`);
+  const eventJobs = (catalog.jobs || []).filter((job) => ["queued", "running", "cancel_requested", "failed", "cancelled"].includes(job.status)).slice(0, 12);
+  const eventEntries = await Promise.all(eventJobs.map(async (job) => {
+    try { return [job.id, await api(`/api/knowledge/jobs/${encodeURIComponent(job.id)}/events`)]; }
+    catch (_) { return [job.id, []]; }
+  }));
+  state.knowledge = catalog;
+  state.knowledgeJobEvents = new Map(eventEntries);
   initializeKnowledgeSelection(selectNew);
   renderKnowledgeSelection();
   renderKnowledgeCatalog();
+  renderKnowledgeJobs();
+}
+
+function stopKnowledgePolling() {
+  if (state.knowledgePollTimer) window.clearTimeout(state.knowledgePollTimer);
+  state.knowledgePollTimer = null;
+}
+
+function scheduleKnowledgePolling(delay = 1800) {
+  stopKnowledgePolling();
+  if (!el("knowledge-library-dialog").open) return;
+  state.knowledgePollTimer = window.setTimeout(async () => {
+    if (state.knowledgePollLoading || !el("knowledge-library-dialog").open) return scheduleKnowledgePolling();
+    state.knowledgePollLoading = true;
+    try { await loadKnowledge(el("knowledge-show-retired").checked, true); }
+    catch (_) { /* Keep the last visible catalog during transient polling failures. */ }
+    finally { state.knowledgePollLoading = false; scheduleKnowledgePolling(); }
+  }, delay);
 }
 
 function renderKnowledgeSelection() {
   const ready = state.knowledge.documents.filter((item) => item.status === "ready");
   const enabled = ready.filter((item) => item.enabled);
   const selected = enabled.filter((item) => state.knowledgeSelection.has(item.id));
+  const jobs = state.knowledge.jobs || [];
+  const waiting = jobs.filter((job) => ["queued", "running", "cancel_requested"].includes(job.status));
+  const failed = jobs.filter((job) => job.status === "failed");
   el("knowledge-selection-count").textContent = `${selected.length} of ${enabled.length} enabled document${enabled.length === 1 ? "" : "s"} selected`;
-  el("knowledge-stats").textContent = `${state.knowledge.stats?.documents || ready.length} current documents · ${state.knowledge.stats?.chunks || 0} exact passages · ${formatBytes(state.knowledge.stats?.bytes || 0)}`;
+  el("knowledge-stats").textContent = `${state.knowledge.stats?.documents || ready.length} active generations · ${state.knowledge.stats?.chunks || 0} exact passages · ${formatBytes(state.knowledge.stats?.bytes || 0)}`;
+  el("knowledge-index-summary").textContent = `${waiting.length} waiting or active · ${failed.length} failed · ${ready.length} published generations available now`;
 }
 
 function knowledgeLabel(text, control) {
@@ -170,7 +204,9 @@ function knowledgeLabel(text, control) {
 
 function knowledgeDocumentCard(documentRecord) {
   const card = document.createElement("article");
-  card.className = `knowledge-document ${documentRecord.enabled ? "enabled" : "disabled"} ${documentRecord.status}`;
+  const indexJob = (state.knowledge.jobs || []).find((job) => job.document_id === documentRecord.id);
+  const effectiveStatus = documentRecord.status === "indexing" && indexJob?.status === "cancelled" ? "cancelled" : documentRecord.status;
+  card.className = `knowledge-document ${documentRecord.enabled ? "enabled" : "disabled"} ${effectiveStatus}`;
   const header = document.createElement("header");
   const selection = document.createElement("input");
   selection.type = "checkbox";
@@ -187,7 +223,11 @@ function knowledgeDocumentCard(documentRecord) {
   const meta = document.createElement("p");
   meta.textContent = `${displayStatus(documentRecord.source_type)} · generation ${documentRecord.generation} · ${documentRecord.chunk_count} passage${documentRecord.chunk_count === 1 ? "" : "s"} · ${documentRecord.acquisition_count || 0} verified run import${documentRecord.acquisition_count === 1 ? "" : "s"} · ${formatBytes(documentRecord.bytes)}`;
   heading.append(title, meta);
-  const badge = document.createElement("span"); badge.textContent = documentRecord.status === "ready" ? (documentRecord.enabled ? "ENABLED" : "DISABLED") : documentRecord.status.toUpperCase();
+  const badge = document.createElement("span");
+  badge.textContent = documentRecord.status === "ready"
+    ? (documentRecord.enabled ? "CURRENT · READY" : "CURRENT · DISABLED")
+    : effectiveStatus === "cancelled" ? "INDEX CANCELLED"
+      : documentRecord.status === "indexing" ? "QUEUED / INDEXING" : documentRecord.status.toUpperCase();
   header.append(selection, heading, badge);
 
   const description = document.createElement("p");
@@ -195,12 +235,22 @@ function knowledgeDocumentCard(documentRecord) {
   description.textContent = documentRecord.description || "No description.";
   const tags = document.createElement("small");
   tags.textContent = `${(documentRecord.tags || []).join(" · ") || "untagged"} · sha256 ${documentRecord.content_sha256.slice(0, 14)}…`;
+  const routing = document.createElement("small");
+  const routingMetadata = documentRecord.semantic_metadata?.routing || {};
+  routing.textContent = effectiveStatus === "cancelled"
+    ? "Semantic indexing was cancelled. Exact source bytes remain stored and the job can be retried; any published predecessor remains available."
+    : documentRecord.status === "indexing"
+    ? "Pending: Qwen will index exact text; Gemma will inspect only extracted images. The published predecessor remains available."
+    : documentRecord.status === "index_failed"
+      ? "Semantic indexing failed. Exact source bytes remain stored; use the failed job below to inspect events or retry."
+      : `Retrieval routing: text ${routingMetadata.text || "exact lexical + Qwen descriptors when available"}; visuals ${routingMetadata.visual || "Gemma only when actual images exist"}.`;
   const actions = document.createElement("div"); actions.className = "knowledge-document-actions";
   const preview = document.createElement("button"); preview.type = "button"; preview.textContent = "Preview"; preview.addEventListener("click", () => openKnowledgePreview(documentRecord));
   const chunks = document.createElement("button"); chunks.type = "button"; chunks.textContent = "Indexed passages"; chunks.addEventListener("click", () => openKnowledgeChunks(documentRecord));
   const acquisitions = document.createElement("button"); acquisitions.type = "button"; acquisitions.textContent = "Import history"; acquisitions.addEventListener("click", () => openKnowledgeAcquisitions(documentRecord));
+  const figures = document.createElement("button"); figures.type = "button"; figures.textContent = "Figures"; figures.addEventListener("click", () => loadKnowledgeVisuals(documentRecord));
   const download = document.createElement("a"); download.href = `/api/knowledge/${encodeURIComponent(documentRecord.id)}/download`; download.textContent = "Download";
-  actions.append(preview, chunks, acquisitions, download);
+  actions.append(preview, chunks, figures, acquisitions, download);
   if (documentRecord.status === "ready") {
     const edit = document.createElement("button"); edit.type = "button"; edit.textContent = "Edit metadata";
     const toggle = document.createElement("button"); toggle.type = "button"; toggle.textContent = documentRecord.enabled ? "Disable" : "Enable";
@@ -215,9 +265,9 @@ function knowledgeDocumentCard(documentRecord) {
       if (!window.confirm(`Delete “${documentRecord.title}” from future runs? Existing run snapshots remain reproducible.`)) return;
       await mutateKnowledge(`/api/knowledge/${encodeURIComponent(documentRecord.id)}?etag=${documentRecord.etag}`, { method: "DELETE" }, "Knowledge document deleted.");
     });
-    card.append(header, description, tags, actions, editForm);
+    card.append(header, description, tags, routing, actions, editForm);
   } else {
-    card.append(header, description, tags, actions);
+    card.append(header, description, tags, routing, actions);
   }
   return card;
 }
@@ -249,6 +299,83 @@ function renderKnowledgeCatalog() {
   const records = state.knowledge.documents.filter((item) => !query || `${item.title} ${item.description} ${item.source_type} ${(item.tags || []).join(" ")}`.toLowerCase().includes(query));
   if (!records.length) { const empty = document.createElement("p"); empty.className = "file-empty"; empty.textContent = "No knowledge documents match this view."; catalog.append(empty); return; }
   for (const item of records) catalog.append(knowledgeDocumentCard(item));
+}
+
+function renderKnowledgeJobs() {
+  const container = el("knowledge-jobs");
+  container.replaceChildren();
+  const allJobs = state.knowledge.jobs || [];
+  const jobs = allJobs.slice(0, 20);
+  if (!jobs.length) {
+    const empty = document.createElement("p"); empty.className = "file-empty"; empty.textContent = "No semantic indexing jobs yet."; container.append(empty); return;
+  }
+  const documentById = new Map(state.knowledge.documents.map((item) => [item.id, item]));
+  const queuedOrder = allJobs.filter((job) => job.status === "queued").sort((left, right) => left.created.localeCompare(right.created));
+  for (const job of jobs) {
+    const item = document.createElement("article"); item.className = `knowledge-job ${job.status}`;
+    const header = document.createElement("header");
+    const title = document.createElement("strong"); title.textContent = documentById.get(job.document_id)?.title || `Document ${job.document_id.slice(0, 8)}`;
+    const status = document.createElement("span"); status.textContent = displayStatus(job.status).toUpperCase();
+    header.append(title, status);
+    const message = document.createElement("p"); message.textContent = job.message;
+    const detail = document.createElement("small");
+    const queuePosition = job.status === "queued" ? `queue position ${queuedOrder.findIndex((item) => item.id === job.id) + 1} · ` : "";
+    detail.textContent = `${queuePosition}${displayStatus(job.operation)} · attempt ${job.attempt} · updated ${formatDate(job.updated)} · Qwen text → Gemma actual images only`;
+    const controls = document.createElement("nav");
+    if (["queued", "running", "cancel_requested"].includes(job.status)) {
+      const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "danger-link"; cancel.textContent = job.status === "cancel_requested" ? "Cancelling…" : "Cancel"; cancel.disabled = job.status === "cancel_requested";
+      cancel.addEventListener("click", async () => { cancel.disabled = true; try { await mutateKnowledge(`/api/knowledge/jobs/${encodeURIComponent(job.id)}/cancel`, { method: "POST" }, "Index cancellation requested."); } catch (error) { cancel.disabled = false; toast(error.message, "error"); } });
+      controls.append(cancel);
+    }
+    if (["failed", "cancelled"].includes(job.status)) {
+      const retry = document.createElement("button"); retry.type = "button"; retry.textContent = "Retry";
+      retry.addEventListener("click", async () => { retry.disabled = true; try { await mutateKnowledge(`/api/knowledge/jobs/${encodeURIComponent(job.id)}/retry`, { method: "POST" }, "Indexing queued again."); } catch (error) { retry.disabled = false; toast(error.message, "error"); } });
+      controls.append(retry);
+    }
+    const events = state.knowledgeJobEvents.get(job.id) || [];
+    item.append(header, message, detail, controls);
+    if (events.length) {
+      const timeline = document.createElement("ol"); timeline.className = "knowledge-job-events";
+      for (const event of events.slice(-6)) {
+        const row = document.createElement("li"); row.textContent = `${event.actor}: ${event.message}`; timeline.append(row);
+      }
+      item.append(timeline);
+    }
+    container.append(item);
+  }
+}
+
+function renderKnowledgeVisuals(visuals, title) {
+  state.knowledgeVisuals = visuals;
+  state.knowledgeVisualTitle = title;
+  const gallery = el("knowledge-visual-gallery"); gallery.replaceChildren();
+  el("knowledge-visual-help").textContent = visuals.length
+    ? `${title} · ${visuals.length} hash-verified visual artifact${visuals.length === 1 ? "" : "s"}. Gemma descriptors aid retrieval but are not shown as evidence.`
+    : `${title} has no registered visual artifacts.`;
+  for (const visual of visuals) {
+    const figure = document.createElement("figure"); figure.className = "knowledge-visual";
+    const open = document.createElement("button"); open.type = "button"; open.title = "Open full visual preview";
+    const image = document.createElement("img"); image.src = visual.preview_url; image.alt = visual.source_label || "Knowledge visual"; image.loading = "lazy";
+    open.append(image); open.addEventListener("click", () => openKnowledgeVisualPreview(visual, title));
+    const caption = document.createElement("figcaption"); caption.textContent = visual.source_label || "Extracted image";
+    const hash = document.createElement("small"); hash.textContent = `sha256 ${visual.sha256.slice(0, 14)}…`; caption.append(hash);
+    figure.append(open, caption); gallery.append(figure);
+  }
+}
+
+async function loadKnowledgeVisuals(documentRecord) {
+  el("knowledge-visual-help").textContent = `Loading visual artifacts for ${documentRecord.title}…`;
+  const visuals = await api(`/api/knowledge/${encodeURIComponent(documentRecord.id)}/visuals`);
+  renderKnowledgeVisuals(visuals, documentRecord.title);
+}
+
+function openKnowledgeVisualPreview(visual, title) {
+  el("knowledge-visual-preview-title").textContent = `${title} — ${visual.source_label || "visual"}`;
+  el("knowledge-visual-preview-meta").textContent = `Exact stored image · sha256 ${visual.sha256}`;
+  el("knowledge-visual-preview-image").src = visual.preview_url;
+  el("knowledge-visual-preview-image").alt = visual.source_label || title;
+  el("knowledge-visual-preview-download").href = visual.preview_url;
+  const dialog = el("knowledge-visual-preview-dialog"); if (!dialog.open) dialog.showModal();
 }
 
 async function mutateKnowledge(path, options, message) {
@@ -326,48 +453,84 @@ async function openKnowledgeLibrary() {
   await loadKnowledge(el("knowledge-show-retired").checked);
   const dialog = el("knowledge-library-dialog");
   if (!dialog.open) dialog.showModal();
+  scheduleKnowledgePolling();
 }
 
 async function uploadKnowledge(event) {
   event.preventDefault();
-  const file = el("knowledge-upload-file").files[0];
-  if (!file) return;
-  const body = new FormData();
-  body.append("upload", file);
-  body.append("title", el("knowledge-upload-title").value);
-  body.append("description", el("knowledge-upload-description").value);
-  body.append("tags", el("knowledge-upload-tags").value);
-  body.append("source_type", el("knowledge-upload-source-type").value);
-  body.append("canonical_url", el("knowledge-upload-url").value);
+  const files = [...el("knowledge-upload-file").files];
+  if (!files.length) return;
   const button = el("knowledge-upload-form").querySelector("button[type=submit]");
   button.disabled = true;
+  const failures = [];
+  let completed = 0;
+  let queued = 0;
+  let reused = 0;
   try {
-    await api("/api/knowledge", { method: "POST", body });
+    for (const [index, file] of files.entries()) {
+      button.textContent = `Uploading ${index + 1} of ${files.length}…`;
+      const body = new FormData();
+      body.append("upload", file);
+      body.append("title", files.length === 1 ? el("knowledge-upload-title").value : "");
+      body.append("description", el("knowledge-upload-description").value);
+      body.append("tags", el("knowledge-upload-tags").value);
+      body.append("source_type", el("knowledge-upload-source-type").value);
+      body.append("canonical_url", files.length === 1 ? el("knowledge-upload-url").value : "");
+      try {
+        const result = await api("/api/knowledge", { method: "POST", body });
+        completed += 1;
+        if (result.job) queued += 1; else reused += 1;
+      }
+      catch (error) { failures.push(`${file.name}: ${error.message}`); }
+    }
     el("knowledge-upload-form").reset();
     await loadKnowledge(el("knowledge-show-retired").checked, true);
-    toast("Knowledge document extracted, hashed, and indexed.");
-  } finally { button.disabled = false; }
+    toast(`${completed} document${completed === 1 ? "" : "s"} accepted · ${queued} queued · ${reused} already ready${failures.length ? ` · ${failures.length} failed` : ""}.`, failures.length ? "error" : "");
+    if (failures.length) {
+      el("knowledge-index-summary").textContent = failures.join(" · ");
+    }
+  } finally { button.disabled = false; button.textContent = "Upload and queue indexing"; }
 }
 
 async function searchKnowledge(event) {
   event.preventDefault();
   const container = el("knowledge-search-results");
   container.replaceChildren();
-  const response = await api("/api/knowledge/search", {
+  const request = {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query: el("knowledge-search-query").value, limit: 8 }),
-  });
+  };
+  const [response, visualResponse] = await Promise.all([
+    api("/api/knowledge/search", request),
+    api("/api/knowledge/search/visuals", request),
+  ]);
+  const textHeading = document.createElement("strong"); textHeading.textContent = `Passages (${response.passages.length})`; container.append(textHeading);
   if (!response.passages.length) {
-    const empty = document.createElement("p"); empty.textContent = "No lexical passage matched. Try a synonym; absence of a hit is not proof of absence."; container.append(empty); return;
+    const empty = document.createElement("p"); empty.textContent = "No exact passage matched. Try a synonym; absence of a hit is not proof of absence."; container.append(empty);
   }
   for (const passage of response.passages) {
     const item = document.createElement("article");
     const title = document.createElement("strong"); title.textContent = passage.title;
-    const meta = document.createElement("small"); meta.textContent = `characters ${passage.char_start}–${passage.char_end} · sha256 ${passage.chunk_sha256.slice(0, 14)}…`;
+    const meta = document.createElement("small"); meta.textContent = `${displayStatus(passage.retrieval_method)} retrieval · characters ${passage.char_start}–${passage.char_end} · sha256 ${passage.chunk_sha256.slice(0, 14)}…`;
     const text = document.createElement("p"); text.textContent = passage.untrusted_source_text;
     item.append(title, meta, text); container.append(item);
   }
+  const visualHeading = document.createElement("strong"); visualHeading.textContent = `Figures (${visualResponse.visuals.length})`; container.append(visualHeading);
+  if (visualResponse.visuals.length) {
+    for (const visual of visualResponse.visuals) {
+      const item = document.createElement("article");
+      const title = document.createElement("strong"); title.textContent = visual.title;
+      const meta = document.createElement("small"); meta.textContent = `${displayStatus(visual.retrieval_method)} retrieval · ${visual.source_label} · sha256 ${visual.sha256.slice(0, 14)}…`;
+      const show = document.createElement("button"); show.type = "button"; show.textContent = "Show exact image"; show.addEventListener("click", () => renderKnowledgeVisuals([visual], visual.title));
+      item.append(title, meta, show); container.append(item);
+    }
+  } else {
+    const empty = document.createElement("p"); empty.textContent = "No visual descriptor matched. This does not imply that the documents contain no relevant figure."; container.append(empty);
+  }
+  const limitations = document.createElement("p"); limitations.className = "search-limitations";
+  limitations.textContent = `Method limits: ${[...(response.limitations || []), ...(visualResponse.limitations || [])].join(" ")}`;
+  container.append(limitations);
 }
 
 function configureIntegrationDownloads() {
@@ -1396,6 +1559,7 @@ function sourceRow(source, run) {
   const copy = document.createElement("div");
   const local = (run.reference_manifest?.references || []).find((item) => item.source_id === source.source_id);
   const knowledge = (run.result?.retrieval_evidence?.knowledge_passages || []).find((item) => item.source_url === source.url);
+  const knowledgeVisual = (run.result?.retrieval_evidence?.knowledge_visuals || []).find((item) => item.source_url === source.url);
   const link = document.createElement(local?.markdown ? "button" : source.url ? "a" : "span");
   link.textContent = source.title;
   if (local?.markdown) {
@@ -1429,6 +1593,16 @@ function sourceRow(source, run) {
     original.textContent = knowledge.document_filename?.toLowerCase().endsWith(".pdf") ? "PDF" : "Original";
     original.target = "_blank"; original.rel = "noreferrer";
     actions.append(text, original);
+  }
+  if (knowledgeVisual) {
+    const preview = document.createElement("button");
+    preview.type = "button"; preview.textContent = "Preview image";
+    preview.addEventListener("click", () => openKnowledgeVisualPreview({
+      preview_url: knowledgeVisual.source_url,
+      source_label: knowledgeVisual.source_label,
+      sha256: knowledgeVisual.artifact_sha256,
+    }, knowledgeVisual.title));
+    actions.append(preview);
   }
   if (source.url) {
     const canonical = document.createElement("a"); canonical.href = source.url;
@@ -1679,11 +1853,14 @@ function bindEvents() {
   el("knowledge-library-button").addEventListener("click", () => openKnowledgeLibrary().catch((error) => toast(error.message, "error")));
   el("knowledge-manage-inline").addEventListener("click", () => openKnowledgeLibrary().catch((error) => toast(error.message, "error")));
   el("knowledge-library-close").addEventListener("click", () => el("knowledge-library-dialog").close());
+  el("knowledge-library-dialog").addEventListener("close", stopKnowledgePolling);
+  el("knowledge-visual-preview-close").addEventListener("click", () => el("knowledge-visual-preview-dialog").close());
+  el("knowledge-visual-preview-dialog").addEventListener("close", () => { el("knowledge-visual-preview-image").removeAttribute("src"); });
   el("knowledge-upload-form").addEventListener("submit", (event) => uploadKnowledge(event).catch((error) => toast(error.message, "error")));
   el("knowledge-search-form").addEventListener("submit", (event) => searchKnowledge(event).catch((error) => toast(error.message, "error")));
   el("knowledge-filter").addEventListener("input", renderKnowledgeCatalog);
   el("knowledge-show-retired").addEventListener("change", () => loadKnowledge(el("knowledge-show-retired").checked).catch((error) => toast(error.message, "error")));
-  el("knowledge-upload-file").addEventListener("change", () => { const file = el("knowledge-upload-file").files[0]; if (file && !el("knowledge-upload-title").value) el("knowledge-upload-title").value = file.name.replace(/\.[^.]+$/, ""); });
+  el("knowledge-upload-file").addEventListener("change", () => { const files = el("knowledge-upload-file").files; if (files.length !== 1) el("knowledge-upload-title").value = ""; });
   el("knowledge-select-all").addEventListener("click", () => { for (const item of state.knowledge.documents) if (item.status === "ready" && item.enabled) state.knowledgeSelection.add(item.id); renderKnowledgeSelection(); renderKnowledgeCatalog(); });
   el("knowledge-select-none").addEventListener("click", () => { state.knowledgeSelection.clear(); renderKnowledgeSelection(); renderKnowledgeCatalog(); });
   el("knowledge-reindex-all").addEventListener("click", async () => { if (!window.confirm("Create a new immutable indexed generation for every current document? Existing run snapshots will remain unchanged.")) return; try { await mutateKnowledge("/api/knowledge/reindex-all", { method: "POST" }, "Knowledge library reindexed."); } catch (error) { toast(error.message, "error"); } });

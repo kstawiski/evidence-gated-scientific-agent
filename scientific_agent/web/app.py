@@ -34,7 +34,14 @@ from .. import __version__
 from ..config import Settings, load_mcp_secrets
 from ..discussion import discuss_report
 from ..environment import cleanup_workspace_environment
-from ..knowledge import DOCUMENT_ID, KnowledgeLibrary, PASSAGE_ID, SOURCE_TYPES
+from ..knowledge import (
+    DOCUMENT_ID,
+    KNOWLEDGE_VISUAL_ID,
+    KnowledgeLibrary,
+    PASSAGE_ID,
+    SOURCE_TYPES,
+)
+from ..knowledge_indexing import KnowledgeIndexService, KnowledgeSemanticIndexer
 from ..orchestrator import run_scientific_task
 from ..provenance import sha256_file
 from ..reporting import FIGURE_MEDIA_TYPES
@@ -236,6 +243,7 @@ def create_app(
     runner: Runner = run_scientific_task,
     discussion_runner=discuss_report,
     model_status_monitor: ModelStatusMonitor | None = None,
+    knowledge_semantic_indexer: KnowledgeSemanticIndexer | None = None,
 ) -> FastAPI:
     web = web_settings or WebSettings()
     scientific_settings = agent_settings or Settings()
@@ -255,12 +263,21 @@ def create_app(
     )
     store = WorkspaceStore(web.database_path, web.workspaces_dir)
     knowledge = KnowledgeLibrary(web.knowledge_dir, web.deployment_id, web.public_url)
+    semantic_indexer = knowledge_semantic_indexer or KnowledgeSemanticIndexer(
+        scientific_settings
+    )
+    knowledge_index_service = KnowledgeIndexService(
+        knowledge,
+        semantic_indexer,
+        scientific_work_active=store.has_any_active_run,
+    )
     service = TaskService(
         store,
         scientific_settings,
         max_workers=web.max_workers,
         runner=runner,
         knowledge_library=knowledge,
+        knowledge_index_service=knowledge_index_service,
         public_url=web.public_url,
     )
     skill_archive = build_skill_archive(__version__)
@@ -292,8 +309,12 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        yield
-        service.close()
+        await knowledge_index_service.start()
+        try:
+            yield
+        finally:
+            await knowledge_index_service.close()
+            service.close()
 
     app = FastAPI(
         title="Evidence Bench API",
@@ -307,6 +328,7 @@ def create_app(
     app.state.store = store
     app.state.service = service
     app.state.knowledge = knowledge
+    app.state.knowledge_index_service = knowledge_index_service
     app.state.web_settings = web
 
     @app.middleware("http")
@@ -415,12 +437,46 @@ def create_app(
         return {
             "stats": knowledge.stats(),
             "documents": knowledge.list_documents(include_retired=include_retired),
+            "jobs": knowledge.list_index_jobs(limit=100),
         }
 
-    @app.post("/api/knowledge", status_code=201)
+    def public_visual(document_id: str, asset: dict) -> dict:
+        return {
+            "id": asset["id"],
+            "sha256": asset["sha256"],
+            "source_label": asset["source_label"],
+            "preview_url": (
+                f"/api/knowledge/{quote(document_id, safe='')}/visuals/"
+                f"{quote(asset['id'], safe='')}/preview"
+            ),
+        }
+
+    def document_index_bundle(document: dict, operation: str) -> dict:
+        if document.get("published") and document.get("semantic_status") == "ready":
+            return {"document": document, "job": None, "visuals": []}
+        if document.get("published"):
+            # Never attach a new semantic index to a generation that may already
+            # be pinned by a run snapshot. Publish an immutable successor only
+            # after its background index passes every precondition.
+            document = knowledge.reindex(
+                document["id"], document["etag"], semantic_pending=True
+            )
+        job = knowledge_index_service.enqueue(
+            document["id"], operation, document.get("supersedes_id")
+        )
+        return {
+            "document": document,
+            "job": job,
+            "visuals": [
+                public_visual(document["id"], item)
+                for item in knowledge.visual_assets(document["id"])
+            ],
+        }
+
+    @app.post("/api/knowledge", status_code=202)
     async def upload_knowledge(
         upload: UploadFile = File(...),
-        title: str = Form(..., min_length=1, max_length=300),
+        title: str = Form(default="", max_length=300),
         description: str = Form(default="", max_length=4_000),
         tags: str = Form(default=""),
         source_type: str = Form(default="other"),
@@ -429,17 +485,85 @@ def create_app(
         if upload.filename is None:
             raise ValueError("uploaded knowledge requires a filename")
         parsed_tags = [item.strip() for item in tags.split(",") if item.strip()]
-        return await asyncio.to_thread(
+        document = await asyncio.to_thread(
             knowledge.ingest,
             upload.filename,
             upload.file,
             web.max_upload_bytes,
-            title=title,
+            title=title.strip() or Path(upload.filename).stem or upload.filename,
             description=description,
             tags=parsed_tags,
             source_type=source_type,
             canonical_url=canonical_url.strip() or None,
+            semantic_pending=True,
         )
+        return await asyncio.to_thread(document_index_bundle, document, "upload")
+
+    @app.get("/api/knowledge/jobs")
+    async def knowledge_jobs(
+        status: str | None = Query(default=None, max_length=40),
+        limit: int = Query(default=100, ge=1, le=1_000),
+    ) -> list[dict]:
+        return knowledge.list_index_jobs(status=status, limit=limit)
+
+    @app.get("/api/knowledge/jobs/{job_id}")
+    async def knowledge_job(job_id: str) -> dict:
+        return knowledge.get_index_job(job_id)
+
+    @app.get("/api/knowledge/jobs/{job_id}/events")
+    async def knowledge_job_events(
+        job_id: str, after_id: int = Query(default=0, ge=0)
+    ) -> list[dict]:
+        knowledge.get_index_job(job_id)
+        return knowledge.list_index_events(job_id, after_id=after_id)
+
+    @app.post("/api/knowledge/jobs/{job_id}/cancel")
+    async def cancel_knowledge_job(job_id: str) -> dict:
+        return knowledge_index_service.request_cancel(job_id)
+
+    @app.post("/api/knowledge/jobs/{job_id}/retry")
+    async def retry_knowledge_job(job_id: str) -> dict:
+        return knowledge_index_service.retry(job_id)
+
+    @app.post("/api/knowledge/search")
+    async def test_knowledge_search(request: KnowledgeSearch) -> dict:
+        snapshot = knowledge.snapshot(request.document_ids)
+        return await asyncio.to_thread(
+            knowledge.search, request.query, snapshot, request.limit
+        )
+
+    @app.post("/api/knowledge/search/visuals")
+    async def search_knowledge_visuals(request: KnowledgeSearch) -> dict:
+        snapshot = knowledge.snapshot(request.document_ids)
+        result = await asyncio.to_thread(
+            knowledge.search_visuals, request.query, snapshot, request.limit
+        )
+        return {
+            **result,
+            "visuals": [
+                {
+                    **{key: value for key, value in item.items() if key != "path"},
+                    **public_visual(item["document_id"], {"id": item["visual_id"], **item}),
+                }
+                for item in result["visuals"]
+            ],
+        }
+
+    @app.post("/api/knowledge/reindex-all", status_code=202)
+    async def reindex_all_knowledge() -> dict:
+        documents = await asyncio.to_thread(
+            knowledge.reindex_all, enabled_only=True, semantic_pending=True
+        )
+        items = [
+            await asyncio.to_thread(document_index_bundle, document, "reindex")
+            for document in documents
+        ]
+        return {
+            "documents": [item["document"] for item in items],
+            "jobs": [item["job"] for item in items],
+            "items": items,
+            "count": len(items),
+        }
 
     @app.get("/api/knowledge/{document_id}")
     async def get_knowledge(document_id: str) -> dict:
@@ -449,7 +573,7 @@ def create_app(
     async def edit_knowledge(document_id: str, request: KnowledgeEdit) -> dict:
         if request.source_type is not None and request.source_type not in SOURCE_TYPES:
             raise ValueError("invalid knowledge source type")
-        return await asyncio.to_thread(
+        document = await asyncio.to_thread(
             knowledge.retire_and_clone,
             document_id,
             title=request.title,
@@ -458,6 +582,10 @@ def create_app(
             source_type=request.source_type,
             canonical_url=request.canonical_url,
             etag=request.etag,
+            semantic_pending=True,
+        )
+        return await asyncio.to_thread(
+            document_index_bundle, document, "metadata_revision"
         )
 
     @app.patch("/api/knowledge/{document_id}/enabled")
@@ -471,14 +599,12 @@ def create_app(
         knowledge.delete(document_id, etag)
         return Response(status_code=204)
 
-    @app.post("/api/knowledge/{document_id}/reindex", status_code=201)
+    @app.post("/api/knowledge/{document_id}/reindex", status_code=202)
     async def reindex_knowledge(document_id: str, etag: int = Query(..., ge=1)) -> dict:
-        return await asyncio.to_thread(knowledge.reindex, document_id, etag)
-
-    @app.post("/api/knowledge/reindex-all", status_code=201)
-    async def reindex_all_knowledge() -> dict:
-        documents = await asyncio.to_thread(knowledge.reindex_all)
-        return {"documents": documents, "count": len(documents)}
+        document = await asyncio.to_thread(
+            knowledge.reindex, document_id, etag, semantic_pending=True
+        )
+        return await asyncio.to_thread(document_index_bundle, document, "reindex")
 
     @app.get("/api/knowledge/{document_id}/download")
     async def download_knowledge(document_id: str) -> FileResponse:
@@ -501,11 +627,23 @@ def create_app(
     async def knowledge_acquisitions(document_id: str) -> list[dict]:
         return knowledge.acquisition_history(document_id)
 
-    @app.post("/api/knowledge/search")
-    async def test_knowledge_search(request: KnowledgeSearch) -> dict:
-        snapshot = knowledge.snapshot(request.document_ids)
-        return await asyncio.to_thread(
-            knowledge.search, request.query, snapshot, request.limit
+    @app.get("/api/knowledge/{document_id}/visuals")
+    async def knowledge_visuals(document_id: str) -> list[dict]:
+        return [
+            public_visual(document_id, item)
+            for item in knowledge.visual_assets(document_id)
+        ]
+
+    @app.get("/api/knowledge/{document_id}/visuals/{visual_id}/preview")
+    async def preview_knowledge_visual(document_id: str, visual_id: str) -> FileResponse:
+        assets = knowledge.visual_assets(document_id, visual_id=visual_id)
+        if not assets:
+            raise KeyError("knowledge visual not found")
+        path = Path(assets[0]["path"])
+        return FileResponse(
+            path,
+            media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream",
+            headers={"Content-Disposition": "inline"},
         )
 
     @app.get("/api/workspaces")
@@ -648,6 +786,58 @@ def create_app(
             media_type="text/markdown; charset=utf-8",
             headers={
                 "Content-Disposition": f'inline; filename="{passage_id}.md"',
+                "Cache-Control": "private, immutable, max-age=31536000",
+            },
+        )
+
+    @app.get("/api/runs/{run_id}/knowledge/visuals/{knowledge_visual_id}")
+    async def run_knowledge_visual(
+        run_id: str, knowledge_visual_id: str
+    ) -> FileResponse:
+        if not KNOWLEDGE_VISUAL_ID.fullmatch(knowledge_visual_id):
+            raise KeyError("knowledge visual not found")
+        root = store.run_root(run_id).resolve()
+        evidence_path = root / "retrieval_evidence.json"
+        if not evidence_path.is_file() or evidence_path.is_symlink():
+            raise KeyError("knowledge visual not found")
+        evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+        record = next(
+            (
+                item
+                for item in evidence.get("knowledge_visuals", [])
+                if item.get("knowledge_visual_id") == knowledge_visual_id
+            ),
+            None,
+        )
+        if not isinstance(record, dict):
+            raise KeyError("knowledge visual not found")
+        raw_path = record.get("artifact_path")
+        if not isinstance(raw_path, str):
+            raise KeyError("knowledge visual integrity check failed")
+        unresolved = Path(raw_path)
+        expected_parent = (root / "knowledge" / "visuals").resolve()
+        try:
+            path = unresolved.resolve()
+        except (OSError, RuntimeError) as exc:
+            raise KeyError("knowledge visual integrity check failed") from exc
+        if (
+            not unresolved.is_absolute()
+            or unresolved.is_symlink()
+            or not unresolved.is_file()
+            or path.parent != expected_parent
+            or not path.name.startswith(f"{knowledge_visual_id}.")
+            or path.suffix.casefold() not in {".png", ".jpg", ".jpeg", ".webp"}
+            or record.get("visual_sha256") != record.get("artifact_sha256")
+            or sha256_file(path) != record.get("artifact_sha256")
+        ):
+            raise KeyError("knowledge visual integrity check failed")
+        return FileResponse(
+            path,
+            media_type=mimetypes.guess_type(path.name)[0] or "application/octet-stream",
+            headers={
+                "Content-Disposition": (
+                    f"inline; filename*=UTF-8''{quote(path.name)}"
+                ),
                 "Cache-Control": "private, immutable, max-age=31536000",
             },
         )

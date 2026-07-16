@@ -22,11 +22,97 @@ class ArtifactRef(BaseModel):
     description: str = ""
 
 
+class InputColumnProfile(BaseModel):
+    """Value-free structural summary used before a scientific method is locked."""
+
+    name: str
+    inferred_types: list[str] = Field(default_factory=list, max_length=8)
+    non_missing_count: int = Field(ge=0)
+    missing_count: int = Field(ge=0)
+    missing_fraction: float = Field(ge=0, le=1)
+    distinct_non_missing: int = Field(ge=0)
+    distinct_count_capped: bool = False
+
+
+class InputFileProfile(BaseModel):
+    """Bounded deterministic inspection of one immutable workspace input."""
+
+    path: str
+    sha256: str
+    bytes: int = Field(ge=0)
+    detected_format: str
+    media_type: str
+    inspection_status: Literal["complete", "partial", "unsupported", "failed"]
+    rows_observed: int | None = Field(default=None, ge=0)
+    rows_total: int | None = Field(default=None, ge=0)
+    columns: list[InputColumnProfile] = Field(default_factory=list, max_length=256)
+    details: dict = Field(default_factory=dict)
+    limitations: list[str] = Field(default_factory=list, max_length=24)
+
+
+class InputProfile(BaseModel):
+    """Controller-owned evidence supplied to both blinded planners."""
+
+    version: int = 1
+    total_files: int = Field(ge=0)
+    profiled_files: int = Field(ge=0)
+    files: list[InputFileProfile] = Field(default_factory=list, max_length=200)
+    visual_observations: list[str] = Field(default_factory=list, max_length=100)
+    visual_limitations: list[str] = Field(default_factory=list, max_length=100)
+    limitations: list[str] = Field(default_factory=list, max_length=100)
+
+
+class KnowledgeDocumentSnapshot(BaseModel):
+    document_id: str
+    generation_group_id: str
+    title: str
+    source_type: str
+    canonical_url: str | None = None
+    tags: list[str] = Field(default_factory=list, max_length=32)
+    original_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    index_version: str
+    chunk_count: int = Field(ge=0)
+
+
+class KnowledgeSnapshot(BaseModel):
+    version: int = 1
+    created_at: str
+    deployment_id: str
+    documents: list[KnowledgeDocumentSnapshot] = Field(
+        default_factory=list, max_length=10_000
+    )
+    snapshot_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class KnowledgePassageEvidence(BaseModel):
+    passage_id: str
+    document_id: str
+    title: str
+    chunk_id: str
+    char_start: int = Field(ge=0)
+    char_end: int = Field(ge=0)
+    content_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    chunk_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_url: str
+    artifact_path: str
+    artifact_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    document_filename: str
+    document_text_path: str
+    document_text_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    document_original_path: str
+    document_original_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
 class TaskSpec(BaseModel):
     task_id: str
     objective: str = Field(min_length=3)
     deliverables: list[str]
     available_inputs: list[ArtifactRef] = Field(default_factory=list)
+    input_profile: InputProfile | None = None
+    knowledge_sources: list[ArtifactRef] = Field(
+        default_factory=list, max_length=10_000
+    )
     constraints: list[str] = Field(default_factory=list)
     unknowns: list[str] = Field(default_factory=list)
     scientific_domain: str = "general"
@@ -467,6 +553,10 @@ class RetrievalEvidence(BaseModel):
     urls: list[str] = Field(default_factory=list)
     retrieval_dates: list[str] = Field(default_factory=list)
     artifacts: list[str] = Field(default_factory=list)
+    knowledge_snapshot_sha256: str | None = Field(
+        default=None, pattern=r"^[0-9a-f]{64}$"
+    )
+    knowledge_passages: list[KnowledgePassageEvidence] = Field(default_factory=list)
 
 
 class ComputationRecord(BaseModel):

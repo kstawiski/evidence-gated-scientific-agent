@@ -300,6 +300,14 @@ def build_plan_audit_packet(master: MasterPlan) -> dict:
         "task": {
             "objective": task.objective,
             "deliverables": task.deliverables,
+            "available_inputs": [
+                item.model_dump(mode="json") for item in task.available_inputs
+            ],
+            "input_profile": (
+                task.input_profile.model_dump(mode="json")
+                if task.input_profile is not None
+                else None
+            ),
             "constraints": task.constraints,
             "unknowns": task.unknowns,
             "scientific_domain": task.scientific_domain,

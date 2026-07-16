@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -46,6 +47,11 @@ class WebSettings:
         default_factory=lambda: int(os.environ.get("WEB_MAX_WORKERS", "2"))
     )
     a2a_enabled: bool = field(default_factory=lambda: _flag("A2A_ENABLED", True))
+    deployment_id: str = field(
+        default_factory=lambda: os.environ.get(
+            "EVIDENCE_BENCH_DEPLOYMENT_ID", "default"
+        ).strip()
+    )
     browser_public_url: str = field(
         default_factory=lambda: os.environ.get("BROWSER_PUBLIC_URL", "").strip()
     )
@@ -76,6 +82,10 @@ class WebSettings:
         return self.data_dir / "workspaces"
 
     @property
+    def knowledge_dir(self) -> Path:
+        return self.data_dir / "knowledge"
+
+    @property
     def browser_frame_sources(self) -> tuple[str, ...]:
         if self.browser_public_url:
             parsed = urlsplit(self.browser_public_url)
@@ -92,6 +102,11 @@ class WebSettings:
             raise RuntimeError("A2A_TOKEN is required when A2A_ENABLED is true")
         if self.max_workers < 1:
             raise ValueError("WEB_MAX_WORKERS must be positive")
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,80}", self.deployment_id):
+            raise ValueError(
+                "EVIDENCE_BENCH_DEPLOYMENT_ID must contain 1-80 letters, "
+                "numbers, dots, underscores, or hyphens"
+            )
         if self.max_upload_bytes < 1:
             raise ValueError("WEB_MAX_UPLOAD_BYTES must be positive")
         if not 1 <= self.browser_novnc_port <= 65535:

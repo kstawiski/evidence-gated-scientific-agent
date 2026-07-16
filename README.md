@@ -130,6 +130,14 @@ The service exposes:
 - `GET /.well-known/agent-card.json` — public A2A 1.0 Agent Card;
 - `POST /a2a` — JSON-RPC A2A endpoint using `Authorization: Bearer <A2A_TOKEN>`;
 - `POST /api/workspaces/{id}/runs`, `GET /api/runs/{run_id}` — start and poll a run;
+- `GET`, `POST`, `PATCH`, `DELETE /api/knowledge...` — manage, preview,
+  version, enable/disable, reindex, and test-search the instance-local knowledge
+  library, including exact chunk and verified run-acquisition history; run
+  submission snapshots the selected immutable generations;
+- `GET /api/runs/{run_id}/knowledge/passages/{passage_id}` and
+  `.../knowledge/documents/{document_id}/{text|original}` — inspect the exact
+  cited passage, full extracted text, and immutable original preserved in that
+  run;
 - `GET /api/runs/{run_id}/events`, `.../events/stream` — cursor-based event log
   plus an SSE live stream with polling fallback;
 - `GET /api/workspaces/{id}/file-preview?filename=...` — bounded UTF-8 preview

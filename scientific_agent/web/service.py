@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
@@ -11,14 +12,17 @@ from pathlib import Path
 from typing import Awaitable, Callable
 
 from ..config import Settings
+from ..knowledge import KnowledgeLibrary
 from ..orchestrator import run_scientific_task
 from ..provenance import build_manifest, utc_now, write_json
 from ..schemas import RunResult
 from .store import ACTIVE_RUN_STATES, WorkspaceStore
 
 
+logger = logging.getLogger(__name__)
 Runner = Callable[..., Awaitable[RunResult]]
 ACTORS = {
+    "input-intake": "Controller + Gemma",
     "planning": "Qwen + Gemma",
     "plan-review": "Qwen + Gemma",
     "research": "Qwen",
@@ -52,10 +56,14 @@ class TaskService:
         base_settings: Settings,
         max_workers: int,
         runner: Runner = run_scientific_task,
+        knowledge_library: KnowledgeLibrary | None = None,
+        public_url: str = "",
     ):
         self.store = store
         self.base_settings = base_settings
         self.runner = runner
+        self.knowledge_library = knowledge_library
+        self.public_url = public_url.rstrip("/")
         self.executor = ThreadPoolExecutor(
             max_workers=max_workers, thread_name_prefix="evidence-bench"
         )
@@ -75,7 +83,11 @@ class TaskService:
         *,
         parent_run_id: str | None = None,
         run_kind: str = "analysis",
+        knowledge_document_ids: list[str] | None = None,
+        knowledge_snapshot: dict | None = None,
     ) -> dict:
+        if knowledge_snapshot is None and self.knowledge_library is not None:
+            knowledge_snapshot = self.knowledge_library.snapshot(knowledge_document_ids)
         run = self.store.create_run(
             workspace_id,
             objective,
@@ -83,6 +95,7 @@ class TaskService:
             mcp_servers,
             parent_run_id=parent_run_id,
             run_kind=run_kind,
+            knowledge_snapshot=knowledge_snapshot,
         )
         cancellation = threading.Event()
         with self._lock:
@@ -124,6 +137,7 @@ class TaskService:
             tuple(parent["mcp_servers"]),
             parent_run_id=parent_run_id,
             run_kind="revision",
+            knowledge_snapshot=parent.get("knowledge_snapshot") or {},
         )
 
     async def execute(
@@ -151,6 +165,20 @@ class TaskService:
             self.base_settings,
             workspace=files_dir,
             runs_dir=runs_dir,
+            knowledge_root=(
+                self.knowledge_library.root if self.knowledge_library else None
+            ),
+            knowledge_deployment_id=(
+                self.knowledge_library.deployment_id
+                if self.knowledge_library
+                else self.base_settings.knowledge_deployment_id
+            ),
+            knowledge_snapshot=run.get("knowledge_snapshot") or None,
+            knowledge_citation_base_url=(
+                f"{self.public_url}/api/runs/{run_id}/knowledge/passages"
+                if self.public_url and run.get("knowledge_snapshot")
+                else ""
+            ),
         )
         provenance_holder: dict[str, Path] = {}
 
@@ -290,6 +318,39 @@ class TaskService:
             "requires_more_evidence": "Completed with unresolved evidence requirements",
             "requires_human_decision": "Completed and awaiting a human scientific decision",
         }
+        if self.knowledge_library is not None and not cancellation.is_set():
+            try:
+                self.store.update_run(
+                    run_id,
+                    phase="finalizing",
+                    message="Registering controller-verified literature",
+                    event_type="phase_changed",
+                    actor="Controller",
+                )
+                imported = self.knowledge_library.import_verified_run_articles(
+                    Path(result.provenance_dir),
+                    workspace_id=run["workspace_id"],
+                    run_id=run_id,
+                )
+                new_documents = [
+                    item for item in imported if not item.get("deduplicated")
+                ]
+                if imported:
+                    self.store.append_event(
+                        run_id,
+                        "knowledge_import",
+                        "Controller",
+                        "finalizing",
+                        (
+                            f"Recorded {len(imported)} verified article acquisition(s); "
+                            f"{len(new_documents)} created a new knowledge generation"
+                        ),
+                        None,
+                    )
+            except Exception:
+                # Knowledge promotion is a post-analysis convenience. It must never
+                # change or invalidate the completed scientific record.
+                logger.exception("verified article knowledge import failed")
         committed = self.store.finish_run(
             run_id,
             status=result.status,

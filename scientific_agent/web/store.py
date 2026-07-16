@@ -104,6 +104,10 @@ class WorkspaceStore:
                 "cancel_requested_at": (
                     "ALTER TABLE runs ADD COLUMN cancel_requested_at TEXT"
                 ),
+                "knowledge_snapshot": (
+                    "ALTER TABLE runs ADD COLUMN knowledge_snapshot TEXT NOT NULL "
+                    "DEFAULT '{}'"
+                ),
             }
             for column, statement in migrations.items():
                 if column not in columns:
@@ -402,6 +406,7 @@ class WorkspaceStore:
         *,
         parent_run_id: str | None = None,
         run_kind: str = "analysis",
+        knowledge_snapshot: dict | None = None,
     ) -> dict:
         self.get_workspace(workspace_id)
         objective = objective.strip()
@@ -429,9 +434,10 @@ class WorkspaceStore:
                     """
                     INSERT INTO runs
                     (id, workspace_id, objective, enable_code, mcp_servers, status,
-                     phase, message, created_at, parent_run_id, run_kind)
+                     phase, message, created_at, parent_run_id, run_kind,
+                     knowledge_snapshot)
                     VALUES (?, ?, ?, ?, ?, 'queued', 'queued',
-                            'Waiting for an execution slot', ?, ?, ?)
+                            'Waiting for an execution slot', ?, ?, ?, ?)
                     """,
                     (
                         run_id,
@@ -442,6 +448,7 @@ class WorkspaceStore:
                         now,
                         parent_run_id,
                         run_kind,
+                        json.dumps(knowledge_snapshot or {}, sort_keys=True),
                     ),
                 )
                 connection.execute(
@@ -813,6 +820,9 @@ class WorkspaceStore:
         value = dict(row)
         value["enable_code"] = bool(value["enable_code"])
         value["mcp_servers"] = json.loads(value["mcp_servers"])
+        value["knowledge_snapshot"] = json.loads(
+            value.get("knowledge_snapshot") or "{}"
+        )
         return value
 
     def list_runs(self, workspace_id: str) -> list[dict]:

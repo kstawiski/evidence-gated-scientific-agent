@@ -30,6 +30,10 @@ const state = {
   modelStatus: null,
   modelStatusTimer: null,
   modelStatusLoading: false,
+  knowledge: { stats: {}, documents: [] },
+  knowledgeSelection: new Set(),
+  knowledgeKnownIds: new Set(),
+  knowledgeSelectionInitialized: false,
 };
 
 const el = (id) => document.getElementById(id);
@@ -38,8 +42,9 @@ const supportedStates = new Set(["supported", "supported_with_comments"]);
 const warningStates = new Set(["inconclusive", "requires_more_evidence", "requires_human_decision", "contradicted"]);
 const terminalStates = new Set(["supported", "supported_with_comments", "contradicted", "inconclusive", "requires_more_evidence", "requires_human_decision", "failed", "interrupted", "cancelled"]);
 const textArtifactExtensions = new Set(["bib", "c", "cfg", "conf", "cpp", "css", "csv", "env", "go", "h", "html", "ini", "ipynb", "java", "js", "json", "jsonl", "log", "md", "py", "qmd", "r", "rmd", "rs", "rst", "sh", "sql", "stan", "svg", "tex", "toml", "ts", "tsv", "txt", "xml", "yaml", "yml"]);
-const phaseOrder = ["planning", "research", "validation", "scientific-review", "repair", "finalizing"];
+const phaseOrder = ["input-intake", "planning", "research", "validation", "scientific-review", "repair", "finalizing"];
 const phaseActors = {
+  "input-intake": "Controller + Gemma",
   planning: "Qwen + Gemma",
   "plan-review": "Qwen + Gemma",
   research: "Qwen",
@@ -106,10 +111,12 @@ function activeSummary(workspace = state.workspace) {
 }
 
 async function loadConfig() {
-  [state.config, state.integrations] = await Promise.all([
+  [state.config, state.integrations, state.knowledge] = await Promise.all([
     api("/api/config"),
     api("/api/integrations"),
+    api("/api/knowledge"),
   ]);
+  initializeKnowledgeSelection();
   el("app-version").textContent = `v${state.config.version}`;
   el("executor-model").textContent = state.config.models.executor.split("/").pop();
   el("critic-model").textContent = state.config.models.critic.split("/").pop();
@@ -118,7 +125,248 @@ async function loadConfig() {
   });
   configureResearchBrowser();
   configureIntegrationDownloads();
+  renderKnowledgeSelection();
   setWorkspaceLocked(workspaceLocked());
+}
+
+function initializeKnowledgeSelection(selectNew = false) {
+  const current = state.knowledge.documents.filter((item) => item.status === "ready");
+  const currentIds = new Set(current.map((item) => item.id));
+  for (const id of [...state.knowledgeSelection]) {
+    if (!currentIds.has(id)) state.knowledgeSelection.delete(id);
+  }
+  if (!state.knowledgeSelectionInitialized) {
+    for (const item of current) if (item.enabled) state.knowledgeSelection.add(item.id);
+    state.knowledgeSelectionInitialized = true;
+  } else if (selectNew) {
+    for (const item of current) {
+      if (item.enabled && !state.knowledgeKnownIds.has(item.id)) state.knowledgeSelection.add(item.id);
+    }
+  }
+  state.knowledgeKnownIds = currentIds;
+}
+
+async function loadKnowledge(includeRetired = false, selectNew = false) {
+  state.knowledge = await api(`/api/knowledge?include_retired=${includeRetired ? "true" : "false"}`);
+  initializeKnowledgeSelection(selectNew);
+  renderKnowledgeSelection();
+  renderKnowledgeCatalog();
+}
+
+function renderKnowledgeSelection() {
+  const ready = state.knowledge.documents.filter((item) => item.status === "ready");
+  const enabled = ready.filter((item) => item.enabled);
+  const selected = enabled.filter((item) => state.knowledgeSelection.has(item.id));
+  el("knowledge-selection-count").textContent = `${selected.length} of ${enabled.length} enabled document${enabled.length === 1 ? "" : "s"} selected`;
+  el("knowledge-stats").textContent = `${state.knowledge.stats?.documents || ready.length} current documents · ${state.knowledge.stats?.chunks || 0} exact passages · ${formatBytes(state.knowledge.stats?.bytes || 0)}`;
+}
+
+function knowledgeLabel(text, control) {
+  const label = document.createElement("label");
+  label.append(document.createTextNode(text), control);
+  return label;
+}
+
+function knowledgeDocumentCard(documentRecord) {
+  const card = document.createElement("article");
+  card.className = `knowledge-document ${documentRecord.enabled ? "enabled" : "disabled"} ${documentRecord.status}`;
+  const header = document.createElement("header");
+  const selection = document.createElement("input");
+  selection.type = "checkbox";
+  selection.checked = state.knowledgeSelection.has(documentRecord.id);
+  selection.disabled = !documentRecord.enabled || documentRecord.status !== "ready" || workspaceLocked();
+  selection.title = "Include this immutable generation in the next run";
+  selection.addEventListener("change", () => {
+    if (selection.checked) state.knowledgeSelection.add(documentRecord.id);
+    else state.knowledgeSelection.delete(documentRecord.id);
+    renderKnowledgeSelection();
+  });
+  const heading = document.createElement("div");
+  const title = document.createElement("h3"); title.textContent = documentRecord.title;
+  const meta = document.createElement("p");
+  meta.textContent = `${displayStatus(documentRecord.source_type)} · generation ${documentRecord.generation} · ${documentRecord.chunk_count} passage${documentRecord.chunk_count === 1 ? "" : "s"} · ${documentRecord.acquisition_count || 0} verified run import${documentRecord.acquisition_count === 1 ? "" : "s"} · ${formatBytes(documentRecord.bytes)}`;
+  heading.append(title, meta);
+  const badge = document.createElement("span"); badge.textContent = documentRecord.status === "ready" ? (documentRecord.enabled ? "ENABLED" : "DISABLED") : documentRecord.status.toUpperCase();
+  header.append(selection, heading, badge);
+
+  const description = document.createElement("p");
+  description.className = "knowledge-description";
+  description.textContent = documentRecord.description || "No description.";
+  const tags = document.createElement("small");
+  tags.textContent = `${(documentRecord.tags || []).join(" · ") || "untagged"} · sha256 ${documentRecord.content_sha256.slice(0, 14)}…`;
+  const actions = document.createElement("div"); actions.className = "knowledge-document-actions";
+  const preview = document.createElement("button"); preview.type = "button"; preview.textContent = "Preview"; preview.addEventListener("click", () => openKnowledgePreview(documentRecord));
+  const chunks = document.createElement("button"); chunks.type = "button"; chunks.textContent = "Indexed passages"; chunks.addEventListener("click", () => openKnowledgeChunks(documentRecord));
+  const acquisitions = document.createElement("button"); acquisitions.type = "button"; acquisitions.textContent = "Import history"; acquisitions.addEventListener("click", () => openKnowledgeAcquisitions(documentRecord));
+  const download = document.createElement("a"); download.href = `/api/knowledge/${encodeURIComponent(documentRecord.id)}/download`; download.textContent = "Download";
+  actions.append(preview, chunks, acquisitions, download);
+  if (documentRecord.status === "ready") {
+    const edit = document.createElement("button"); edit.type = "button"; edit.textContent = "Edit metadata";
+    const toggle = document.createElement("button"); toggle.type = "button"; toggle.textContent = documentRecord.enabled ? "Disable" : "Enable";
+    const reindex = document.createElement("button"); reindex.type = "button"; reindex.textContent = "Reindex";
+    const remove = document.createElement("button"); remove.type = "button"; remove.textContent = "Delete"; remove.className = "danger-link";
+    actions.append(edit, toggle, reindex, remove);
+    const editForm = buildKnowledgeEditForm(documentRecord, card);
+    edit.addEventListener("click", () => editForm.classList.toggle("hidden"));
+    toggle.addEventListener("click", () => mutateKnowledge(`/api/knowledge/${encodeURIComponent(documentRecord.id)}/enabled`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled: !documentRecord.enabled, etag: documentRecord.etag }) }, "Knowledge availability updated."));
+    reindex.addEventListener("click", () => mutateKnowledge(`/api/knowledge/${encodeURIComponent(documentRecord.id)}/reindex?etag=${documentRecord.etag}`, { method: "POST" }, "A new indexed generation was created."));
+    remove.addEventListener("click", async () => {
+      if (!window.confirm(`Delete “${documentRecord.title}” from future runs? Existing run snapshots remain reproducible.`)) return;
+      await mutateKnowledge(`/api/knowledge/${encodeURIComponent(documentRecord.id)}?etag=${documentRecord.etag}`, { method: "DELETE" }, "Knowledge document deleted.");
+    });
+    card.append(header, description, tags, actions, editForm);
+  } else {
+    card.append(header, description, tags, actions);
+  }
+  return card;
+}
+
+function buildKnowledgeEditForm(documentRecord, card) {
+  const form = document.createElement("form"); form.className = "knowledge-inline-edit hidden";
+  const title = document.createElement("input"); title.value = documentRecord.title; title.maxLength = 300; title.required = true;
+  const type = document.createElement("select");
+  for (const value of ["primary_study", "review", "guideline", "documentation", "dataset", "web_page", "other"]) { const option = document.createElement("option"); option.value = value; option.textContent = displayStatus(value); option.selected = value === documentRecord.source_type; type.append(option); }
+  const url = document.createElement("input"); url.type = "url"; url.maxLength = 2000; url.value = documentRecord.canonical_url || "";
+  const tags = document.createElement("input"); tags.value = (documentRecord.tags || []).join(", "); tags.maxLength = 1000;
+  const description = document.createElement("textarea"); description.rows = 3; description.maxLength = 4000; description.value = documentRecord.description || "";
+  const save = document.createElement("button"); save.type = "submit"; save.textContent = "Save as new generation";
+  form.append(knowledgeLabel("Title", title), knowledgeLabel("Source type", type), knowledgeLabel("Canonical URL", url), knowledgeLabel("Tags", tags), knowledgeLabel("Description", description), save);
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault(); save.disabled = true;
+    try {
+      await mutateKnowledge(`/api/knowledge/${encodeURIComponent(documentRecord.id)}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: title.value, source_type: type.value, canonical_url: url.value, tags: tags.value.split(",").map((item) => item.trim()).filter(Boolean), description: description.value, etag: documentRecord.etag }) }, "Metadata saved as an immutable generation.");
+    } finally { save.disabled = false; }
+  });
+  return form;
+}
+
+function renderKnowledgeCatalog() {
+  const catalog = el("knowledge-catalog");
+  if (!catalog) return;
+  catalog.replaceChildren();
+  const query = el("knowledge-filter").value.trim().toLowerCase();
+  const records = state.knowledge.documents.filter((item) => !query || `${item.title} ${item.description} ${item.source_type} ${(item.tags || []).join(" ")}`.toLowerCase().includes(query));
+  if (!records.length) { const empty = document.createElement("p"); empty.className = "file-empty"; empty.textContent = "No knowledge documents match this view."; catalog.append(empty); return; }
+  for (const item of records) catalog.append(knowledgeDocumentCard(item));
+}
+
+async function mutateKnowledge(path, options, message) {
+  await api(path, options);
+  await loadKnowledge(el("knowledge-show-retired").checked, true);
+  toast(message);
+}
+
+async function openKnowledgePreview(documentRecord) {
+  const dialog = el("artifact-preview-dialog");
+  state.previewArtifact = { kind: "knowledge", path: documentRecord.id };
+  el("artifact-preview-title").textContent = documentRecord.title;
+  el("artifact-preview-meta").textContent = "Loading extracted text…";
+  el("artifact-preview-text").textContent = "";
+  el("artifact-preview-download").href = `/api/knowledge/${encodeURIComponent(documentRecord.id)}/download`;
+  if (!dialog.open) dialog.showModal();
+  const requestId = ++state.previewRequest;
+  try {
+    const preview = await api(`/api/knowledge/${encodeURIComponent(documentRecord.id)}/preview`);
+    if (requestId !== state.previewRequest || state.previewArtifact?.kind !== "knowledge" || state.previewArtifact?.path !== documentRecord.id) return;
+    el("artifact-preview-text").textContent = preview.content;
+    el("artifact-preview-meta").textContent = `${formatBytes(preview.bytes)} · ${preview.truncated ? "head + tail preview" : "complete extracted text"}`;
+  } catch (error) { if (requestId === state.previewRequest) { el("artifact-preview-meta").textContent = "Preview unavailable"; el("artifact-preview-text").textContent = error.message; } }
+}
+
+async function openKnowledgeChunks(documentRecord) {
+  const dialog = el("artifact-preview-dialog");
+  state.previewArtifact = { kind: "knowledge-chunks", path: documentRecord.id };
+  el("artifact-preview-title").textContent = `${documentRecord.title} — indexed passages`;
+  el("artifact-preview-meta").textContent = "Loading immutable passage index…";
+  el("artifact-preview-text").textContent = "";
+  el("artifact-preview-download").href = `/api/knowledge/${encodeURIComponent(documentRecord.id)}/download`;
+  if (!dialog.open) dialog.showModal();
+  const requestId = ++state.previewRequest;
+  try {
+    const chunks = await api(`/api/knowledge/${encodeURIComponent(documentRecord.id)}/chunks?limit=200`);
+    if (requestId !== state.previewRequest || state.previewArtifact?.kind !== "knowledge-chunks" || state.previewArtifact?.path !== documentRecord.id) return;
+    el("artifact-preview-text").textContent = chunks.map((chunk) =>
+      `Passage ${chunk.ordinal + 1}\ncharacters ${chunk.char_start}–${chunk.char_end}\nsha256 ${chunk.sha256}\nindexed characters ${chunk.chars}`
+    ).join("\n\n");
+    el("artifact-preview-meta").textContent = `${chunks.length} immutable indexed passage${chunks.length === 1 ? "" : "s"}${documentRecord.chunk_count > chunks.length ? " · first 200 shown" : ""}`;
+  } catch (error) {
+    if (requestId === state.previewRequest) {
+      el("artifact-preview-meta").textContent = "Passage index unavailable";
+      el("artifact-preview-text").textContent = error.message;
+    }
+  }
+}
+
+async function openKnowledgeAcquisitions(documentRecord) {
+  const dialog = el("artifact-preview-dialog");
+  state.previewArtifact = { kind: "knowledge-acquisitions", path: documentRecord.id };
+  el("artifact-preview-title").textContent = `${documentRecord.title} — verified import history`;
+  el("artifact-preview-meta").textContent = "Loading controller-recorded acquisitions…";
+  el("artifact-preview-text").textContent = "";
+  el("artifact-preview-download").href = `/api/knowledge/${encodeURIComponent(documentRecord.id)}/download`;
+  if (!dialog.open) dialog.showModal();
+  const requestId = ++state.previewRequest;
+  try {
+    const acquisitions = await api(`/api/knowledge/${encodeURIComponent(documentRecord.id)}/acquisitions`);
+    if (requestId !== state.previewRequest || state.previewArtifact?.kind !== "knowledge-acquisitions" || state.previewArtifact?.path !== documentRecord.id) return;
+    el("artifact-preview-text").textContent = acquisitions.length ? acquisitions.map((item) =>
+      `Acquired ${item.acquired_at}\nworkspace ${item.workspace_id}\nrun ${item.run_id}\nsource ${item.source_id}\nPMID ${item.pmid || "—"}\nDOI ${item.doi || "—"}\noriginal sha256 ${item.original_sha256}\ntext sha256 ${item.content_sha256}`
+    ).join("\n\n") : "No completed run has automatically imported this document. It was added or curated manually.";
+    el("artifact-preview-meta").textContent = `${acquisitions.length} controller-verified run acquisition${acquisitions.length === 1 ? "" : "s"}`;
+  } catch (error) {
+    if (requestId === state.previewRequest) {
+      el("artifact-preview-meta").textContent = "Import history unavailable";
+      el("artifact-preview-text").textContent = error.message;
+    }
+  }
+}
+
+async function openKnowledgeLibrary() {
+  await loadKnowledge(el("knowledge-show-retired").checked);
+  const dialog = el("knowledge-library-dialog");
+  if (!dialog.open) dialog.showModal();
+}
+
+async function uploadKnowledge(event) {
+  event.preventDefault();
+  const file = el("knowledge-upload-file").files[0];
+  if (!file) return;
+  const body = new FormData();
+  body.append("upload", file);
+  body.append("title", el("knowledge-upload-title").value);
+  body.append("description", el("knowledge-upload-description").value);
+  body.append("tags", el("knowledge-upload-tags").value);
+  body.append("source_type", el("knowledge-upload-source-type").value);
+  body.append("canonical_url", el("knowledge-upload-url").value);
+  const button = el("knowledge-upload-form").querySelector("button[type=submit]");
+  button.disabled = true;
+  try {
+    await api("/api/knowledge", { method: "POST", body });
+    el("knowledge-upload-form").reset();
+    await loadKnowledge(el("knowledge-show-retired").checked, true);
+    toast("Knowledge document extracted, hashed, and indexed.");
+  } finally { button.disabled = false; }
+}
+
+async function searchKnowledge(event) {
+  event.preventDefault();
+  const container = el("knowledge-search-results");
+  container.replaceChildren();
+  const response = await api("/api/knowledge/search", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query: el("knowledge-search-query").value, limit: 8 }),
+  });
+  if (!response.passages.length) {
+    const empty = document.createElement("p"); empty.textContent = "No lexical passage matched. Try a synonym; absence of a hit is not proof of absence."; container.append(empty); return;
+  }
+  for (const passage of response.passages) {
+    const item = document.createElement("article");
+    const title = document.createElement("strong"); title.textContent = passage.title;
+    const meta = document.createElement("small"); meta.textContent = `characters ${passage.char_start}–${passage.char_end} · sha256 ${passage.chunk_sha256.slice(0, 14)}…`;
+    const text = document.createElement("p"); text.textContent = passage.untrusted_source_text;
+    item.append(title, meta, text); container.append(item);
+  }
 }
 
 function configureIntegrationDownloads() {
@@ -381,6 +629,10 @@ function reflectActiveProtocol() {
   document.querySelectorAll("#mcp-options input").forEach((input) => {
     input.checked = active.mcp_servers.includes(input.value);
   });
+  if (active.knowledge_snapshot?.documents) {
+    state.knowledgeSelection = new Set(active.knowledge_snapshot.documents.map((item) => item.document_id));
+    renderKnowledgeSelection();
+  }
 }
 
 function renderActiveRun() {
@@ -417,6 +669,7 @@ function setWorkspaceLocked(locked) {
   const drop = el("drop-zone");
   drop.classList.toggle("locked", locked);
   drop.setAttribute("aria-disabled", String(locked));
+  renderKnowledgeCatalog();
 }
 
 function renderFiles() {
@@ -574,7 +827,8 @@ function renderRail() {
   el("run-message").textContent = run ? run.message : "No run selected.";
   const current = run?.phase || "";
   let activeIndex = phaseOrder.indexOf(current);
-  if (current === "plan-review" || current === "reporting") activeIndex = current === "plan-review" ? 0 : 1;
+  if (current === "plan-review") activeIndex = phaseOrder.indexOf("planning");
+  if (current === "reporting") activeIndex = phaseOrder.indexOf("research");
   if (current === "complete") activeIndex = phaseOrder.length;
   if (["failed", "stopped", "cancelled", "canceling"].includes(current)) activeIndex = -1;
   document.querySelectorAll("#provenance-rail li").forEach((item, index) => {
@@ -1070,6 +1324,7 @@ function sourceRow(source, run) {
   const id = document.createElement("code"); id.textContent = source.source_id;
   const copy = document.createElement("div");
   const local = (run.reference_manifest?.references || []).find((item) => item.source_id === source.source_id);
+  const knowledge = (run.result?.retrieval_evidence?.knowledge_passages || []).find((item) => item.source_url === source.url);
   const link = document.createElement(local?.markdown ? "button" : source.url ? "a" : "span");
   link.textContent = source.title;
   if (local?.markdown) {
@@ -1093,6 +1348,16 @@ function sourceRow(source, run) {
     markdown.type = "button"; markdown.textContent = source.full_text_status === "abstract_only" ? "Abstract" : "Text";
     markdown.addEventListener("click", () => openArtifactPreview(local.markdown.path, run.id));
     actions.append(markdown);
+  }
+  if (knowledge) {
+    const text = document.createElement("a");
+    text.href = `/api/runs/${encodeURIComponent(run.id)}/knowledge/documents/${encodeURIComponent(knowledge.document_id)}/text`;
+    text.textContent = "Full text"; text.target = "_blank"; text.rel = "noreferrer";
+    const original = document.createElement("a");
+    original.href = `/api/runs/${encodeURIComponent(run.id)}/knowledge/documents/${encodeURIComponent(knowledge.document_id)}/original`;
+    original.textContent = knowledge.document_filename?.toLowerCase().endsWith(".pdf") ? "PDF" : "Original";
+    original.target = "_blank"; original.rel = "noreferrer";
+    actions.append(text, original);
   }
   if (source.url) {
     const canonical = document.createElement("a"); canonical.href = source.url;
@@ -1198,7 +1463,12 @@ async function startRun(event) {
   event.preventDefault();
   if (workspaceLocked()) return;
   const mcp = [...document.querySelectorAll("#mcp-options input:checked")].map((input) => input.value);
-  const body = { objective: el("objective").value, enable_code: el("enable-code").checked, mcp_servers: mcp };
+  const body = {
+    objective: el("objective").value,
+    enable_code: el("enable-code").checked,
+    mcp_servers: mcp,
+    knowledge_document_ids: [...state.knowledgeSelection],
+  };
   const run = await api(`/api/workspaces/${state.workspace.id}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   state.activeRun = await api(`/api/runs/${run.id}`);
   state.selectedRun = state.activeRun;
@@ -1276,7 +1546,10 @@ async function pollActiveRun() {
     renderWorkspaces();
     renderWorkspace();
     if (state.activeRun) schedulePoll();
-    else toast(`Run finished: ${displayStatus(run.status)}.`);
+    else {
+      try { await loadKnowledge(false, true); } catch (_) { /* run result remains authoritative */ }
+      toast(`Run finished: ${displayStatus(run.status)}.`);
+    }
   } catch (error) {
     if (!state.pollErrorShown) { toast(`Live monitor delayed: ${error.message}`, "error"); state.pollErrorShown = true; }
     state.pollBackoff = Math.min(15000, state.pollBackoff * 2);
@@ -1305,6 +1578,17 @@ function bindEvents() {
   el("research-browser-reconnect").addEventListener("click", reconnectResearchBrowser);
   el("integration-downloads-button").addEventListener("click", () => el("integration-downloads-dialog").showModal());
   el("integration-downloads-close").addEventListener("click", () => el("integration-downloads-dialog").close());
+  el("knowledge-library-button").addEventListener("click", () => openKnowledgeLibrary().catch((error) => toast(error.message, "error")));
+  el("knowledge-manage-inline").addEventListener("click", () => openKnowledgeLibrary().catch((error) => toast(error.message, "error")));
+  el("knowledge-library-close").addEventListener("click", () => el("knowledge-library-dialog").close());
+  el("knowledge-upload-form").addEventListener("submit", (event) => uploadKnowledge(event).catch((error) => toast(error.message, "error")));
+  el("knowledge-search-form").addEventListener("submit", (event) => searchKnowledge(event).catch((error) => toast(error.message, "error")));
+  el("knowledge-filter").addEventListener("input", renderKnowledgeCatalog);
+  el("knowledge-show-retired").addEventListener("change", () => loadKnowledge(el("knowledge-show-retired").checked).catch((error) => toast(error.message, "error")));
+  el("knowledge-upload-file").addEventListener("change", () => { const file = el("knowledge-upload-file").files[0]; if (file && !el("knowledge-upload-title").value) el("knowledge-upload-title").value = file.name.replace(/\.[^.]+$/, ""); });
+  el("knowledge-select-all").addEventListener("click", () => { for (const item of state.knowledge.documents) if (item.status === "ready" && item.enabled) state.knowledgeSelection.add(item.id); renderKnowledgeSelection(); renderKnowledgeCatalog(); });
+  el("knowledge-select-none").addEventListener("click", () => { state.knowledgeSelection.clear(); renderKnowledgeSelection(); renderKnowledgeCatalog(); });
+  el("knowledge-reindex-all").addEventListener("click", async () => { if (!window.confirm("Create a new immutable indexed generation for every current document? Existing run snapshots will remain unchanged.")) return; try { await mutateKnowledge("/api/knowledge/reindex-all", { method: "POST" }, "Knowledge library reindexed."); } catch (error) { toast(error.message, "error"); } });
   el("cancel-dialog").addEventListener("close", () => { if (el("cancel-dialog").returnValue === "cancel") cancelActiveRun().catch((error) => toast(error.message, "error")); });
   const drop = el("drop-zone");
   ["dragenter", "dragover"].forEach((name) => drop.addEventListener(name, (event) => { event.preventDefault(); if (!workspaceLocked()) drop.classList.add("dragging"); }));
@@ -1323,6 +1607,9 @@ function bindEvents() {
     el("objective").value = state.selectedRun.objective;
     el("enable-code").checked = state.selectedRun.enable_code;
     document.querySelectorAll("#mcp-options input").forEach((input) => { input.checked = state.selectedRun.mcp_servers.includes(input.value) && !input.disabled; });
+    state.knowledgeSelection = new Set((state.selectedRun.knowledge_snapshot?.documents || []).map((item) => item.document_id));
+    renderKnowledgeSelection();
+    renderKnowledgeCatalog();
     el("objective").focus();
     el("task-form").scrollIntoView({ behavior: "smooth", block: "start" });
     toast("Protocol loaded for review. Starting it remains a separate action.");

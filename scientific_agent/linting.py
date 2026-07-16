@@ -1400,8 +1400,126 @@ def validate_report(
     retrieval_artifacts = {
         os.path.normpath(path) for path in (retrieval.artifacts if retrieval else [])
     }
+    knowledge_passages_by_url: dict[str, tuple[Any, str]] = {}
+    knowledge_snapshot_documents: dict[str, tuple[str, str]] = {}
+    snapshot_artifact = next(
+        (
+            Path(artifact.path)
+            for artifact in controller_artifacts
+            if Path(artifact.path).name == "knowledge_snapshot.json"
+        ),
+        None,
+    )
+    if snapshot_artifact is not None:
+        try:
+            snapshot = json.loads(snapshot_artifact.read_text(encoding="utf-8"))
+            expected = snapshot.pop("snapshot_sha256")
+            observed = hashlib.sha256(
+                json.dumps(
+                    snapshot, sort_keys=True, separators=(",", ":"), default=str
+                ).encode()
+            ).hexdigest()
+            if observed != expected or (
+                retrieval
+                and retrieval.knowledge_snapshot_sha256
+                and retrieval.knowledge_snapshot_sha256 != expected
+            ):
+                raise ValueError("snapshot hash mismatch")
+            knowledge_snapshot_documents = {
+                str(item["document_id"]): (
+                    str(item["original_sha256"]),
+                    str(item["content_sha256"]),
+                )
+                for item in snapshot.get("documents", [])
+            }
+        except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
+            findings.append(
+                LintFinding(
+                    code="knowledge_snapshot_invalid",
+                    location="knowledge_snapshot.json",
+                    message="The controller knowledge snapshot failed integrity validation.",
+                )
+            )
+    for passage in retrieval.knowledge_passages if retrieval else []:
+        location = f"knowledge_passages[{passage.passage_id}]"
+        path = Path(passage.artifact_path)
+        normalized = os.path.normpath(passage.artifact_path)
+        try:
+            expected_document = knowledge_snapshot_documents.get(passage.document_id)
+            if expected_document is None:
+                raise ValueError("passage document is absent from the snapshot")
+            artifact_text = path.read_text(encoding="utf-8")
+            marker = "# Exact untrusted source passage\n\n"
+            source_text = artifact_text.split(marker, 1)[1]
+            if source_text.endswith("\n"):
+                source_text = source_text[:-1]
+            valid = bool(
+                passage.content_sha256 == expected_document[1]
+                and normalized in retrieval_artifacts
+                and path.is_file()
+                and not path.is_symlink()
+                and hashlib.sha256(path.read_bytes()).hexdigest()
+                == passage.artifact_sha256
+                and hashlib.sha256(source_text.encode("utf-8")).hexdigest()
+                == passage.chunk_sha256
+                and len(source_text) == passage.char_end - passage.char_start
+            )
+            for document_path, document_sha, expected_sha in (
+                (
+                    Path(passage.document_text_path),
+                    passage.document_text_sha256,
+                    expected_document[1],
+                ),
+                (
+                    Path(passage.document_original_path),
+                    passage.document_original_sha256,
+                    expected_document[0],
+                ),
+            ):
+                valid = bool(
+                    valid
+                    and os.path.normpath(str(document_path)) in retrieval_artifacts
+                    and document_path.is_file()
+                    and not document_path.is_symlink()
+                    and document_sha == expected_sha
+                    and hashlib.sha256(document_path.read_bytes()).hexdigest()
+                    == document_sha
+                )
+        except (OSError, UnicodeError, IndexError, TypeError, ValueError):
+            valid = False
+            source_text = ""
+        if not valid:
+            findings.append(
+                LintFinding(
+                    code="knowledge_passage_integrity_failed",
+                    location=location,
+                    message=(
+                        "A knowledge citation must resolve to exact hash-checked "
+                        "passage bytes from this run's immutable snapshot."
+                    ),
+                )
+            )
+            continue
+        normalized_url = _normalize_url(passage.source_url)
+        if normalized_url in knowledge_passages_by_url:
+            findings.append(
+                LintFinding(
+                    code="duplicate_knowledge_passage_url",
+                    location=location,
+                    message="Knowledge passage URLs must identify exactly one passage.",
+                )
+            )
+            continue
+        knowledge_passages_by_url[normalized_url] = (passage, source_text)
     acquired_text_by_source: dict[str, str] = {}
     for index, source in enumerate(report.sources):
+        knowledge_match = (
+            knowledge_passages_by_url.get(_normalize_url(str(source.url)))
+            if source.url is not None
+            else None
+        )
+        if knowledge_match is not None:
+            acquired_text_by_source[source.source_id] = knowledge_match[1].casefold()
         if source.doi is not None and source.source_type == "web_page":
             findings.append(
                 LintFinding(
@@ -1419,6 +1537,7 @@ def validate_report(
             source.url is not None
             and source.source_type in {"primary_study", "review"}
             and source.local_markdown_path is None
+            and knowledge_match is None
         ):
             findings.append(
                 LintFinding(
@@ -1432,7 +1551,11 @@ def validate_report(
                     ),
                 )
             )
-        if source.pmid and source.local_markdown_path is None:
+        if (
+            source.pmid
+            and source.local_markdown_path is None
+            and knowledge_match is None
+        ):
             findings.append(
                 LintFinding(
                     code="pubmed_source_without_local_text",
@@ -1486,7 +1609,7 @@ def validate_report(
                             message="Local literature PDF failed signature or size checks.",
                         )
                     )
-        if source.pmid and source.full_text_status is None:
+        if source.pmid and source.full_text_status is None and knowledge_match is None:
             findings.append(
                 LintFinding(
                     code="pubmed_acquisition_status_missing",
@@ -1494,7 +1617,7 @@ def validate_report(
                     message="A cited PubMed record requires an explicit acquisition status.",
                 )
             )
-        if source.pmid:
+        if source.pmid and knowledge_match is None:
             try:
                 acquired, _, markdown = load_acquired_article_record(source, retrieval)
                 acquired_text_by_source[source.source_id] = markdown.lower()
@@ -1564,6 +1687,40 @@ def validate_report(
                         code="pubmed_acquisition_metadata_invalid",
                         location=f"sources[{index}]",
                         message=str(exc),
+                    )
+                )
+        if knowledge_match is not None:
+            _, source_text = knowledge_match
+            passage_terms = _grounding_terms(source.supporting_passage)
+            if passage_terms and not any(
+                term in source_text.casefold() for term in passage_terms
+            ):
+                findings.append(
+                    LintFinding(
+                        code="knowledge_supporting_passage_not_grounded",
+                        location=f"sources[{index}].supporting_passage",
+                        message=(
+                            "The stated supporting passage has no informative "
+                            "term overlap with the exact snapshotted knowledge text."
+                        ),
+                    )
+                )
+            precise = _PRECISE_LITERATURE_NUMBER.findall(source.supporting_passage)
+            missing_numbers = [
+                item
+                for item in precise
+                if item.replace(" ", "") not in source_text.replace(" ", "")
+            ]
+            if missing_numbers:
+                findings.append(
+                    LintFinding(
+                        code="knowledge_supporting_number_not_grounded",
+                        location=f"sources[{index}].supporting_passage",
+                        message=(
+                            "Precise values attributed to a knowledge passage "
+                            "must occur in its exact snapshotted bytes: "
+                            + ", ".join(missing_numbers)
+                        ),
                     )
                 )
     claim_ids = [claim.claim_id for claim in report.claims]
@@ -1937,7 +2094,12 @@ def validate_report(
                         )
                     )
                 if not any(
-                    source.artifact_path or source.local_markdown_path
+                    source.artifact_path
+                    or source.local_markdown_path
+                    or (
+                        source.url is not None
+                        and _normalize_url(str(source.url)) in knowledge_passages_by_url
+                    )
                     for source in referenced_sources
                 ):
                     findings.append(
@@ -1952,7 +2114,12 @@ def validate_report(
                         )
                     )
             if _PROCEDURE_EQUIVALENCE.search(claim.text) and not any(
-                source.artifact_path or source.local_markdown_path
+                source.artifact_path
+                or source.local_markdown_path
+                or (
+                    source.url is not None
+                    and _normalize_url(str(source.url)) in knowledge_passages_by_url
+                )
                 for source in referenced_sources
             ):
                 findings.append(
@@ -1997,8 +2164,7 @@ def validate_report(
                 for source in referenced_sources:
                     acquired_text = acquired_text_by_source.get(source.source_id)
                     if (
-                        source.pmid
-                        and acquired_text is not None
+                        acquired_text is not None
                         and claim_terms
                         and not any(term in acquired_text for term in claim_terms)
                     ):
@@ -2008,7 +2174,7 @@ def validate_report(
                                 location=location,
                                 message=(
                                     f"Claim {claim.claim_id} has no informative term "
-                                    f"overlap with acquired PubMed source "
+                                    f"overlap with exact locally acquired source "
                                     f"{source.source_id}; independent semantic audit "
                                     "cannot substitute for this gross-mismatch check."
                                 ),

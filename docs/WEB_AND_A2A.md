@@ -518,6 +518,17 @@ back up only SQLite: a report's computation and environment hashes refer to file
 in the application and environment trees, and manually acquired paper artifacts
 may originate in browser downloads.
 
+Set `EVIDENCE_BENCH_DEPLOYMENT_ID` to a stable, unique value for each instance.
+The knowledge directory is stamped with that identity and startup fails if a
+private volume is accidentally mounted into the lab deployment or vice versa.
+Knowledge documents are managed from the WebUI. Every new run snapshots the
+selected immutable generations; verified PubMed article Markdown and available
+PDFs cited by a deterministically passing run are automatically deduplicated and
+added to that instance's library. The WebUI retains a per-document acquisition
+history with the controller-verified source, run/workspace, identifiers, and
+hashes, including later runs that reused already-known bytes. Search leads and
+failed downloads are not promoted.
+
 Where you point these three persistence paths is a deployment choice, not
 something this project prescribes. Keep durable application state on backed-up
 storage, monitor its capacity, and keep container layers and build temporary

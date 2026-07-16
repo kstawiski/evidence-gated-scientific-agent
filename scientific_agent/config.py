@@ -270,6 +270,20 @@ class Settings:
             os.environ.get("SCIENTIFIC_AGENT_RUNS_DIR", str(PROJECT_ROOT / "runs"))
         ).resolve()
     )
+    knowledge_root: Path | None = field(
+        default_factory=lambda: (
+            Path(value).resolve()
+            if (value := os.environ.get("SCIENTIFIC_AGENT_KNOWLEDGE_DIR", "").strip())
+            else None
+        )
+    )
+    knowledge_deployment_id: str = field(
+        default_factory=lambda: os.environ.get(
+            "EVIDENCE_BENCH_DEPLOYMENT_ID", "default"
+        ).strip()
+    )
+    knowledge_snapshot: dict | None = None
+    knowledge_citation_base_url: str = ""
     max_repair_rounds: int = field(
         default_factory=lambda: int(os.environ.get("MAX_REPAIR_ROUNDS", "4"))
     )

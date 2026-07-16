@@ -43,7 +43,17 @@ async def fake_runner(objective, settings, *, progress, **kwargs):
                 "limitations": [],
             }
         ],
-        "sources": [],
+        "sources": [
+            {
+                "source_id": "S1",
+                "title": "Fixture article",
+                "url": "https://pubmed.ncbi.nlm.nih.gov/123/",
+                "source_type": "primary_study",
+                "retrieved_at": "2026-07-16T00:00:00Z",
+                "pmid": "123",
+                "rights_status": "full_text_available",
+            }
+        ],
         "unresolved_issues": [],
         "limitations": [],
         "narrative": "Fixture narrative.",
@@ -74,6 +84,9 @@ async def fake_runner(objective, settings, *, progress, **kwargs):
     reference_pdf.write_bytes(b"%PDF-1.4\nfixture\n%%EOF\n")
     reference_markdown.write_text("# Fixture article\n\nPMID: 123\n", encoding="utf-8")
     (root / "scientific_report.json").write_text(json.dumps(report), encoding="utf-8")
+    (root / "deterministic_validation.json").write_text(
+        json.dumps({"passed": True}), encoding="utf-8"
+    )
     (root / "run_result.json").write_text(
         json.dumps({"status": "supported"}), encoding="utf-8"
     )
@@ -134,6 +147,13 @@ async def fake_runner(objective, settings, *, progress, **kwargs):
                         "path": "references/markdown/fixture-2026-pmid123.md",
                         "bytes": reference_markdown.stat().st_size,
                         "sha256": sha256_file(reference_markdown),
+                    },
+                    {
+                        "path": "deterministic_validation.json",
+                        "bytes": (root / "deterministic_validation.json")
+                        .stat()
+                        .st_size,
+                        "sha256": sha256_file(root / "deterministic_validation.json"),
                     },
                 ]
             }
@@ -249,6 +269,18 @@ def test_ui_api_auth_workspace_upload_and_run(tmp_path):
         assert result["status"] == "supported"
         assert result["report"]["title"] == "Validated test report"
         assert result["reference_manifest"]["references"][0]["pmid"] == "123"
+        imported = client.get(
+            "/api/knowledge", auth=("researcher", "correct horse")
+        ).json()["documents"]
+        assert len(imported) == 1
+        assert imported[0]["origin_type"] == "verified_run_article"
+        assert imported[0]["origin_run_id"] == result["id"]
+        assert imported[0]["pmid"] == "123"
+        acquisitions = client.get(
+            f"/api/knowledge/{imported[0]['id']}/acquisitions",
+            auth=("researcher", "correct horse"),
+        ).json()
+        assert acquisitions[0]["run_id"] == result["id"]
         visible_paths = {artifact["path"] for artifact in result["artifacts"]}
         assert "tool_call_log.jsonl" not in visible_paths
         assert "evidence/raw-tool-result.json" not in visible_paths

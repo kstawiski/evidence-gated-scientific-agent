@@ -965,6 +965,23 @@ def test_task_spec_exposes_exact_virtual_input_manifest_to_planners():
     ]
 
 
+def test_task_spec_exposes_controller_input_profile_to_planners():
+    from scientific_agent.schemas import InputProfile
+
+    profile = InputProfile(
+        total_files=1,
+        profiled_files=0,
+        limitations=["task-specific reader required"],
+    )
+    task = _prepare_task_spec(
+        "Analyze the uploaded dataset.",
+        enable_code=True,
+        input_profile=profile,
+    )
+
+    assert task.input_profile == profile
+
+
 def test_controller_task_cannot_be_shortened_by_plan_synthesis():
     full = normalize_task(
         "Analyze the dataset in Python and R, then save a reconciliation artifact."

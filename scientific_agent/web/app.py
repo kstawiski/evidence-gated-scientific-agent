@@ -13,6 +13,7 @@ import tempfile
 import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import quote
 
 import uvicorn
 from a2a.server.request_handlers import DefaultRequestHandler
@@ -22,7 +23,7 @@ from a2a.server.routes import (
     create_jsonrpc_routes,
 )
 from a2a.server.tasks import InMemoryTaskStore
-from fastapi import FastAPI, File, Query, Request, UploadFile
+from fastapi import FastAPI, File, Form, Query, Request, UploadFile
 from fastapi.background import BackgroundTasks
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -32,6 +33,7 @@ from .. import __version__
 from ..config import Settings, load_mcp_secrets
 from ..discussion import discuss_report
 from ..environment import cleanup_workspace_environment
+from ..knowledge import DOCUMENT_ID, KnowledgeLibrary, PASSAGE_ID, SOURCE_TYPES
 from ..orchestrator import run_scientific_task
 from ..provenance import sha256_file
 from ..reporting import FIGURE_MEDIA_TYPES
@@ -113,6 +115,7 @@ class RunCreate(BaseModel):
     objective: str = Field(min_length=3, max_length=20_000)
     enable_code: bool = True
     mcp_servers: list[str] | None = Field(default=None, max_length=3)
+    knowledge_document_ids: list[str] | None = Field(default=None, max_length=10_000)
 
 
 class FollowUpCreate(BaseModel):
@@ -122,6 +125,26 @@ class FollowUpCreate(BaseModel):
 
 class DiscussionCreate(BaseModel):
     message: str = Field(min_length=3, max_length=20_000)
+
+
+class KnowledgeToggle(BaseModel):
+    enabled: bool
+    etag: int = Field(ge=1)
+
+
+class KnowledgeEdit(BaseModel):
+    title: str | None = Field(default=None, min_length=1, max_length=300)
+    description: str | None = Field(default=None, max_length=4_000)
+    tags: list[str] | None = Field(default=None, max_length=32)
+    source_type: str | None = None
+    canonical_url: str | None = Field(default=None, max_length=2_000)
+    etag: int = Field(ge=1)
+
+
+class KnowledgeSearch(BaseModel):
+    query: str = Field(min_length=2, max_length=1_000)
+    document_ids: list[str] | None = Field(default=None, max_length=10_000)
+    limit: int = Field(default=8, ge=1, le=20)
 
 
 def _json_error(status: int, message: str, *, challenge: str | None = None):
@@ -227,11 +250,14 @@ def create_app(
         name for name in scientific_settings.mcp_servers if mcp_availability.get(name)
     )
     store = WorkspaceStore(web.database_path, web.workspaces_dir)
+    knowledge = KnowledgeLibrary(web.knowledge_dir, web.deployment_id, web.public_url)
     service = TaskService(
         store,
         scientific_settings,
         max_workers=web.max_workers,
         runner=runner,
+        knowledge_library=knowledge,
+        public_url=web.public_url,
     )
     skill_archive = build_skill_archive(__version__)
     a2a_archive = build_a2a_archive(
@@ -276,6 +302,7 @@ def create_app(
     app.add_middleware(AuthenticationMiddleware, settings=web)
     app.state.store = store
     app.state.service = service
+    app.state.knowledge = knowledge
     app.state.web_settings = web
 
     @app.middleware("http")
@@ -330,6 +357,7 @@ def create_app(
                 "novnc_port": web.browser_novnc_port,
             },
             "max_upload_bytes": web.max_upload_bytes,
+            "knowledge": knowledge.stats(),
         }
 
     @app.get("/api/model-status")
@@ -377,6 +405,104 @@ def create_app(
     @app.get("/api/integrations/a2a")
     async def download_a2a_integration() -> Response:
         return _integration_response(a2a_archive)
+
+    @app.get("/api/knowledge")
+    async def knowledge_catalog(include_retired: bool = Query(default=False)) -> dict:
+        return {
+            "stats": knowledge.stats(),
+            "documents": knowledge.list_documents(include_retired=include_retired),
+        }
+
+    @app.post("/api/knowledge", status_code=201)
+    async def upload_knowledge(
+        upload: UploadFile = File(...),
+        title: str = Form(..., min_length=1, max_length=300),
+        description: str = Form(default="", max_length=4_000),
+        tags: str = Form(default=""),
+        source_type: str = Form(default="other"),
+        canonical_url: str = Form(default=""),
+    ) -> dict:
+        if upload.filename is None:
+            raise ValueError("uploaded knowledge requires a filename")
+        parsed_tags = [item.strip() for item in tags.split(",") if item.strip()]
+        return await asyncio.to_thread(
+            knowledge.ingest,
+            upload.filename,
+            upload.file,
+            web.max_upload_bytes,
+            title=title,
+            description=description,
+            tags=parsed_tags,
+            source_type=source_type,
+            canonical_url=canonical_url.strip() or None,
+        )
+
+    @app.get("/api/knowledge/{document_id}")
+    async def get_knowledge(document_id: str) -> dict:
+        return knowledge.get_document(document_id)
+
+    @app.patch("/api/knowledge/{document_id}")
+    async def edit_knowledge(document_id: str, request: KnowledgeEdit) -> dict:
+        if request.source_type is not None and request.source_type not in SOURCE_TYPES:
+            raise ValueError("invalid knowledge source type")
+        return await asyncio.to_thread(
+            knowledge.retire_and_clone,
+            document_id,
+            title=request.title,
+            description=request.description,
+            tags=request.tags,
+            source_type=request.source_type,
+            canonical_url=request.canonical_url,
+            etag=request.etag,
+        )
+
+    @app.patch("/api/knowledge/{document_id}/enabled")
+    async def toggle_knowledge(document_id: str, request: KnowledgeToggle) -> dict:
+        return knowledge.update_enabled(document_id, request.enabled, request.etag)
+
+    @app.delete("/api/knowledge/{document_id}", status_code=204)
+    async def delete_knowledge(
+        document_id: str, etag: int = Query(..., ge=1)
+    ) -> Response:
+        knowledge.delete(document_id, etag)
+        return Response(status_code=204)
+
+    @app.post("/api/knowledge/{document_id}/reindex", status_code=201)
+    async def reindex_knowledge(document_id: str, etag: int = Query(..., ge=1)) -> dict:
+        return await asyncio.to_thread(knowledge.reindex, document_id, etag)
+
+    @app.post("/api/knowledge/reindex-all", status_code=201)
+    async def reindex_all_knowledge() -> dict:
+        documents = await asyncio.to_thread(knowledge.reindex_all)
+        return {"documents": documents, "count": len(documents)}
+
+    @app.get("/api/knowledge/{document_id}/download")
+    async def download_knowledge(document_id: str) -> FileResponse:
+        document = knowledge.get_document(document_id)
+        path = knowledge.source_path(document_id)
+        return FileResponse(path, filename=document["filename"])
+
+    @app.get("/api/knowledge/{document_id}/preview")
+    async def preview_knowledge(document_id: str) -> dict:
+        path = knowledge.extracted_path(document_id)
+        return _text_preview(path, f"knowledge/{document_id}/extracted.txt")
+
+    @app.get("/api/knowledge/{document_id}/chunks")
+    async def knowledge_chunks(
+        document_id: str, limit: int = Query(default=200, ge=1, le=1_000)
+    ) -> list[dict]:
+        return knowledge.chunks(document_id, limit)
+
+    @app.get("/api/knowledge/{document_id}/acquisitions")
+    async def knowledge_acquisitions(document_id: str) -> list[dict]:
+        return knowledge.acquisition_history(document_id)
+
+    @app.post("/api/knowledge/search")
+    async def test_knowledge_search(request: KnowledgeSearch) -> dict:
+        snapshot = knowledge.snapshot(request.document_ids)
+        return await asyncio.to_thread(
+            knowledge.search, request.query, snapshot, request.limit
+        )
 
     @app.get("/api/workspaces")
     async def list_workspaces() -> list[dict]:
@@ -450,11 +576,133 @@ def create_app(
             request.objective,
             request.enable_code,
             selected,
+            knowledge_document_ids=request.knowledge_document_ids,
         )
 
     @app.get("/api/runs/{run_id}")
     async def get_run(run_id: str) -> dict:
         return service.detail(run_id)
+
+    @app.get("/api/runs/{run_id}/knowledge/passages/{passage_id}")
+    async def run_knowledge_passage(run_id: str, passage_id: str) -> FileResponse:
+        if not PASSAGE_ID.fullmatch(passage_id):
+            raise KeyError("knowledge passage not found")
+        root = store.run_root(run_id)
+        path = (root / "knowledge" / "passages" / f"{passage_id}.md").resolve()
+        expected_parent = (root / "knowledge" / "passages").resolve()
+        evidence_path = root / "retrieval_evidence.json"
+        if (
+            path.parent != expected_parent
+            or not path.is_file()
+            or path.is_symlink()
+            or not evidence_path.is_file()
+        ):
+            raise KeyError("knowledge passage not found")
+        evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+        record = next(
+            (
+                item
+                for item in evidence.get("knowledge_passages", [])
+                if item.get("passage_id") == passage_id
+            ),
+            None,
+        )
+        if record is None or sha256_file(path) != record.get("artifact_sha256"):
+            raise KeyError("knowledge passage integrity check failed")
+        return FileResponse(
+            path,
+            media_type="text/markdown; charset=utf-8",
+            headers={
+                "Content-Disposition": f'inline; filename="{passage_id}.md"',
+                "Cache-Control": "private, immutable, max-age=31536000",
+            },
+        )
+
+    def registered_run_knowledge_document(
+        run_id: str, document_id: str, kind: str
+    ) -> tuple[Path, dict]:
+        if not DOCUMENT_ID.fullmatch(document_id):
+            raise KeyError("knowledge document not found")
+        root = store.run_root(run_id).resolve()
+        evidence_path = root / "retrieval_evidence.json"
+        if not evidence_path.is_file():
+            raise KeyError("knowledge document not found")
+        evidence = json.loads(evidence_path.read_text(encoding="utf-8"))
+        record = next(
+            (
+                item
+                for item in evidence.get("knowledge_passages", [])
+                if item.get("document_id") == document_id
+            ),
+            None,
+        )
+        if not isinstance(record, dict):
+            raise KeyError("knowledge document not found")
+        path_field = (
+            "document_text_path" if kind == "text" else "document_original_path"
+        )
+        hash_field = (
+            "document_text_sha256" if kind == "text" else "document_original_sha256"
+        )
+        raw_path = record.get(path_field)
+        if not isinstance(raw_path, str):
+            raise KeyError("knowledge document not found")
+        unresolved = Path(raw_path)
+        if (
+            not unresolved.is_absolute()
+            or ".." in unresolved.parts
+            or root not in unresolved.parents
+        ):
+            raise KeyError("knowledge document integrity check failed")
+        relative = unresolved.relative_to(root)
+        if any(
+            (root.joinpath(*relative.parts[:index])).is_symlink()
+            for index in range(1, len(relative.parts) + 1)
+        ):
+            raise KeyError("knowledge document integrity check failed")
+        path = unresolved.resolve()
+        if (
+            root not in path.parents
+            or not path.is_file()
+            or sha256_file(path) != record.get(hash_field)
+        ):
+            raise KeyError("knowledge document integrity check failed")
+        return path, record
+
+    @app.get("/api/runs/{run_id}/knowledge/documents/{document_id}/text")
+    async def run_knowledge_document_text(
+        run_id: str, document_id: str
+    ) -> FileResponse:
+        path, _ = registered_run_knowledge_document(run_id, document_id, "text")
+        return FileResponse(
+            path,
+            media_type="text/markdown; charset=utf-8",
+            headers={
+                "Content-Disposition": f'inline; filename="{document_id}.md"',
+                "Cache-Control": "private, immutable, max-age=31536000",
+            },
+        )
+
+    @app.get("/api/runs/{run_id}/knowledge/documents/{document_id}/original")
+    async def run_knowledge_document_original(
+        run_id: str, document_id: str
+    ) -> FileResponse:
+        path, record = registered_run_knowledge_document(
+            run_id, document_id, "original"
+        )
+        filename = Path(str(record.get("document_filename") or path.name)).name
+        media_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        disposition = "inline" if path.suffix.casefold() == ".pdf" else "attachment"
+        return FileResponse(
+            path,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": (
+                    f"{disposition}; filename*=UTF-8''{quote(filename)}"
+                ),
+                "Cache-Control": "private, immutable, max-age=31536000",
+            },
+        )
 
     @app.get("/api/runs/{run_id}/events")
     async def get_run_events(

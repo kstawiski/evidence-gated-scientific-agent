@@ -1,7 +1,12 @@
 import hashlib
 import json
 
-from evals.run_deployed_eval import _language_result, score
+from evals.run_deployed_eval import (
+    _known_effect_matches_reference,
+    _language_result,
+    _reconciliation_delta,
+    score,
+)
 
 
 class _Artifacts:
@@ -76,6 +81,51 @@ def test_language_result_prefers_complete_reference_over_display_values():
     )
 
     assert selected is complete
+
+
+def test_known_effect_accepts_nested_language_artifact_field_names():
+    value = {
+        "primary": {
+            "treatment_n": 20,
+            "control_n": 20,
+            "treatment_mean_change": 5.0,
+            "control_mean_change": 0.0,
+            "mean_difference": 5.0,
+            "welch_t_statistic": 10.897247358851683,
+            "degrees_of_freedom": 38.0,
+            "p_value": 2.971749478841818e-13,
+            "ci_95_lower": 4.071144254485707,
+            "ci_95_upper": 5.928855745514293,
+            "pooled_sd": 1.4509525002200232,
+            "j_correction": 0.9801324503311258,
+            "hedges_g": 3.3775483697174717,
+        }
+    }
+
+    assert _known_effect_matches_reference(value) is True
+
+
+def test_reconciliation_delta_accepts_typed_comparison_records():
+    artifact = {
+        "comparisons": [
+            {
+                "metric": "mean_difference",
+                "absolute_difference": 0.0,
+                "passed": True,
+            },
+            {
+                "metric": "welch_t_statistic",
+                "absolute_difference": 1.8e-14,
+                "passed": True,
+            },
+        ],
+        "reconciliation_passed": True,
+    }
+
+    assert _reconciliation_delta(artifact, "mean_diff", "mean_difference") == 0.0
+    assert (
+        _reconciliation_delta(artifact, "t_statistic", "welch_t_statistic") == 1.8e-14
+    )
 
 
 def test_cancelled_run_scores_cleanly_without_requesting_final_artifacts():

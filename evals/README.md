@@ -64,6 +64,7 @@ repository does not embed them.
 | Cancellation | **PASS** | A live in-flight analysis was cooperatively cancelled and durably remained `cancelled`; its partial state was not presented as a report. |
 | Managed browser boundary | **PASS** | The service-owned Chromium CDP session and passwordless trusted-network noVNC view were reachable through their intended gateways; CDP stayed unpublished, direct Internet and private proxy targets were denied, downloads/profile data survived restart, and the application saw downloads read-only. |
 | Manuscript-package stress run (pre-fix) | **FAILED MERIT GATE** | Run `18b7b94f-6d3a-4c0c-941c-cc6b96ce0aeb` correctly stopped at `requires_human_decision`, but consumed all four repairs. It recovered bounded Python failures and improved scientific scope/PubMed anchoring; however, the critic invented manuscript-plus-supplement word-count arithmetic, treated permitted placeholders as blockers, and later lost article review to invalid TIFF display preparation. This retained failure directly motivated task-scope critic constraints, controller TIFF/PDF/archive rendering, Gemma-only source-image review, and preservation of article audits when display preparation fails. |
+| Fresh planted-effect run (pre visual-clearance fix) | **FAILED MERIT GATE** | Run `4d143e16-3616-4f7b-8b38-7a9c1ea4f3fe` recovered and reconciled the exact Python/R statistics, but incorrectly labeled the prespecified task exploratory and accepted a visibly overlapping figure after a bare Gemma pass. The run is rejected despite its terminal `supported` status. It directly motivated controller-enforced task risk/method locks, exact per-display Gemma clearance attestations, and evaluator support for the valid nested result shapes. |
 
 The PubMed gate's scored JSON and full provenance bundle are retained with the
 deployment evaluation artifacts. The local paper copies are hash verified and
@@ -82,6 +83,8 @@ PubMed evaluator did not record its image digest, and the public record states
 that gap instead of inferring one retrospectively.
 The retained manuscript stress failure is summarized in
 [`results/v0.4.0-manuscript-stress-pre-fix.json`](results/v0.4.0-manuscript-stress-pre-fix.json).
+The rejected fresh planted-effect run and its implemented repairs are summarized in
+[`results/v0.4.0-known-effect-fresh-pre-visual-gate.json`](results/v0.4.0-known-effect-fresh-pre-visual-gate.json).
 
 The A2A evidence is retained as
 [`results/v0.4.0-a2a-live.json`](results/v0.4.0-a2a-live.json). The server uses

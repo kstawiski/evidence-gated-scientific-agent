@@ -15,8 +15,15 @@ def build_workspace_tools(root: Path):
 
     def resolve(path: str) -> Path:
         candidate = Path(path)
+        if candidate.is_absolute() and candidate.parts[:2] == ("/", "workspace"):
+            candidate = Path(*candidate.parts[2:])
         if not candidate.is_absolute():
             candidate = workspace / candidate
+        current = candidate
+        while current != workspace and workspace in current.parents:
+            if current.is_symlink():
+                raise ValueError(f"symlinks are not allowed in workspace paths: {path}")
+            current = current.parent
         resolved = candidate.resolve()
         if resolved != workspace and workspace not in resolved.parents:
             raise ValueError(f"path escapes workspace: {path}")
@@ -72,20 +79,26 @@ def build_workspace_tools(root: Path):
         try:
             target = resolve(path)
             rx = re.compile(pattern)
-            files = (
-                [target]
-                if target.is_file()
-                else [p for p in target.rglob("*") if p.is_file()]
-            )
+            files = [target] if target.is_file() else target.rglob("*")
             hits: list[str] = []
             for file in files:
-                if file.stat().st_size > MAX_READ_BYTES:
+                if file.is_symlink():
+                    continue
+                confined = file.resolve()
+                if (
+                    confined != workspace and workspace not in confined.parents
+                ) or not confined.is_file():
+                    continue
+                if confined.stat().st_size > MAX_READ_BYTES:
                     continue
                 for line_no, line in enumerate(
-                    file.read_text(encoding="utf-8", errors="replace").splitlines(), 1
+                    confined.read_text(encoding="utf-8", errors="replace").splitlines(),
+                    1,
                 ):
                     if rx.search(line):
-                        hits.append(f"{file.relative_to(workspace)}:{line_no}:{line}")
+                        hits.append(
+                            f"{confined.relative_to(workspace)}:{line_no}:{line}"
+                        )
                         if len(hits) >= MAX_SEARCH_HITS:
                             return {"matches": hits, "truncated": True}
             return {"matches": hits, "truncated": False}

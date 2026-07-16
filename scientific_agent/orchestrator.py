@@ -79,6 +79,7 @@ from .schemas import (
 )
 from .workflow import (
     audit_master_plan,
+    bind_controller_task,
     build_planning_workflow,
     build_simple_planning,
     normalize_task,
@@ -1531,6 +1532,79 @@ def _figures_missing_ocr(display_inputs: list[dict]) -> list[str]:
     return missing
 
 
+def _required_display_clearance_refs(display_inputs: list[dict]) -> list[str]:
+    """Return exact Gemma attestations required for a passing display review."""
+
+    required: list[str] = []
+    for item in display_inputs:
+        display_id = str(item.get("display_id") or "unknown-display")
+        required.append(f"display-reviewed:{display_id}")
+        if item.get("kind") == "figure":
+            required.extend(
+                [
+                    f"visual-clearance:{display_id}:top-text",
+                    f"visual-clearance:{display_id}:legend-data",
+                ]
+            )
+    return required
+
+
+def _enforce_display_clearance_refs(
+    review: VerificationReport,
+    display_inputs: list[dict],
+) -> VerificationReport:
+    """Fail closed when a nominal pass lacks per-display Gemma clearance."""
+
+    if review.verdict not in {"pass", "pass_with_nonblocking_comments"}:
+        return review
+    present = set(review.evidence_refs)
+    missing_by_display: dict[str, list[str]] = {}
+    for item in display_inputs:
+        display_id = str(item.get("display_id") or "unknown-display")
+        required = [f"display-reviewed:{display_id}"]
+        if item.get("kind") == "figure":
+            required.extend(
+                [
+                    f"visual-clearance:{display_id}:top-text",
+                    f"visual-clearance:{display_id}:legend-data",
+                ]
+            )
+        missing = [value for value in required if value not in present]
+        if missing:
+            missing_by_display[display_id] = missing
+    if not missing_by_display:
+        return review
+    clearance_gate = VerificationReport(
+        verdict="inconclusive",
+        blocking_findings=[
+            Finding(
+                finding_id=(
+                    "controller-display-clearance-missing-"
+                    + hashlib.sha256(display_id.encode("utf-8")).hexdigest()[:12]
+                ),
+                location=f"display {display_id}",
+                problem=(
+                    "The visual critic returned a nominal pass without all required "
+                    "per-display clearance attestations."
+                ),
+                why_it_matters=(
+                    "A generic pass does not prove that title spacing and legend/data "
+                    "occlusion were inspected at sufficient detail."
+                ),
+                evidence="Missing evidence_refs: " + ", ".join(missing),
+                falsification_test_or_correction=(
+                    "Repeat the Gemma-only raster review and either report the visible "
+                    "defect or return every exact clearance reference after direct "
+                    "inspection; Qwen must not interpret image pixels."
+                ),
+            )
+            for display_id, missing in missing_by_display.items()
+        ],
+        evidence_refs=list(review.evidence_refs),
+    )
+    return _merge_reviews(review, clearance_gate)
+
+
 def _display_provenance_summary(
     display_inputs: list[dict],
 ) -> tuple[list[dict], list[dict]]:
@@ -1542,6 +1616,26 @@ def _display_provenance_summary(
             continue
         ocr = item.get("ocr") if isinstance(item.get("ocr"), dict) else {}
         ocr_text = str(ocr.get("text") or "")
+        layout_questions = (
+            item.get("layout_review_questions")
+            if isinstance(item.get("layout_review_questions"), dict)
+            else {}
+        )
+        top_clearance = (
+            layout_questions.get("top_text_clearance")
+            if isinstance(layout_questions.get("top_text_clearance"), dict)
+            else {}
+        )
+        legend_clearance = (
+            layout_questions.get("legend_data_clearance")
+            if isinstance(layout_questions.get("legend_data_clearance"), dict)
+            else {}
+        )
+        legend_candidate = (
+            legend_clearance.get("candidate")
+            if isinstance(legend_clearance.get("candidate"), dict)
+            else {}
+        )
         figure_text_inputs.append(
             {
                 "display_id": item["display_id"],
@@ -1557,6 +1651,13 @@ def _display_provenance_summary(
                     else None
                 ),
                 "geometry_available": bool(ocr.get("words")),
+                "top_text_overlap_candidates": int(
+                    top_clearance.get("candidate_overlap_count", 0)
+                ),
+                "top_text_overlap_candidates_in_top_band": int(
+                    top_clearance.get("candidate_overlap_count_in_top_22_percent", 0)
+                ),
+                "legend_candidate_priority": legend_candidate.get("priority"),
             }
         )
     table_previews = [
@@ -2065,7 +2166,7 @@ async def _repair_plan(
             else None
         ),
     )
-    master = master.model_copy(update={"task": planning.master_plan.task})
+    master = bind_controller_task(master, planning.master_plan.task)
     audit = await _audit_plan(settings, master, on_visible_text)
     lint = lint_plan(master.task, master.plan)
     status = planning_status(lint, audit)
@@ -2732,6 +2833,9 @@ async def _audit_report(
                 },
                 "display_inputs": batch_inputs,
                 "visual_input_order": [item["display_id"] for item in batch_figures],
+                "required_clearance_refs": _required_display_clearance_refs(
+                    batch_inputs
+                ),
                 "batch": {
                     "number": batch_number,
                     "total": len(image_batches),
@@ -2749,8 +2853,11 @@ async def _audit_report(
                     on_visible_text=on_visible_text,
                     cancel_event=cancel_event,
                 )
-                model_result = _without_ocr_contradicted_typography(
-                    raw_model_result, batch_inputs
+                model_result = _enforce_display_clearance_refs(
+                    _without_ocr_contradicted_typography(
+                        raw_model_result, batch_inputs
+                    ),
+                    batch_inputs,
                 )
                 display_results.append(model_result)
                 if audit_outputs is not None:

@@ -66,8 +66,10 @@ falsifiable validator, not as a model-generated output artifact. Stop immediatel
 after all five statuses and return only PlanAuditChecklist."""
 
 SCIENTIFIC_REPORT_CONTRACT = """
-Write a standards-derived exploratory scientific report, never a claim of peer
-review, science lock, manuscript readiness, or submission readiness. The report
+Write a standards-derived scientific report, never a claim of peer review, science
+lock, manuscript readiness, or submission readiness. Preserve the TaskSpec and
+controller protocol's confirmatory, exploratory, or decision-critical status.
+Never relabel one as another. The report
 must obey the user's task scope rather than invent an external readiness audit. If
 the task explicitly excludes submission readiness, administrative formatting or
 placeholder observations are not scientific blockers unless they prevent the
@@ -240,9 +242,15 @@ artifact-producing call in every required computation language and any required
 cross-language reconciliation before retrieving optional additional papers.
 use run_python_analysis and/or run_r_analysis. Read inputs from /workspace and
 write all result tables, figures, and machine-readable summaries under /output.
+For list_workspace, read_text_file, and search_workspace, pass a workspace-relative
+path such as `known_effect.csv`; the `/workspace/...` form is the equivalent path
+inside Python/R sandbox code, not a requirement for inspection-tool arguments.
 Put final report figures below /output/figures and final report tables below
-/output/tables; put intermediate data and diagnostics below /output/data. Figures
-must be publication-size raster PNG/JPEG/WebP saved with at least 300-DPI
+/output/tables; put intermediate data and diagnostics below /output/data.
+The output subdirectories are not precreated: before every write, Python must use
+`Path(target).parent.mkdir(parents=True, exist_ok=True)` (or equivalent), and R
+must use `dir.create(dirname(target), recursive=TRUE, showWarnings=FALSE)`.
+Figures must be publication-size raster PNG/JPEG/WebP saved with at least 300-DPI
 metadata, with legible axes, units, labels, color-independent encoding, visible
 uncertainty, and no clipping or overlap. A single numeric axis may contain only
 quantities with the same units and interpretation. In particular, never plot an
@@ -543,7 +551,24 @@ You are the sole visual critic: all image understanding is performed in this
 Gemma review. The primary Qwen agent never receives raster images and must not be
 treated as visual corroboration. Controller OCR, geometry, hashes, and table
 previews are supplementary evidence; missing OCR alone does not excuse inspection
-of a supplied raster. The image order exactly matches visual_input_order.
+of a supplied raster. `layout_review_questions` are deterministic attention
+signals, not pixel interpretations or automatic defects. Inspect the named region
+yourself and either report the visible defect or explicitly clear the question.
+The image order exactly matches visual_input_order.
+
+PASS CLEARANCE CONTRACT: before returning pass or pass_with_nonblocking_comments,
+inspect every supplied display separately and add exact machine-readable strings
+to evidence_refs. For every display add `display-reviewed:<display_id>`. For every
+figure additionally add `visual-clearance:<display_id>:top-text` only after zooming
+the top band and confirming that title, subtitle, test label, estimate, and interval
+do not overlap, and add `visual-clearance:<display_id>:legend-data` only after
+tracing the complete legend rectangle and confirming that it covers no point,
+error bar, annotation, or statistical text. Copy display_id byte for byte from the
+payload. Never emit a clearance string for a region with a defect. A bare pass, a
+generic evidence reference, or one display's clearance applied to another display
+is invalid and will fail closed. A controller geometry warning may be visually
+cleared when direct inspection proves spacing is sound; the warning alone does not
+force a repair.
 
 Inputs marked registered=false are successful computation artifacts that the
 draft failed to register. Audit their actual image/table content anyway. Report

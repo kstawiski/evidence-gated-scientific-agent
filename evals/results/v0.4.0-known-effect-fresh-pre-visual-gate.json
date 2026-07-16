@@ -1,0 +1,31 @@
+{
+  "case": "known-effect-fresh-pre-visual-gate",
+  "release_candidate": "v0.4.0",
+  "started_at": "2026-07-16T01:39:23.586948+00:00",
+  "deployment_commit": "b82d9ea980a50c021efd821e40c2670e33d6b9b8",
+  "deployment_image_digest": "sha256:25d724da44b23a313ecb999261a98bf1808c1a5cdc733941468f464e7bc5b23e",
+  "workspace_id": "7dd7053b-6da3-4144-820b-74349230fbc4",
+  "run_id": "4d143e16-3616-4f7b-8b38-7a9c1ea4f3fe",
+  "terminal_status": "supported",
+  "merit_gate": "failed",
+  "productive_behavior": [
+    "Python and R independently recovered a treatment-minus-control mean-change difference of 5.0.",
+    "The Welch statistic was 10.897247358851683 with 38 degrees of freedom, p=2.971749478841818e-13, and a 95% confidence interval of [4.071144254485707, 5.928855745514293].",
+    "Both implementations recovered Hedges g=3.37754836971747 and the reconciliation artifact passed at absolute tolerance 1e-6.",
+    "Live Qwen and Gemma output, successful and failed code, tracebacks, generated artifacts, and final files were downloadable while the run was active.",
+    "A missing /output/data directory caused one bounded Python failure; Qwen recovered within the same audited run and preserved the failed attempt."
+  ],
+  "release_blockers": [
+    "The controller classified an explicitly prespecified, pre-outcome-locked analysis as exploratory, and the report repeated that incorrect status.",
+    "The generated figure visibly overlapped title, subtitle, and test-label text and placed a legend over the plot region, but the Gemma display critic returned a bare pass with no evidence references.",
+    "The deployed evaluator did not recognize otherwise valid nested treatment_n/control_n fields or the typed comparisons-list reconciliation shape."
+  ],
+  "implemented_repairs": [
+    "Controller-owned scientific-risk normalization now recognizes explicit current method locks, protects the result across plan synthesis and repair, and deterministically supplies every mandatory protocol field.",
+    "Gemma must return exact per-display and per-region clearance references; a bare pass fails closed while the raw critic response remains preserved.",
+    "Bounded OCR/raster geometry now asks Gemma to inspect likely top-text overlap and legend/data occlusion without assigning pixel interpretation to Qwen or deterministic code.",
+    "The evaluator accepts both canonical and nested language-result keys and typed reconciliation comparison records.",
+    "Workspace inspection accepts /workspace aliases, instructs output-parent creation, and recursively rejects external symlink traversal."
+  ],
+  "disposition": "Preserved as a failed fresh-run scientific-quality fixture. A terminal supported status is not counted as release evidence when manual merit inspection identifies a visible defect."
+}

@@ -60,6 +60,7 @@ from scientific_agent.schemas import (
     VisualEvidenceReport,
 )
 from scientific_agent.workflow import (
+    DEFAULT_METHOD_LOCK_FIELDS,
     PLAN_CRITIC_UNAVAILABLE,
     audit_master_plan,
     bind_controller_task,
@@ -296,6 +297,39 @@ def _display_audit_fixture():
         sources=[],
     )
     return planning, report
+
+
+def _pass_with_requested_display_clearances(kwargs):
+    payload = kwargs.get("payload") if isinstance(kwargs, dict) else None
+    required = (
+        payload.get("required_clearance_refs", []) if isinstance(payload, dict) else []
+    )
+    return VerificationReport(verdict="pass", evidence_refs=list(required))
+
+
+def _high_priority_layout_questions():
+    return {
+        "source": "controller_ocr_and_raster_geometry",
+        "pixel_interpretation_authority": "Gemma",
+        "top_text_clearance": {
+            "required": True,
+            "candidate_overlap_count": 5,
+            "candidate_overlap_count_in_top_22_percent": 4,
+            "priority": "high",
+            "examples": [],
+            "question": "Are all top labels mutually separated?",
+        },
+        "legend_data_clearance": {
+            "required": True,
+            "candidate": {
+                "candidate_box_fraction": [0.65, 0.1, 0.98, 0.4],
+                "cue_words": ["Treatment", "Control", "Observations", "Group"],
+                "chromatic_pixel_fraction_beyond_key_zone": 0.02,
+                "priority": "high",
+            },
+            "question": "Does the legend cover data or annotations?",
+        },
+    }
 
 
 def test_join_bundle_recovers_blinded_plans():
@@ -639,6 +673,246 @@ def test_task_normalizer_locks_explicit_computation_languages():
     assert task.required_computation_languages == ["python", "r"]
 
 
+def test_task_normalizer_requires_method_lock_for_prespecified_analysis():
+    task = normalize_task(
+        "Analyze the dataset using a prespecified endpoint and lock the method "
+        "before inspecting outcomes."
+    )
+
+    assert task.scientific_risk == "confirmatory"
+
+
+def test_task_normalizer_locks_known_effect_evaluation_objective():
+    task = normalize_task(
+        "Analyze /workspace/known_effect.csv as a prespecified two-group pre/post "
+        "study. Before inspecting group outcomes, lock a Welch two-sample t-test "
+        "on change and execute it independently in Python and R."
+    )
+
+    assert task.scientific_risk == "confirmatory"
+
+
+def test_task_normalizer_respects_explicit_nonconfirmatory_scope():
+    task = normalize_task(
+        "Analyze the dataset as exploratory and not confirmatory; generate "
+        "hypotheses only."
+    )
+
+    assert task.scientific_risk == "exploratory"
+
+
+def test_task_normalizer_recognizes_explicit_decision_critical_work():
+    task = normalize_task(
+        "Evaluate the model for a decision-critical regulatory decision."
+    )
+
+    assert task.scientific_risk == "decision_critical"
+
+
+@pytest.mark.parametrize(
+    "objective",
+    [
+        "Compare exploratory and confirmatory study designs.",
+        "Perform an exploratory analysis to plan a future confirmatory trial.",
+        "Analyze retrospective data to determine whether a confirmatory study is warranted.",
+        "This analysis will not inform a regulatory decision.",
+        "Evaluate why this is not a clinical decision.",
+    ],
+)
+def test_task_normalizer_does_not_promote_referenced_or_negated_stakes(objective):
+    assert normalize_task(objective).scientific_risk == "exploratory"
+
+
+@pytest.mark.parametrize(
+    "objective",
+    [
+        "This is not exploratory; analyze the results to guide a clinical decision.",
+        "Do not delay; analyze the results to guide a clinical decision.",
+        "Never ignore the result; analyze it to support a regulatory decision.",
+    ],
+)
+def test_task_normalizer_preserves_unnegated_decision_stakes(objective):
+    assert normalize_task(objective).scientific_risk == "decision_critical"
+
+
+def test_secondary_nonprespecified_endpoint_does_not_downgrade_primary_analysis():
+    task = normalize_task(
+        "Conduct a confirmatory analysis of the primary outcome; one secondary "
+        "endpoint is not prespecified."
+    )
+
+    assert task.scientific_risk == "confirmatory"
+
+
+@pytest.mark.parametrize(
+    "objective",
+    [
+        "Do not conduct a confirmatory analysis; perform exploratory hypothesis generation.",
+        "Never run a confirmatory analysis; analyze descriptively.",
+        "This is a non-decision-critical exploratory analysis.",
+    ],
+)
+def test_task_normalizer_does_not_promote_negated_current_stakes(objective):
+    assert normalize_task(objective).scientific_risk == "exploratory"
+
+
+@pytest.mark.parametrize(
+    "objective",
+    [
+        "Plan a future confirmatory trial, but conduct a confirmatory analysis now.",
+        "Compare exploratory and confirmatory study designs; then conduct a "
+        "confirmatory analysis of the current endpoint.",
+        "Conduct a confirmatory evaluation of the current intervention.",
+        "Run a confirmatory inference for the primary outcome.",
+        "Undertake confirmatory evaluation now.",
+    ],
+)
+def test_task_normalizer_recognizes_current_confirmatory_clause(objective):
+    assert normalize_task(objective).scientific_risk == "confirmatory"
+
+
+@pytest.mark.parametrize(
+    "objective",
+    [
+        "This analysis cannot inform a clinical decision.",
+        "This is not expected to be decision-critical.",
+        "Do not use the prespecified endpoint; analyze an exploratory endpoint instead.",
+    ],
+)
+def test_task_normalizer_binds_common_negation_to_the_affected_stake(objective):
+    assert normalize_task(objective).scientific_risk == "exploratory"
+
+
+@pytest.mark.parametrize(
+    "objective",
+    [
+        "This analysis doesn't inform a clinical decision.",
+        "We shouldn't conduct a confirmatory analysis.",
+        "Do not conduct and run a confirmatory analysis.",
+        "Neither inform nor guide a clinical decision.",
+    ],
+)
+def test_task_normalizer_handles_contracted_and_coordinated_negation(objective):
+    assert normalize_task(objective).scientific_risk == "exploratory"
+
+
+def test_task_normalizer_does_not_treat_not_only_as_negation():
+    task = normalize_task(
+        "Not only conduct a confirmatory analysis; also report sensitivity analyses."
+    )
+
+    assert task.scientific_risk == "confirmatory"
+
+
+@pytest.mark.parametrize(
+    "objective",
+    [
+        "Analyze the primary endpoint, which was prespecified before data collection.",
+        "The primary endpoint was prespecified before data collection; analyze it now.",
+        "Analyze the endpoint specified a priori in the protocol.",
+    ],
+)
+def test_task_normalizer_recognizes_noun_first_method_locks(objective):
+    assert normalize_task(objective).scientific_risk == "confirmatory"
+
+
+@pytest.mark.parametrize(
+    "objective",
+    [
+        "Analyze the results to guide clinical decisions.",
+        "Evaluate the model to guide patient-care decisions.",
+        "Conduct a confirmatory analysis and use it to guide clinical decisions.",
+        "Do not delay and analyze the results to guide a clinical decision.",
+    ],
+)
+def test_task_normalizer_recognizes_plural_or_independent_decision_stakes(objective):
+    assert normalize_task(objective).scientific_risk == "decision_critical"
+
+
+@pytest.mark.parametrize(
+    "objective",
+    [
+        "Do not delay and conduct a confirmatory analysis now.",
+        "Perform the analysis exactly as preregistered.",
+        "Execute the locked analysis plan on the primary endpoint.",
+    ],
+)
+def test_task_normalizer_recognizes_independent_or_locked_analysis(objective):
+    assert normalize_task(objective).scientific_risk == "confirmatory"
+
+
+def test_task_normalizer_handles_must_not_contraction():
+    assert (
+        normalize_task("We mustn't conduct a confirmatory analysis.").scientific_risk
+        == "exploratory"
+    )
+
+
+@pytest.mark.parametrize(
+    "objective",
+    [
+        "Analyze the result to guide patient care.",
+        "Evaluate the model to support treatment decisions.",
+        "Conduct the locked analysis for use in clinical decision-making.",
+        "Analyze the result for use in regulatory decisions.",
+    ],
+)
+def test_task_normalizer_recognizes_common_decision_stakes(objective):
+    assert normalize_task(objective).scientific_risk == "decision_critical"
+
+
+@pytest.mark.parametrize(
+    "objective",
+    [
+        "Analyze the primary outcome defined a priori.",
+        "Execute the locked statistical analysis plan.",
+        "Perform the analysis according to the preregistration.",
+        "Execute the statistical analysis plan finalized before outcomes were reviewed.",
+    ],
+)
+def test_task_normalizer_recognizes_common_method_lock_phrasing(objective):
+    assert normalize_task(objective).scientific_risk == "confirmatory"
+
+
+def test_task_normalizer_recognizes_current_confirmatory_analysis():
+    task = normalize_task("Conduct a confirmatory analysis of the primary outcome.")
+
+    assert task.scientific_risk == "confirmatory"
+
+
+def test_controller_enforces_required_method_lock_and_protocol_fields():
+    task = normalize_task("Analyze a prespecified primary endpoint.")
+    master = MasterPlan(
+        task=task.model_copy(update={"scientific_risk": "exploratory"}),
+        plan=_plan("MASTER"),
+        resolutions=[],
+        method_lock_required=False,
+        protocol_fields=[],
+    )
+
+    bound = bind_controller_task(master, task)
+
+    assert bound.method_lock_required is True
+    assert bound.protocol_fields
+    assert bound.task.scientific_risk == "confirmatory"
+
+
+def test_controller_unions_partial_model_protocol_with_all_required_fields():
+    task = normalize_task("Analyze a prespecified primary endpoint.")
+    master = MasterPlan(
+        task=task,
+        plan=_plan("MASTER"),
+        resolutions=[],
+        method_lock_required=False,
+        protocol_fields=["software versions and random seeds", "custom audit field"],
+    )
+
+    bound = bind_controller_task(master, task)
+
+    assert bound.protocol_fields[:9] == DEFAULT_METHOD_LOCK_FIELDS
+    assert bound.protocol_fields[9] == "custom audit field"
+
+
 def test_run_authorization_clears_languages_for_documentation_only_task():
     task = _prepare_task_spec(
         "Compare the official Python and R API documentation.", enable_code=False
@@ -742,6 +1016,51 @@ async def test_plan_repair_preserves_controller_task_and_uses_dedicated_prompt(
     assert repaired.master_plan.task == controller_task
     assert repaired.status == "supported"
     assert "every concrete blocking" in seen["system_prompt"]
+
+
+@pytest.mark.asyncio
+async def test_plan_repair_cannot_downgrade_controller_method_lock(monkeypatch):
+    controller_task = normalize_task("Analyze a prespecified primary endpoint.")
+    downgraded = MasterPlan(
+        task=controller_task.model_copy(update={"scientific_risk": "exploratory"}),
+        plan=_plan("MASTER"),
+        resolutions=[],
+        method_lock_required=False,
+        protocol_fields=[],
+    )
+
+    async def fake_request(*_args, **_kwargs):
+        return downgraded
+
+    async def fake_audit(*_args, **_kwargs):
+        return VerificationReport(verdict="pass")
+
+    monkeypatch.setattr(orchestrator_module, "request_structured", fake_request)
+    monkeypatch.setattr(orchestrator_module, "_audit_plan", fake_audit)
+    initial = PlanningResult(
+        master_plan=downgraded.model_copy(update={"task": controller_task}),
+        audit=VerificationReport(
+            verdict="fail",
+            blocking_findings=[
+                Finding(
+                    finding_id="lock-missing",
+                    location="method_lock_required",
+                    problem="The required method lock is missing.",
+                    why_it_matters="The analysis is confirmatory.",
+                    evidence="The controller classified the task as confirmatory.",
+                    falsification_test_or_correction="Restore the controller method lock.",
+                )
+            ],
+        ),
+        plan_lints=[],
+        status="requires_revision",
+    )
+
+    repaired = await orchestrator_module._repair_plan(Settings(), initial)
+
+    assert repaired.master_plan.task == controller_task
+    assert repaired.master_plan.method_lock_required is True
+    assert len(repaired.master_plan.protocol_fields) == 9
 
 
 @pytest.mark.asyncio
@@ -1570,8 +1889,8 @@ async def test_raw_contradictory_critic_outputs_remain_browsable(tmp_path, monke
         computation,
     )
 
-    async def passing_request(_endpoint, **_kwargs):
-        return VerificationReport(verdict="pass")
+    async def passing_request(_endpoint, **kwargs):
+        return _pass_with_requested_display_clearances(kwargs)
 
     monkeypatch.setattr(
         "scientific_agent.orchestrator.request_structured", passing_request
@@ -1774,7 +2093,7 @@ async def test_missing_figure_ocr_still_runs_gemma_multimodal_review(
 
     async def fake_request(endpoint, **kwargs):
         calls.append((endpoint, kwargs))
-        return VerificationReport(verdict="pass")
+        return _pass_with_requested_display_clearances(kwargs)
 
     monkeypatch.setattr(
         "scientific_agent.orchestrator.request_structured", fake_request
@@ -1801,6 +2120,129 @@ async def test_missing_figure_ocr_still_runs_gemma_multimodal_review(
     assert display_audit["critic_model"] == settings.gemma.model
     assert display_audit["review_source"] == "gemma_multimodal_critic"
     assert display_audit["figures_missing_ocr"] == ["effect-figure"]
+
+
+@pytest.mark.anyio
+async def test_bare_gemma_display_pass_fails_closed_and_preserves_raw_output(
+    tmp_path, monkeypatch
+):
+    planning, report = _display_audit_fixture()
+    image = tmp_path / "effect.png"
+    image.write_bytes(b"test image bytes")
+    display_input = {
+        "display_id": "effect-figure",
+        "kind": "figure",
+        "sha256": "a" * 64,
+        "media_type": "image/png",
+        "width": 800,
+        "height": 600,
+        "ocr": {"available": True, "text": "Effect plot", "words": []},
+        "layout_review_questions": _high_priority_layout_questions(),
+    }
+    monkeypatch.setattr(
+        "scientific_agent.orchestrator.prepare_display_audit",
+        lambda *_args: ([image], [display_input]),
+    )
+    calls = []
+
+    async def fake_request(_endpoint, **kwargs):
+        calls.append(kwargs)
+        return VerificationReport(verdict="pass", evidence_refs=[])
+
+    monkeypatch.setattr(
+        "scientific_agent.orchestrator.request_structured", fake_request
+    )
+
+    review = await _audit_report_resilient(
+        Settings(),
+        planning,
+        report,
+        DeterministicValidation(passed=True),
+        RetrievalEvidence(),
+        ComputationEvidence(),
+        EventLedger(tmp_path / "events.jsonl"),
+        live_dir=tmp_path / "live",
+    )
+
+    assert review.verdict == "inconclusive"
+    assert any(
+        item.finding_id.startswith("controller-display-clearance-missing-")
+        for item in review.blocking_findings
+    )
+    display_payload = calls[1]["payload"]
+    assert display_payload["display_inputs"][0]["layout_review_questions"] == (
+        _high_priority_layout_questions()
+    )
+    assert display_payload["required_clearance_refs"] == [
+        "display-reviewed:effect-figure",
+        "visual-clearance:effect-figure:top-text",
+        "visual-clearance:effect-figure:legend-data",
+    ]
+    raw = json.loads(
+        (tmp_path / "live" / "gemma_display_batch_001_raw.json").read_text()
+    )
+    normalized = json.loads(
+        (tmp_path / "live" / "gemma_display_batch_001.json").read_text()
+    )
+    assert raw["verdict"] == "pass"
+    assert raw["evidence_refs"] == []
+    assert normalized["verdict"] == "inconclusive"
+
+
+@pytest.mark.anyio
+async def test_gemma_can_visually_clear_layout_warning_without_forced_repair(
+    tmp_path, monkeypatch
+):
+    planning, report = _display_audit_fixture()
+    image = tmp_path / "effect.png"
+    image.write_bytes(b"test image bytes")
+    monkeypatch.setattr(
+        "scientific_agent.orchestrator.prepare_display_audit",
+        lambda *_args: (
+            [image],
+            [
+                {
+                    "display_id": "effect-figure",
+                    "kind": "figure",
+                    "sha256": "a" * 64,
+                    "media_type": "image/png",
+                    "width": 800,
+                    "height": 600,
+                    "ocr": {"available": True, "text": "Effect plot", "words": []},
+                    "layout_review_questions": _high_priority_layout_questions(),
+                }
+            ],
+        ),
+    )
+
+    async def fake_request(_endpoint, **kwargs):
+        return _pass_with_requested_display_clearances(kwargs)
+
+    monkeypatch.setattr(
+        "scientific_agent.orchestrator.request_structured", fake_request
+    )
+
+    review = await _audit_report_resilient(
+        Settings(),
+        planning,
+        report,
+        DeterministicValidation(passed=True),
+        RetrievalEvidence(),
+        ComputationEvidence(),
+        EventLedger(tmp_path / "events.jsonl"),
+        live_dir=tmp_path / "live",
+    )
+
+    assert review.verdict == "pass"
+    normalized = json.loads(
+        (tmp_path / "live" / "gemma_display_batch_001.json").read_text()
+    )
+    assert normalized["verdict"] == "pass"
+    assert normalized["evidence_refs"] == [
+        "display-reviewed:effect-figure",
+        "visual-clearance:effect-figure:top-text",
+        "visual-clearance:effect-figure:legend-data",
+    ]
 
 
 @pytest.mark.anyio
@@ -1913,8 +2355,8 @@ async def test_display_provenance_uses_exact_review_inputs_without_second_read(
 
     monkeypatch.setattr("scientific_agent.orchestrator.prepare_display_audit", prepare)
 
-    async def passing_review(*_args, **_kwargs):
-        return VerificationReport(verdict="pass")
+    async def passing_review(*_args, **kwargs):
+        return _pass_with_requested_display_clearances(kwargs)
 
     monkeypatch.setattr(
         "scientific_agent.orchestrator.request_structured", passing_review
@@ -2032,7 +2474,7 @@ async def test_gemma_only_visual_review_batches_more_than_five_images(
 
     async def fake_request(endpoint, **kwargs):
         calls.append((endpoint, kwargs))
-        return VerificationReport(verdict="pass")
+        return _pass_with_requested_display_clearances(kwargs)
 
     monkeypatch.setattr(
         "scientific_agent.orchestrator.request_structured", fake_request

@@ -1,11 +1,12 @@
 from pathlib import Path
 
 import pytest
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from scientific_agent.linting import validate_report
 from scientific_agent.provenance import sha256_file
 from scientific_agent.reporting import (
+    _figure_layout_review_questions,
     _parse_tesseract_tsv,
     inspect_figure,
     materialize_displays,
@@ -128,6 +129,137 @@ def test_tesseract_tsv_parser_returns_bounded_text_and_geometry():
     }
 
 
+def test_layout_review_questions_prioritize_top_overlap_and_legend_data(
+    tmp_path: Path,
+):
+    image_path = tmp_path / "overlap.png"
+    image = Image.new("RGB", (1000, 600), color="white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((800, 130, 930, 250), fill=(20, 90, 210))
+    image.save(image_path)
+    ocr = {
+        "available": True,
+        "words": [
+            {
+                "text": "Primary",
+                "confidence": 96,
+                "left": 330,
+                "top": 20,
+                "width": 220,
+                "height": 60,
+            },
+            {
+                "text": "Analysis",
+                "confidence": 95,
+                "left": 390,
+                "top": 35,
+                "width": 250,
+                "height": 65,
+            },
+            {
+                "text": "Mean",
+                "confidence": 93,
+                "left": 430,
+                "top": 50,
+                "width": 180,
+                "height": 55,
+            },
+            {
+                "text": "Treatment",
+                "confidence": 98,
+                "left": 700,
+                "top": 120,
+                "width": 130,
+                "height": 28,
+            },
+            {
+                "text": "Control",
+                "confidence": 98,
+                "left": 700,
+                "top": 160,
+                "width": 115,
+                "height": 28,
+            },
+            {
+                "text": "Observations",
+                "confidence": 98,
+                "left": 700,
+                "top": 200,
+                "width": 165,
+                "height": 28,
+            },
+            {
+                "text": "Group",
+                "confidence": 98,
+                "left": 700,
+                "top": 240,
+                "width": 95,
+                "height": 28,
+            },
+        ],
+    }
+
+    questions = _figure_layout_review_questions(
+        image_path,
+        ocr,
+        width=1000,
+        height=600,
+    )
+
+    assert questions["pixel_interpretation_authority"] == "Gemma"
+    top = questions["top_text_clearance"]
+    assert top["candidate_overlap_count_in_top_22_percent"] >= 2
+    assert top["priority"] == "high"
+    assert top["examples"]
+    assert all(len(item["union_box_fraction"]) == 4 for item in top["examples"])
+    legend = questions["legend_data_clearance"]["candidate"]
+    assert legend["priority"] == "high"
+    assert legend["chromatic_pixel_fraction_beyond_key_zone"] >= 0.005
+    assert "question" in questions["legend_data_clearance"]
+    assert "verdict" not in questions
+    assert "blocking" not in questions
+
+
+def test_layout_review_question_can_remain_routine_without_deciding_pixels(
+    tmp_path: Path,
+):
+    image_path = tmp_path / "clear.png"
+    image = Image.new("RGB", (1000, 600), color="white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((620, 130, 650, 250), fill=(20, 90, 210))
+    image.save(image_path)
+    ocr = {
+        "available": True,
+        "words": [
+            {"text": "Effect", "left": 300, "top": 20, "width": 100, "height": 30},
+            {"text": "Analysis", "left": 420, "top": 20, "width": 120, "height": 30},
+            {"text": "Treatment", "left": 700, "top": 120, "width": 130, "height": 28},
+            {"text": "Control", "left": 700, "top": 160, "width": 115, "height": 28},
+            {
+                "text": "Observations",
+                "left": 700,
+                "top": 200,
+                "width": 165,
+                "height": 28,
+            },
+            {"text": "Group", "left": 700, "top": 240, "width": 95, "height": 28},
+        ],
+    }
+
+    questions = _figure_layout_review_questions(
+        image_path,
+        ocr,
+        width=1000,
+        height=600,
+    )
+
+    assert questions["top_text_clearance"]["candidate_overlap_count"] == 0
+    assert questions["top_text_clearance"]["priority"] == "routine"
+    assert questions["legend_data_clearance"]["candidate"]["priority"] == "routine"
+    assert questions["top_text_clearance"]["required"] is True
+    assert questions["legend_data_clearance"]["required"] is True
+
+
 def test_decompression_bomb_is_reported_as_invalid_figure(tmp_path, monkeypatch):
     image = tmp_path / "compressed-large-pixel-count.png"
     Image.new("L", (32, 32), color=0).save(image)
@@ -158,7 +290,12 @@ def test_unregistered_displays_are_still_sent_to_first_visual_audit(tmp_path: Pa
     assert {item["kind"] for item in inputs} == {"figure", "table"}
     assert all(item["registered"] is False for item in inputs)
     assert all(item["display_id"].startswith("unregistered:") for item in inputs)
-    assert "ocr" in next(item for item in inputs if item["kind"] == "figure")
+    figure_input = next(item for item in inputs if item["kind"] == "figure")
+    assert "ocr" in figure_input
+    assert (
+        figure_input["layout_review_questions"]["pixel_interpretation_authority"]
+        == "Gemma"
+    )
     assert next(item for item in inputs if item["kind"] == "table")["rows"] == [
         ["A|B", "1.25"],
         ["control", "0.00"],

@@ -28,6 +28,105 @@ from .schemas import (
 from .structured_client import request_structured
 
 PLAN_CRITIC_UNAVAILABLE = "plan-critic-unavailable"
+DEFAULT_METHOD_LOCK_FIELDS = [
+    "primary estimand and endpoints",
+    "eligibility and exclusions",
+    "preprocessing and missing-data handling",
+    "statistical models and covariates",
+    "effect measures and uncertainty",
+    "multiplicity control",
+    "sensitivity analyses",
+    "software versions and random seeds",
+    "protocol-deviation amendment rule",
+]
+
+
+def _scientific_risk(objective: str) -> str:
+    """Conservatively infer explicit protocol stakes from a plain-text task."""
+
+    normalized = " ".join(objective.casefold().split())
+    normalized = re.sub(
+        r"\b(can|could|do|does|did|is|are|was|were|must|should|would|will)"
+        r"n['’]t\b",
+        r"\1 not",
+        normalized,
+    )
+
+    def has_unnegated(pattern: str) -> bool:
+        for match in re.finditer(pattern, normalized):
+            prefix = re.split(
+                r"[.;:!?]|\b(?:and|but|however|instead|yet|then)\b",
+                normalized[: match.start()],
+            )[-1][-100:]
+            if prefix.endswith("non-"):
+                continue
+            if re.search(r"\bnot\s+only\s*$", prefix):
+                return True
+            direct_negation = re.search(
+                r"\b(?:not|never|without|cannot|can not|will not)\b"
+                r"(?:\s+(?:a|an|the|to|be|been|currently|directly|explicitly|"
+                r"necessarily|expected|considered|deemed|treated|intended)){0,5}"
+                r"\s*$",
+                prefix,
+            )
+            auxiliary_negation = re.search(
+                r"\b(?:do|does|did|should|would|could|must|can|will)\s+not\b"
+                r"[^,.;:!?]{0,40}$",
+                prefix,
+            )
+            coordinated_negation = re.search(
+                r"\bneither\b[^,.;:!?]{0,60}(?:\bnor\b[^,.;:!?]{0,30})?$",
+                prefix,
+            )
+            if direct_negation or auxiliary_negation or coordinated_negation:
+                continue
+            return True
+        return False
+
+    if has_unnegated(r"\bdecision[ -]?critical\b") or has_unnegated(
+        r"\b(?:inform|support|guide|drive|make|use|used)\b[^,.;:!?]{0,60}\b"
+        r"(?:patient care|(?:regulatory|clinical|treatment|patient[ -]?care|"
+        r"bedside clinical)\s+(?:decisions?|decision[ -]?making))\b",
+    ):
+        return "decision_critical"
+
+    current_confirmatory_task = has_unnegated(
+        r"\b(?:perform|conduct|run|execute|undertake|analy[sz]e|evaluate)\b"
+        r"(?:(?!\b(?:not|never|non[ -]?|future|planned|subsequent|whether)\b)"
+        r"[^,.;:!?]){0,45}\bconfirmatory\b|"
+        r"\b(?:is|as)\s+(?:a\s+)?confirmatory\b|"
+        r"^(?:a\s+)?confirmatory (?:analysis|test|evaluation|inference)\b"
+    )
+    if current_confirmatory_task:
+        return "confirmatory"
+
+    analysis_requested = bool(
+        re.search(
+            r"\b(?:analy[sz]e|estimate|evaluate|test|model|compute|conduct|run|"
+            r"execute|perform|undertake)\b",
+            normalized,
+        )
+    )
+    operational_lock = has_unnegated(
+        r"\b(?:prespecified|pre[ -]?specified|preregistered|pre[ -]?registered)\b"
+        r"[^,.;:!?]{0,35}\b(?:endpoint|estimand|analysis|protocol|hypothesis|"
+        r"model|outcome|study|design)\b|"
+        r"\b(?:endpoint|estimand|analysis|protocol|hypothesis|model|outcome|"
+        r"study|design)\b.{0,50}\b(?:was |is )?"
+        r"(?:prespecified|pre[ -]?specified|preregistered|pre[ -]?registered)\b|"
+        r"\b(?:endpoint|estimand|analysis|protocol|hypothesis|model|outcome)\b"
+        r"[^,.;:!?]{0,35}\b(?:specified|defined) a priori\b|"
+        r"\bas (?:prespecified|pre[ -]?specified|preregistered|"
+        r"pre[ -]?registered)\b|\baccording to (?:the )?preregistration\b|"
+        r"\blocked\b[^,.;:!?]{0,25}\b(?:analysis plan|protocol|plan)\b|"
+        r"\b(?:statistical )?analysis plan\b[^,.;:!?]{0,40}\bfinalized\b"
+        r"[^,.;:!?]{0,40}\bbefore\b[^,.;:!?]{0,30}\boutcomes?\b|"
+        r"\bmethod lock\b|\block\b[^,.;:!?]{0,35}\b(?:method|analysis|model|"
+        r"test|endpoint|estimand|welch)\b"
+    )
+    if analysis_requested and operational_lock:
+        return "confirmatory"
+    return "exploratory"
 
 
 def normalize_task(node_input: str) -> TaskSpec:
@@ -58,7 +157,7 @@ def normalize_task(node_input: str) -> TaskSpec:
         scientific_domain="general",
         task_type="mixed",
         security_risk="low",
-        scientific_risk="exploratory",
+        scientific_risk=_scientific_risk(objective),
         required_computation_languages=required_languages,
         acceptance_tests=[
             "Every plan step declares outputs, validators, and stop conditions",
@@ -80,7 +179,22 @@ def keep_master(node_input: MasterPlan) -> MasterPlan:
 def bind_controller_task(master: MasterPlan, task: TaskSpec) -> MasterPlan:
     """Prevent model synthesis from rewriting controller-normalized requirements."""
 
-    return master.model_copy(update={"task": task})
+    method_lock_required = task.scientific_risk in {
+        "confirmatory",
+        "decision_critical",
+    }
+    protocol_fields = list(master.protocol_fields)
+    if method_lock_required:
+        protocol_fields = list(
+            dict.fromkeys([*DEFAULT_METHOD_LOCK_FIELDS, *protocol_fields])
+        )[:12]
+    return master.model_copy(
+        update={
+            "task": task,
+            "method_lock_required": method_lock_required,
+            "protocol_fields": protocol_fields,
+        }
+    )
 
 
 def _collect(value: Any, model_type: type[BaseModel]) -> list[BaseModel]:
@@ -371,7 +485,11 @@ async def build_simple_planning(
         resolutions=[],
         method_lock_required=task.scientific_risk
         in {"confirmatory", "decision_critical"},
-        protocol_fields=[],
+        protocol_fields=(
+            list(DEFAULT_METHOD_LOCK_FIELDS)
+            if task.scientific_risk in {"confirmatory", "decision_critical"}
+            else []
+        ),
     )
     lint = lint_plan(task, proposal)
     audit = await audit_master_plan(settings, master, on_visible_text)

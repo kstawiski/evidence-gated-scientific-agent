@@ -42,7 +42,25 @@ MIN_REPORTED_FIGURE_DPI = 300.0
 MAX_READER_TABLE_SIGNIFICANT_DIGITS = 4
 MAX_OCR_WORDS = 400
 MAX_OCR_TEXT_CHARS = 12_000
+MAX_LAYOUT_OVERLAP_EXAMPLES = 8
 _NUMBER_CELL = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?$")
+_WORDLIKE = re.compile(r"[A-Za-z]{2,}")
+_LEGEND_CUES = {
+    "analysis",
+    "ancova",
+    "cohort",
+    "control",
+    "group",
+    "groups",
+    "mean",
+    "observation",
+    "observations",
+    "placebo",
+    "primary",
+    "sd",
+    "sensitivity",
+    "treatment",
+}
 
 
 def _successful_artifacts(computation: ComputationEvidence) -> dict[str, str | None]:
@@ -280,6 +298,177 @@ def extract_figure_ocr(path: Path) -> dict[str, Any]:
     return _extract_figure_ocr_cached(str(path), info.st_size, info.st_mtime_ns)
 
 
+def _figure_layout_review_questions(
+    path: Path,
+    ocr: dict[str, Any],
+    *,
+    width: int,
+    height: int,
+) -> dict[str, Any]:
+    """Turn bounded OCR/raster geometry into questions for Gemma to clear.
+
+    These signals prioritize visual inspection; they never decide whether pixels
+    are acceptable. Gemma remains the sole image-understanding authority.
+    """
+
+    words: list[dict[str, Any]] = []
+    for raw in ocr.get("words", []) if isinstance(ocr, dict) else []:
+        text = str(raw.get("text") or "").strip()[:80]
+        if not _WORDLIKE.search(text):
+            continue
+        try:
+            left = max(0, int(raw["left"]))
+            top = max(0, int(raw["top"]))
+            word_width = max(0, int(raw["width"]))
+            word_height = max(0, int(raw["height"]))
+            confidence = float(raw.get("confidence", -1))
+        except (KeyError, TypeError, ValueError):
+            continue
+        right = min(width, left + word_width)
+        bottom = min(height, top + word_height)
+        if right <= left or bottom <= top:
+            continue
+        words.append(
+            {
+                "text": text,
+                "confidence": round(confidence, 1),
+                "left": left,
+                "top": top,
+                "right": right,
+                "bottom": bottom,
+                "width": right - left,
+                "height": bottom - top,
+            }
+        )
+
+    overlaps: list[dict[str, Any]] = []
+    top_band_count = 0
+    for index, first in enumerate(words):
+        for second in words[index + 1 :]:
+            intersection_width = max(
+                0,
+                min(first["right"], second["right"])
+                - max(first["left"], second["left"]),
+            )
+            intersection_height = max(
+                0,
+                min(first["bottom"], second["bottom"])
+                - max(first["top"], second["top"]),
+            )
+            if not intersection_width or not intersection_height:
+                continue
+            smaller_area = min(
+                first["width"] * first["height"],
+                second["width"] * second["height"],
+            )
+            overlap_fraction = intersection_width * intersection_height / smaller_area
+            if overlap_fraction < 0.20:
+                continue
+            if (
+                first["text"].casefold() == second["text"].casefold()
+                and overlap_fraction >= 0.90
+            ):
+                continue
+            in_top_band = max(first["top"], second["top"]) < height * 0.22
+            top_band_count += int(in_top_band)
+            overlaps.append(
+                {
+                    "texts": [first["text"], second["text"]],
+                    "confidence": [first["confidence"], second["confidence"]],
+                    "overlap_fraction_of_smaller_box": round(overlap_fraction, 3),
+                    "in_top_22_percent": in_top_band,
+                    "union_box_fraction": [
+                        round(min(first["left"], second["left"]) / width, 4),
+                        round(min(first["top"], second["top"]) / height, 4),
+                        round(max(first["right"], second["right"]) / width, 4),
+                        round(max(first["bottom"], second["bottom"]) / height, 4),
+                    ],
+                }
+            )
+    overlaps.sort(
+        key=lambda item: item["overlap_fraction_of_smaller_box"], reverse=True
+    )
+
+    cue_words = []
+    for word in words:
+        normalized = re.sub(r"[^a-z]", "", word["text"].casefold())
+        center_x = (word["left"] + word["right"]) / 2
+        center_y = (word["top"] + word["bottom"]) / 2
+        if (
+            normalized in _LEGEND_CUES
+            and center_x > width * 0.45
+            and height * 0.08 < center_y < height * 0.75
+        ):
+            cue_words.append(word)
+
+    legend_region: dict[str, Any] | None = None
+    if len(cue_words) >= 4:
+        ordered_heights = sorted(word["height"] for word in cue_words)
+        median_height = ordered_heights[len(ordered_heights) // 2]
+        pad_y = max(2 * median_height, int(height * 0.02))
+        pad_x = max(2 * median_height, int(width * 0.04))
+        left = max(
+            0,
+            min(word["left"] for word in cue_words) - max(pad_x, int(width * 0.08)),
+        )
+        top = max(0, min(word["top"] for word in cue_words) - pad_y)
+        right = min(width, max(word["right"] for word in cue_words) + pad_x)
+        bottom = min(height, max(word["bottom"] for word in cue_words) + pad_y)
+        color_start = left + int((right - left) * 0.40)
+        chromatic_fraction = 0.0
+        try:
+            with Image.open(path) as image:
+                sample = image.convert("RGB").crop((color_start, top, right, bottom))
+            sample.thumbnail((512, 512), Image.Resampling.BILINEAR)
+            pixels = sample.load()
+            pixel_count = sample.width * sample.height
+            chromatic_pixels = sum(
+                1
+                for y in range(sample.height)
+                for x in range(sample.width)
+                if max(pixels[x, y]) - min(pixels[x, y]) >= 40
+            )
+            if pixel_count:
+                chromatic_fraction = chromatic_pixels / pixel_count
+        except (OSError, ValueError, Image.DecompressionBombError):
+            chromatic_fraction = 0.0
+        legend_region = {
+            "candidate_box_fraction": [
+                round(left / width, 4),
+                round(top / height, 4),
+                round(right / width, 4),
+                round(bottom / height, 4),
+            ],
+            "cue_words": [word["text"] for word in cue_words[:16]],
+            "chromatic_pixel_fraction_beyond_key_zone": round(chromatic_fraction, 4),
+            "priority": "high" if chromatic_fraction >= 0.005 else "routine",
+        }
+
+    return {
+        "source": "controller_ocr_and_raster_geometry",
+        "pixel_interpretation_authority": "Gemma",
+        "top_text_clearance": {
+            "required": True,
+            "candidate_overlap_count": len(overlaps),
+            "candidate_overlap_count_in_top_22_percent": top_band_count,
+            "priority": "high" if top_band_count >= 2 else "routine",
+            "examples": overlaps[:MAX_LAYOUT_OVERLAP_EXAMPLES],
+            "question": (
+                "Inspect the top band at native detail: are title, subtitle, "
+                "test label, estimate, and interval mutually separated?"
+            ),
+        },
+        "legend_data_clearance": {
+            "required": True,
+            "candidate": legend_region,
+            "question": (
+                "Locate every legend and trace its full rectangle: does it cover "
+                "any data point, error bar, annotation, or statistical text?"
+            ),
+        },
+    }
+
+
 def read_table_preview(
     path: Path,
     *,
@@ -372,6 +561,7 @@ def prepare_display_audit(
         if display.kind == "figure":
             figure_number += 1
             metadata = inspect_figure(source)
+            ocr = extract_figure_ocr(source)
             images.append(source)
             tables.append(
                 {
@@ -381,7 +571,13 @@ def prepare_display_audit(
                     "registered": True,
                     "artifact_path": str(source),
                     "sha256": sha256_file(source),
-                    "ocr": extract_figure_ocr(source),
+                    "ocr": ocr,
+                    "layout_review_questions": _figure_layout_review_questions(
+                        source,
+                        ocr,
+                        width=metadata["width"],
+                        height=metadata["height"],
+                    ),
                     **metadata,
                 }
             )
@@ -421,6 +617,7 @@ def prepare_display_audit(
         if kind == "figures":
             figure_number += 1
             metadata = inspect_figure(resolved)
+            ocr = extract_figure_ocr(resolved)
             images.append(resolved)
             tables.append(
                 {
@@ -430,7 +627,13 @@ def prepare_display_audit(
                     "registered": False,
                     "artifact_path": str(resolved),
                     "sha256": actual_hash,
-                    "ocr": extract_figure_ocr(resolved),
+                    "ocr": ocr,
+                    "layout_review_questions": _figure_layout_review_questions(
+                        resolved,
+                        ocr,
+                        width=metadata["width"],
+                        height=metadata["height"],
+                    ),
                     **metadata,
                 }
             )

@@ -18,6 +18,10 @@ def test_researcher_forbids_mixed_effect_scales_and_zero_rounded_p_values():
     assert "never plot an\nunstandardized estimate" in RESEARCHER
     assert "Hedges g" in RESEARCHER
     assert "never as zero after fixed-decimal rounding" in RESEARCHER
+    assert "workspace-relative" in RESEARCHER
+    assert "inside Python/R sandbox code" in RESEARCHER
+    assert "parent.mkdir(parents=True, exist_ok=True)" in RESEARCHER
+    assert "dir.create(dirname(target), recursive=TRUE" in RESEARCHER
 
 
 def test_planners_do_not_invent_input_names_or_qwen_visual_audits():
@@ -138,6 +142,18 @@ def test_display_auditor_does_not_force_ocr_contradicted_typo_repairs():
     assert "return inconclusive for that label" in DISPLAY_AUDITOR
 
 
+def test_display_auditor_requires_explicit_per_figure_layout_clearance():
+    assert "layout_review_questions" in DISPLAY_AUDITOR
+    assert (
+        "deterministic attention\nsignals, not pixel interpretations" in DISPLAY_AUDITOR
+    )
+    assert "display-reviewed:<display_id>" in DISPLAY_AUDITOR
+    assert "visual-clearance:<display_id>:top-text" in DISPLAY_AUDITOR
+    assert "visual-clearance:<display_id>:legend-data" in DISPLAY_AUDITOR
+    assert "primary Qwen agent never receives raster images" in DISPLAY_AUDITOR
+    assert "A bare pass" in DISPLAY_AUDITOR
+
+
 def test_report_contract_does_not_register_extracted_source_images_as_displays():
     for prompt in (REPORTER, REPAIRER):
         assert "logical /output/figures or /output/tables" in prompt
@@ -150,6 +166,8 @@ def test_report_writer_respects_non_readiness_scope_and_separate_word_counts():
         assert "excludes submission readiness" in prompt
         assert "Never combine main-manuscript and supplement word counts" in prompt
         assert "placeholder explicitly permitted" in prompt
+        assert "confirmatory, exploratory, or decision-critical status" in prompt
+        assert "Never relabel one as another" in prompt
 
 
 def test_report_contract_scopes_method_recommendations_and_literature_reviews():

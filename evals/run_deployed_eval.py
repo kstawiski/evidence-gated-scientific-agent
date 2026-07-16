@@ -174,8 +174,8 @@ def _language_result(
 
 def _known_effect_matches_reference(value: dict) -> bool:
     expected = {
-        ("n_treatment",): 20.0,
-        ("n_control",): 20.0,
+        ("n_treatment", "treatment_n"): 20.0,
+        ("n_control", "control_n"): 20.0,
         ("treatment_mean_change",): 5.0,
         ("control_mean_change",): 0.0,
         (
@@ -216,6 +216,15 @@ def _reconciliation_delta(value: dict, *names: str) -> float:
                 delta = check.get("absolute_delta", check.get("absolute_difference"))
                 if isinstance(delta, (int, float)) and not isinstance(delta, bool):
                     return float(delta)
+    comparisons = value.get("comparisons")
+    if isinstance(comparisons, list):
+        requested = set(names)
+        for check in comparisons:
+            if not isinstance(check, dict) or check.get("metric") not in requested:
+                continue
+            delta = check.get("absolute_delta", check.get("absolute_difference"))
+            if isinstance(delta, (int, float)) and not isinstance(delta, bool):
+                return float(delta)
     for name in names:
         direct = value.get(f"abs_diff_{name}")
         if isinstance(direct, (int, float)) and not isinstance(direct, bool):

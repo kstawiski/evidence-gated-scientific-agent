@@ -20,6 +20,7 @@ from .schemas import (
     MasterPlan,
     PlanAuditChecklist,
     PlanBundle,
+    PlanLintReport,
     PlanProposal,
     PlanningResult,
     TaskSpec,
@@ -197,6 +198,22 @@ def bind_controller_task(master: MasterPlan, task: TaskSpec) -> MasterPlan:
     )
 
 
+def lint_bound_master(master: MasterPlan) -> PlanLintReport:
+    """Lint a master plan against its complete controller-owned protocol lock."""
+
+    required = set(DEFAULT_METHOD_LOCK_FIELDS)
+    controller_method_lock = bool(
+        master.task.scientific_risk in {"confirmatory", "decision_critical"}
+        and master.method_lock_required
+        and required.issubset(master.protocol_fields)
+    )
+    return lint_plan(
+        master.task,
+        master.plan,
+        controller_method_lock=controller_method_lock,
+    )
+
+
 def _collect(value: Any, model_type: type[BaseModel]) -> list[BaseModel]:
     found: list[BaseModel] = []
     if isinstance(value, model_type):
@@ -263,7 +280,7 @@ def package_planning(node_input: dict) -> PlanningResult:
         )
     master = MasterPlan.model_validate(masters[0])
     audit = VerificationReport.model_validate(audits[0])
-    master_lint = lint_plan(master.task, master.plan)
+    master_lint = lint_bound_master(master)
     status = planning_status(master_lint, audit)
     return PlanningResult(
         master_plan=master,
@@ -278,7 +295,7 @@ def build_plan_audit_packet(master: MasterPlan) -> dict:
 
     task = master.task
     plan = master.plan
-    lint = lint_plan(task, plan)
+    lint = lint_bound_master(master)
     return {
         "task": {
             "objective": task.objective,
@@ -346,7 +363,7 @@ def plan_audit_to_verification(
             )
         )
 
-    lint = lint_plan(master.task, master.plan)
+    lint = lint_bound_master(master)
     for item in lint.findings:
         target = blocking if item.blocking else nonblocking
         if len(target) >= 8:
@@ -491,7 +508,7 @@ async def build_simple_planning(
             else []
         ),
     )
-    lint = lint_plan(task, proposal)
+    lint = lint_bound_master(master)
     audit = await audit_master_plan(settings, master, on_visible_text)
     status = planning_status(lint, audit)
     return PlanningResult(

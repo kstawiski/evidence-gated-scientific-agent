@@ -114,6 +114,16 @@ def test_plan_linter_accepts_complete_read_only_plan():
     assert lint_plan(task(), good_plan()).passed
 
 
+def test_controller_method_lock_satisfies_confirmatory_lint_without_magic_words():
+    confirmatory = task().model_copy(update={"scientific_risk": "confirmatory"})
+
+    raw = lint_plan(confirmatory, good_plan())
+    bound = lint_plan(confirmatory, good_plan(), controller_method_lock=True)
+
+    assert "missing_method_lock" in {item.code for item in raw.findings}
+    assert bound.passed
+
+
 def test_plan_linter_rejects_duplicate_ids_and_irreversible_action():
     plan = good_plan()
     duplicate = plan.steps[0].model_copy(update={"security_risk": "irreversible"})

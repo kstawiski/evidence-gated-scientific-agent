@@ -532,7 +532,12 @@ def _metadata_value_matches(field: str, reported: Any, recorded: Any) -> bool:
     return reported == recorded
 
 
-def lint_plan(task: TaskSpec, plan: PlanProposal) -> PlanLintReport:
+def lint_plan(
+    task: TaskSpec,
+    plan: PlanProposal,
+    *,
+    controller_method_lock: bool = False,
+) -> PlanLintReport:
     findings: list[LintFinding] = []
     step_ids = [step.step_id for step in plan.steps]
     if len(step_ids) != len(set(step_ids)):
@@ -627,7 +632,10 @@ def lint_plan(task: TaskSpec, plan: PlanProposal) -> PlanLintReport:
                 )
             )
 
-    if task.scientific_risk in {"confirmatory", "decision_critical"}:
+    if (
+        task.scientific_risk in {"confirmatory", "decision_critical"}
+        and not controller_method_lock
+    ):
         combined = " ".join(
             [
                 *plan.assumptions,

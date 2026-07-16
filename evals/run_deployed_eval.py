@@ -287,7 +287,7 @@ def score(
             "total": len(checks),
         }
     checks["deterministic_validation"] = bool(
-        run_result.get("deterministic_validation", {}).get("passed")
+        (run_result.get("deterministic_validation") or {}).get("passed")
     )
     review = run_result.get("scientific_review") or {}
     checks["independent_review"] = review.get("verdict") in {

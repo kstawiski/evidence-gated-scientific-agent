@@ -45,12 +45,13 @@ def test_plan_audit_status_requires_matching_finding():
         why_it_matters="A shared failure mode could pass undetected.",
         falsification_test_or_correction="Add an independent recomputation.",
     )
-    with pytest.raises(ValueError, match="passing criterion"):
-        PlanAuditReview(
-            criterion=PLAN_AUDIT_CRITERIA[0],
-            status="pass",
-            finding=finding,
-        )
+    normalized = PlanAuditReview(
+        criterion=PLAN_AUDIT_CRITERIA[0],
+        status="pass",
+        finding=finding,
+    )
+    assert normalized.status == "inconclusive"
+    assert normalized.finding == finding
 
 
 def test_source_record_requires_exactly_one_evidence_location():

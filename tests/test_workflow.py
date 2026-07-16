@@ -67,6 +67,7 @@ from scientific_agent.workflow import (
     build_plan_audit_packet,
     build_simple_planning,
     build_planning_workflow,
+    lint_bound_master,
     merge_and_lint,
     normalize_task,
     package_planning,
@@ -911,6 +912,24 @@ def test_controller_unions_partial_model_protocol_with_all_required_fields():
 
     assert bound.protocol_fields[:9] == DEFAULT_METHOD_LOCK_FIELDS
     assert bound.protocol_fields[9] == "custom audit field"
+
+
+def test_bound_master_lint_accepts_complete_controller_protocol_only():
+    task = normalize_task("Analyze a prespecified primary endpoint.")
+    incomplete = MasterPlan(
+        task=task,
+        plan=_plan("MASTER"),
+        resolutions=[],
+        method_lock_required=True,
+        protocol_fields=DEFAULT_METHOD_LOCK_FIELDS[:-1],
+    )
+    complete = bind_controller_task(incomplete, task)
+
+    assert "missing_method_lock" in {
+        item.code for item in lint_bound_master(incomplete).findings
+    }
+    assert lint_bound_master(complete).passed
+    assert build_plan_audit_packet(complete)["deterministic_lint"]["passed"] is True
 
 
 def test_run_authorization_clears_languages_for_documentation_only_task():

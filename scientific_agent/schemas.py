@@ -207,6 +207,19 @@ class PlanAuditReview(BaseModel):
     status: Literal["pass", "fail", "inconclusive"]
     finding: PlanAuditFinding | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def preserve_finding_from_contradictory_pass(cls, value):
+        """A concrete critic finding must never be discarded as a pass."""
+
+        if (
+            isinstance(value, dict)
+            and value.get("status") == "pass"
+            and value.get("finding") is not None
+        ):
+            value = {**value, "status": "inconclusive"}
+        return value
+
     @model_validator(mode="after")
     def finding_matches_status(self) -> "PlanAuditReview":
         if self.status == "pass" and self.finding is not None:

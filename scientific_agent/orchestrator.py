@@ -24,7 +24,7 @@ from . import __version__
 from .config import Settings
 from .execution import build_analysis_tools, create_analysis_executor
 from .environment import EnvironmentManager, build_environment_tools
-from .linting import lint_plan, reconciliation_verdict, validate_report
+from .linting import reconciliation_verdict, validate_report
 from .literature import (
     LiteratureAcquirer,
     RemotePdfTextExtractor,
@@ -82,6 +82,7 @@ from .workflow import (
     bind_controller_task,
     build_planning_workflow,
     build_simple_planning,
+    lint_bound_master,
     normalize_task,
     planning_status,
 )
@@ -2168,7 +2169,7 @@ async def _repair_plan(
     )
     master = bind_controller_task(master, planning.master_plan.task)
     audit = await _audit_plan(settings, master, on_visible_text)
-    lint = lint_plan(master.task, master.plan)
+    lint = lint_bound_master(master)
     status = planning_status(lint, audit)
     return PlanningResult(
         master_plan=master, audit=audit, plan_lints=[lint], status=status

@@ -34,6 +34,32 @@ class _ByteArtifacts:
         return self.values[path]
 
 
+def test_score_handles_terminal_inconclusive_run_with_null_result_sections():
+    detail = {
+        "id": "run-1",
+        "status": "inconclusive",
+        "artifacts": [],
+        "report": None,
+        "result": {
+            "deterministic_validation": None,
+            "scientific_review": None,
+            "computation_evidence": None,
+        },
+    }
+
+    result = score(
+        "known-effect",
+        {"enable_code": False},
+        None,
+        detail,
+        _Artifacts({}),
+    )
+
+    assert result["passed"] is False
+    assert result["checks"]["terminal_status"] is True
+    assert result["checks"]["deterministic_validation"] is False
+
+
 def test_language_result_prefers_complete_reference_over_display_values():
     display_path = "computations/a/output/data/display_values.json"
     result_path = "computations/a/output/results/python/primary.json"

@@ -1028,6 +1028,56 @@ async def test_long_progressing_private_reasoning_is_not_mistaken_for_a_loop():
 
 
 @pytest.mark.asyncio
+async def test_gemma_private_reasoning_without_final_progress_is_retried():
+    calls = 0
+    visible: list[str] = []
+    progressing = " ".join(
+        f"independent-evidence-record-{index}" for index in range(8_000)
+    )
+
+    def handler(request: httpx.Request):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            lines = [
+                "data: "
+                + json.dumps(
+                    {
+                        "choices": [
+                            {
+                                "delta": {"reasoning_content": progressing},
+                                "finish_reason": None,
+                            }
+                        ]
+                    }
+                )
+            ]
+        else:
+            lines = [
+                'data: {"choices":[{"delta":{"content":"{\\"value\\":\\"recovered\\"}"},"finish_reason":"stop"}]}'
+            ]
+        lines.append("data: [DONE]")
+        return httpx.Response(200, text="\n\n".join(lines) + "\n\n")
+
+    result = await request_structured(
+        replace(_endpoint(), model="s8-gemma", max_tokens=None),
+        system_prompt="Return an answer.",
+        payload={},
+        output_type=Answer,
+        temperature=0.2,
+        max_tokens=None,
+        timeout=2,
+        repair_attempts=1,
+        on_visible_text=visible.append,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.value == "recovered"
+    assert calls == 2
+    assert "Gemma stream with no final-channel progress" in "".join(visible)
+
+
+@pytest.mark.asyncio
 async def test_structured_stream_suppresses_qwen_reasoning_prefix():
     chunks: list[str] = []
 

@@ -345,6 +345,12 @@ value is permitted, so the stream is closed without waiting for further copies.
 Likewise, one syntactically complete but schema-invalid value is closed
 immediately and sent to the bounded repair path; appending a correction would
 itself violate the one-value contract.
+Gemma also has a 192 kB private-reasoning no-final-progress safeguard. It does
+not send a token ceiling to the model: generation remains unrestricted, but a
+sample that emits roughly tens of thousands of private reasoning tokens without
+starting its final channel is terminated and independently retried once. This
+prevents a continuously varying Gemma reasoning loop from occupying the single
+local slot for hours while preserving a large reasoning allowance.
 The raw reasoning suffix is immediately discarded and never becomes scientific
 evidence.
 If the repair sample also repeats, the planning transition is recorded as

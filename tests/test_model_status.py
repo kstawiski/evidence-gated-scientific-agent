@@ -92,6 +92,35 @@ def test_monitor_reports_authoritative_vllm_queue_and_llama_slots_with_cache():
     assert first["summary"]["saturated_models"] == 1
 
 
+def test_llama_slot_state_overrides_a_lagging_processing_metric():
+    idle_metric = GEMMA_METRICS.replace(
+        b"llamacpp:requests_processing 1", b"llamacpp:requests_processing 0"
+    )
+
+    def fetch(url, timeout):
+        if url.endswith("/metrics"):
+            return idle_metric
+        if url.endswith("/slots"):
+            return json.dumps([{"id": 0, "is_processing": True}]).encode()
+        raise OSError("unexpected fixed probe")
+
+    monitor = ModelStatusMonitor(
+        (
+            ModelStatusTarget(
+                "critic", "s8-gemma", "llama_cpp", "http://gemma.internal"
+            ),
+        ),
+        fetch=fetch,
+    )
+
+    model = monitor.snapshot()["models"][0]
+
+    assert model["state"] == "saturated"
+    assert model["active_requests"] == 1
+    assert model["slots_total"] == 1
+    assert model["slots_busy"] == 1
+
+
 def test_vllm_cache_usage_is_averaged_across_multiple_engines():
     metrics = QWEN_METRICS + (
         b'vllm:kv_cache_usage_perc{engine="1",model_name="private-backend-id"} 0.625\n'

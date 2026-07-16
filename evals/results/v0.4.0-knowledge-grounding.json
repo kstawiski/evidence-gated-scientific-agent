@@ -1,0 +1,916 @@
+{
+  "application_version": "0.4.0",
+  "baseline_document_id": "5ab34b1cfdba4b3db0fb789f6415d8f2",
+  "benchmark_version": 2,
+  "document_id": "f903267ae36a4f9d9dcd129403c92297",
+  "fixture": "evals/cases/knowledge_retrieval.json",
+  "fixture_sha256": "af28bfe4638a6f096612cffa9651cd7a5c24f8912378cd7bb4113de5c32a0c83",
+  "generated_at": "2026-07-16T21:23:51.311142+00:00",
+  "git_commit": "66fdb238e511bcfb4928f66e748bf2d337eb6f09",
+  "git_dirty": false,
+  "models": {
+    "gemma_max_tokens": null,
+    "qwen_max_tokens": null,
+    "qwen_native_json_schema": false,
+    "text": "umed-qwen",
+    "visual": "s8-gemma"
+  },
+  "no_answer": {
+    "descriptor_evidence_violations": 0,
+    "false_positive_rate": 0.0,
+    "queries": [
+      {
+        "hybrid_hits": 0,
+        "lexical_hits": 0,
+        "query": "lattice gluon propagator quantum chromodynamics"
+      },
+      {
+        "hybrid_hits": 0,
+        "lexical_hits": 0,
+        "query": "tectonic subduction paleomagnetic reversal"
+      },
+      {
+        "hybrid_hits": 0,
+        "lexical_hits": 0,
+        "query": "photosynthetic antenna chlorophyll fluorescence lifetime"
+      },
+      {
+        "hybrid_hits": 0,
+        "lexical_hits": 0,
+        "query": "zebra quantum takeover"
+      },
+      {
+        "hybrid_hits": 0,
+        "lexical_hits": 0,
+        "query": "medieval manuscript vellum pigment spectroscopy"
+      }
+    ]
+  },
+  "passed": true,
+  "queries": [
+    {
+      "hybrid": {
+        "methods": [
+          "lexical",
+          "lexical+semantic_descriptor",
+          "semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "deep inspiration breath hold cardiac dose",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "breast-dibh",
+        "stratum": "exact"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "deep inspiration breath hold cardiac dose",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "breast-dibh",
+        "stratum": "exact"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical",
+          "lexical+semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "DIBH heart sparing",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "breast-dibh",
+        "stratum": "synonym"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "DIBH heart sparing",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "breast-dibh",
+        "stratum": "synonym"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "wstrzymanie oddechu ochrona serca radioterapia piersi",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "breast-dibh",
+        "stratum": "polish"
+      },
+      "lexical": {
+        "methods": [],
+        "ndcg_at_10": 0.0,
+        "query": "wstrzymanie oddechu ochrona serca radioterapia piersi",
+        "rank": null,
+        "recall_at_10": 0.0,
+        "relevant": "breast-dibh",
+        "stratum": "polish"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical",
+          "lexical+semantic_descriptor",
+          "semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "stereotactic body radiotherapy lung",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "lung-sbrt",
+        "stratum": "exact"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "stereotactic body radiotherapy lung",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "lung-sbrt",
+        "stratum": "exact"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical",
+          "lexical+semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "SBRT ablative lung treatment",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "lung-sbrt",
+        "stratum": "synonym"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "SBRT ablative lung treatment",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "lung-sbrt",
+        "stratum": "synonym"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "stereotaktyczna radioterapia płuca wysokie dawki",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "lung-sbrt",
+        "stratum": "polish"
+      },
+      "lexical": {
+        "methods": [],
+        "ndcg_at_10": 0.0,
+        "query": "stereotaktyczna radioterapia płuca wysokie dawki",
+        "rank": null,
+        "recall_at_10": 0.0,
+        "relevant": "lung-sbrt",
+        "stratum": "polish"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical+semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "O6-methylguanine-DNA methyltransferase promoter methylation",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "gbm-mgmt",
+        "stratum": "exact"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "O6-methylguanine-DNA methyltransferase promoter methylation",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "gbm-mgmt",
+        "stratum": "exact"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical",
+          "lexical+semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "MGMT predicts temozolomide benefit",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "gbm-mgmt",
+        "stratum": "synonym"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "MGMT predicts temozolomide benefit",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "gbm-mgmt",
+        "stratum": "synonym"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical",
+          "lexical+semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "metylacja promotora MGMT glejak temozolomid",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "gbm-mgmt",
+        "stratum": "polish"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "metylacja promotora MGMT glejak temozolomid",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "gbm-mgmt",
+        "stratum": "polish"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical",
+          "lexical+semantic_descriptor",
+          "semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "median of ratios size factor negative binomial",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "rnaseq-size-factors",
+        "stratum": "exact"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "median of ratios size factor negative binomial",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "rnaseq-size-factors",
+        "stratum": "exact"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical+semantic_descriptor",
+          "semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "DESeq2 normalization differential expression",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "rnaseq-size-factors",
+        "stratum": "synonym"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 0.6309297535714575,
+        "query": "DESeq2 normalization differential expression",
+        "rank": 2,
+        "recall_at_10": 1.0,
+        "relevant": "rnaseq-size-factors",
+        "stratum": "synonym"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical+semantic_descriptor",
+          "semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "normalizacja RNA-seq różnicowa ekspresja genów",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "rnaseq-size-factors",
+        "stratum": "polish"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "normalizacja RNA-seq różnicowa ekspresja genów",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "rnaseq-size-factors",
+        "stratum": "polish"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical",
+          "lexical+semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "subdistribution hazard cumulative incidence competing event",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "competing-risks",
+        "stratum": "exact"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "subdistribution hazard cumulative incidence competing event",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "competing-risks",
+        "stratum": "exact"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical+semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "Fine Gray regression",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "competing-risks",
+        "stratum": "synonym"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 0.6309297535714575,
+        "query": "Fine Gray regression",
+        "rank": 2,
+        "recall_at_10": 1.0,
+        "relevant": "competing-risks",
+        "stratum": "synonym"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "ryzyka konkurujące skumulowana częstość Fine Gray",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "competing-risks",
+        "stratum": "polish"
+      },
+      "lexical": {
+        "methods": [],
+        "ndcg_at_10": 0.0,
+        "query": "ryzyka konkurujące skumulowana częstość Fine Gray",
+        "rank": null,
+        "recall_at_10": 0.0,
+        "relevant": "competing-risks",
+        "stratum": "polish"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical",
+          "lexical+semantic_descriptor",
+          "semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "inverse probability treatment weights propensity scores",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "propensity-weighting",
+        "stratum": "exact"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "inverse probability treatment weights propensity scores",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "propensity-weighting",
+        "stratum": "exact"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical",
+          "lexical+semantic_descriptor",
+          "semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "IPTW covariate balance",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "propensity-weighting",
+        "stratum": "synonym"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "IPTW covariate balance",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "propensity-weighting",
+        "stratum": "synonym"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical",
+          "lexical+semantic_descriptor",
+          "semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "ważenie odwrotnym prawdopodobieństwem propensity score",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "propensity-weighting",
+        "stratum": "polish"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 0.6309297535714575,
+        "query": "ważenie odwrotnym prawdopodobieństwem propensity score",
+        "rank": 2,
+        "recall_at_10": 1.0,
+        "relevant": "propensity-weighting",
+        "stratum": "polish"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical",
+          "lexical+semantic_descriptor",
+          "semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "multiple imputation chained equations Rubin rules",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "multiple-imputation",
+        "stratum": "exact"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "multiple imputation chained equations Rubin rules",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "multiple-imputation",
+        "stratum": "exact"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical",
+          "lexical+semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "MICE incomplete covariates",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "multiple-imputation",
+        "stratum": "synonym"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "MICE incomplete covariates",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "multiple-imputation",
+        "stratum": "synonym"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "wielokrotna imputacja brakujące zmienne reguły Rubina",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "multiple-imputation",
+        "stratum": "polish"
+      },
+      "lexical": {
+        "methods": [],
+        "ndcg_at_10": 0.0,
+        "query": "wielokrotna imputacja brakujące zmienne reguły Rubina",
+        "rank": null,
+        "recall_at_10": 0.0,
+        "relevant": "multiple-imputation",
+        "stratum": "polish"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical+semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "patients rather than slices held out information leakage",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "radiomics-splitting",
+        "stratum": "exact"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "patients rather than slices held out information leakage",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "radiomics-splitting",
+        "stratum": "exact"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical",
+          "lexical+semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "grouped split prevents radiomics leakage",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "radiomics-splitting",
+        "stratum": "synonym"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "grouped split prevents radiomics leakage",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "radiomics-splitting",
+        "stratum": "synonym"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "podział pacjentów przeciek danych radiomika",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "radiomics-splitting",
+        "stratum": "polish"
+      },
+      "lexical": {
+        "methods": [],
+        "ndcg_at_10": 0.0,
+        "query": "podział pacjentów przeciek danych radiomika",
+        "rank": null,
+        "recall_at_10": 0.0,
+        "relevant": "radiomics-splitting",
+        "stratum": "polish"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical",
+          "lexical+semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "pneumonitis immune checkpoint inhibition",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "ici-pneumonitis",
+        "stratum": "exact"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "pneumonitis immune checkpoint inhibition",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "ici-pneumonitis",
+        "stratum": "exact"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical",
+          "lexical+semantic_descriptor",
+          "semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "ICI related lung toxicity",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "ici-pneumonitis",
+        "stratum": "synonym"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "ICI related lung toxicity",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "ici-pneumonitis",
+        "stratum": "synonym"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "zapalenie płuc inhibitory punktów kontrolnych immunoterapia",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "ici-pneumonitis",
+        "stratum": "polish"
+      },
+      "lexical": {
+        "methods": [],
+        "ndcg_at_10": 0.0,
+        "query": "zapalenie płuc inhibitory punktów kontrolnych immunoterapia",
+        "rank": null,
+        "recall_at_10": 0.0,
+        "relevant": "ici-pneumonitis",
+        "stratum": "polish"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical",
+          "lexical+semantic_descriptor",
+          "semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "mean parotid dose late dry mouth",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "parotid-xerostomia",
+        "stratum": "exact"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "mean parotid dose late dry mouth",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "parotid-xerostomia",
+        "stratum": "exact"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "lexical",
+          "lexical+semantic_descriptor"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "xerostomia salivary gland sparing",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "parotid-xerostomia",
+        "stratum": "synonym"
+      },
+      "lexical": {
+        "methods": [
+          "lexical"
+        ],
+        "ndcg_at_10": 1.0,
+        "query": "xerostomia salivary gland sparing",
+        "rank": 1,
+        "recall_at_10": 1.0,
+        "relevant": "parotid-xerostomia",
+        "stratum": "synonym"
+      }
+    },
+    {
+      "hybrid": {
+        "methods": [
+          "semantic_descriptor"
+        ],
+        "ndcg_at_10": 0.6309297535714575,
+        "query": "suchość jamy ustnej dawka ślinianki przyusznej",
+        "rank": 2,
+        "recall_at_10": 1.0,
+        "relevant": "parotid-xerostomia",
+        "stratum": "polish"
+      },
+      "lexical": {
+        "methods": [],
+        "ndcg_at_10": 0.0,
+        "query": "suchość jamy ustnej dawka ślinianki przyusznej",
+        "rank": null,
+        "recall_at_10": 0.0,
+        "relevant": "parotid-xerostomia",
+        "stratum": "polish"
+      }
+    }
+  ],
+  "semantic_metadata": {
+    "routing": {
+      "text": "qwen",
+      "visual": "gemma-only-if-images"
+    },
+    "text_chunks_indexed": 32,
+    "text_chunks_total": 32,
+    "text_coverage": "complete",
+    "text_model": "umed-qwen",
+    "visual_assets_indexed": 0,
+    "visual_assets_total": 0,
+    "visual_model": null
+  },
+  "summary": {
+    "exact_recall_delta": {
+      "absolute_difference": 0.0,
+      "bootstrap_95_ci": [
+        0.0,
+        0.0
+      ],
+      "queries": 10
+    },
+    "hybrid": {
+      "ndcg_at_10": 0.9876976584523819,
+      "recall_at_10": 1.0
+    },
+    "lexical": {
+      "ndcg_at_10": 0.7297596420238124,
+      "recall_at_10": 0.7666666666666667
+    },
+    "synonym_and_polish_recall_gain": {
+      "absolute_difference": 0.35,
+      "bootstrap_95_ci": [
+        0.15,
+        0.55
+      ],
+      "queries": 20
+    }
+  },
+  "text_indexing_seconds": 540.2953145159408,
+  "thresholds": {
+    "descriptor_prose_never_returned_as_evidence": true,
+    "exact_recall_regression_at_most_0_01": true,
+    "hybrid_ndcg_at_10_at_least_0_75": true,
+    "hybrid_recall_at_10_at_least_0_90": true,
+    "no_answer_false_positive_rate_is_zero": true,
+    "published_baseline_snapshot_remains_searchable": true,
+    "visual_asset_extraction_complete": true,
+    "visual_ndcg_at_5_at_least_0_75": true,
+    "visual_no_answer_false_positive_rate_is_zero": true,
+    "visual_recall_at_5_at_least_0_85": true,
+    "visual_top1_accuracy_at_least_0_67": true,
+    "vocabulary_gap_gain_at_least_0_10": true,
+    "vocabulary_gap_gain_ci_excludes_zero": true
+  },
+  "visual": {
+    "assets": 6,
+    "document_id": "a211efbfa619472fa94fb74ab4745d29",
+    "indexing_seconds": 126.28761991602369,
+    "ndcg_at_5": 1.0,
+    "no_answer_false_positive_rate": 0.0,
+    "no_answer_queries": [
+      {
+        "hits": 0,
+        "query": "electrocardiogram ST segment elevation tracing"
+      },
+      {
+        "hits": 0,
+        "query": "three dimensional protein ribbon structure"
+      },
+      {
+        "hits": 0,
+        "query": "geographic choropleth map of rainfall"
+      }
+    ],
+    "passed": true,
+    "queries": [
+      {
+        "color": "navy",
+        "expected": "ppt/media/image1.png",
+        "kind": "survival",
+        "label": "Panel A",
+        "query": "stepwise time-to-event survival curves with censor marks",
+        "rank": 1
+      },
+      {
+        "color": "darkgreen",
+        "expected": "ppt/media/image2.png",
+        "kind": "forest",
+        "label": "Panel B",
+        "query": "effect estimates with horizontal confidence intervals and null line",
+        "rank": 1
+      },
+      {
+        "color": "darkred",
+        "expected": "ppt/media/image3.png",
+        "kind": "volcano",
+        "label": "Panel C",
+        "query": "gene expression scatter by log fold change and negative log p value",
+        "rank": 1
+      },
+      {
+        "color": "purple",
+        "expected": "ppt/media/image4.png",
+        "kind": "flow",
+        "label": "Panel D",
+        "query": "trial participant enrollment allocation follow-up analysis flow",
+        "rank": 1
+      },
+      {
+        "color": "teal",
+        "expected": "ppt/media/image5.png",
+        "kind": "agreement",
+        "label": "Panel E",
+        "query": "measurement difference versus mean with limits of agreement",
+        "rank": 1
+      },
+      {
+        "color": "maroon",
+        "expected": "ppt/media/image6.png",
+        "kind": "calibration",
+        "label": "Panel F",
+        "query": "observed versus predicted risk with ideal diagonal",
+        "rank": 1
+      }
+    ],
+    "recall_at_5": 1.0,
+    "top1_accuracy": 1.0
+  }
+}

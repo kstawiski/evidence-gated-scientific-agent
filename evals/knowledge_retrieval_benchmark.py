@@ -241,6 +241,7 @@ def _bootstrap_difference(
 
 
 async def run_benchmark(fixture: Path) -> dict:
+    fixture = fixture.resolve()
     case = json.loads(fixture.read_text(encoding="utf-8"))
     corpus = _build_corpus(case["records"])
     with tempfile.TemporaryDirectory(prefix="evidence-knowledge-benchmark-") as raw:
@@ -387,7 +388,7 @@ async def run_benchmark(fixture: Path) -> dict:
                 "qwen_max_tokens": settings.qwen.max_tokens,
                 "gemma_max_tokens": settings.gemma.max_tokens,
             },
-            "fixture": str(fixture),
+            "fixture": _display_path(fixture),
             "fixture_sha256": hashlib.sha256(fixture.read_bytes()).hexdigest(),
             "document_id": candidate["id"],
             "baseline_document_id": document["id"],
@@ -409,6 +410,15 @@ async def run_benchmark(fixture: Path) -> dict:
                 for base, candidate in zip(lexical, hybrid, strict=True)
             ],
         }
+
+
+def _display_path(path: Path) -> str:
+    """Keep public benchmark records portable without hiding the hashed input."""
+
+    try:
+        return path.relative_to(Path.cwd().resolve()).as_posix()
+    except ValueError:
+        return path.name
 
 
 def main() -> None:

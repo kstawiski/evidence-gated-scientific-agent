@@ -188,20 +188,23 @@ class ModelStatusMonitor:
         active = self._required_count(metrics, "llamacpp:requests_processing")
         queued = self._required_count(metrics, "llamacpp:requests_deferred")
         total_slots = slots[0] if slots else None
-        busy_slots = min(total_slots, active) if total_slots is not None else None
+        busy_slots = slots[1] if slots else None
+        # llama.cpp's Prometheus gauge can lag behind the authoritative slot
+        # state.  Never present an actively processing slot as idle.
+        effective_active = max(active, busy_slots or 0)
         if queued:
             state = "queued"
             message = f"{queued} request{'s' if queued != 1 else ''} waiting"
-        elif total_slots and active >= total_slots:
+        elif total_slots and effective_active >= total_slots:
             state = "saturated"
             message = "All inference slots are busy"
         else:
-            state, message = self._state_message(active, queued)
+            state, message = self._state_message(effective_active, queued)
         return self._result(
             target,
             state=state,
             reachable=True,
-            active_requests=active,
+            active_requests=effective_active,
             queued_requests=queued,
             slots_total=total_slots,
             slots_busy=busy_slots,

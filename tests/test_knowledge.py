@@ -1394,6 +1394,40 @@ def test_semantic_index_job_recovery_cancel_retry_and_event_log(tmp_path):
     ]
 
 
+def test_queued_cancellation_fails_unpublished_candidate_and_retry_restores_it(
+    tmp_path,
+):
+    lib = library(tmp_path)
+    current = ingest_text(lib, "Published", "Published exact evidence.")
+    candidate = lib.reindex(current["id"], current["etag"], semantic_pending=True)
+    job = lib.enqueue_index_job(candidate["id"], "reindex", current["id"])
+
+    assert lib.request_cancel_index_job(job["id"])["status"] == "cancelled"
+    failed = lib.get_document(candidate["id"])
+    assert failed["semantic_status"] == "failed"
+    assert failed["published"] is False
+    assert lib.snapshot()["documents"][0]["document_id"] == current["id"]
+
+    assert lib.retry_index_job(job["id"])["status"] == "queued"
+    assert lib.get_document(candidate["id"])["semantic_status"] == "pending"
+
+
+def test_recovery_finishes_requested_cancellation_and_fails_candidate(tmp_path):
+    lib = library(tmp_path)
+    current = ingest_text(lib, "Published", "Published exact evidence.")
+    candidate = lib.reindex(current["id"], current["etag"], semantic_pending=True)
+    job = lib.enqueue_index_job(candidate["id"], "reindex", current["id"])
+    assert lib.claim_next_index_job()["id"] == job["id"]
+    assert lib.request_cancel_index_job(job["id"])["status"] == "cancel_requested"
+
+    assert lib.recover_index_jobs() == 1
+    assert lib.get_index_job(job["id"])["status"] == "cancelled"
+    failed = lib.get_document(candidate["id"])
+    assert failed["semantic_status"] == "failed"
+    assert failed["published"] is False
+    assert lib.snapshot()["documents"][0]["document_id"] == current["id"]
+
+
 def test_reindex_all_can_limit_candidates_to_enabled_documents(tmp_path):
     lib = library(tmp_path)
     enabled = ingest_text(lib, "Enabled", "Enabled source text.")

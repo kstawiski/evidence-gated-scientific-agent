@@ -1780,7 +1780,8 @@ class KnowledgeLibrary:
                     "Controller",
                 )
             cancelled = connection.execute(
-                "SELECT id FROM index_jobs WHERE status='cancel_requested'"
+                "SELECT id, document_id FROM index_jobs "
+                "WHERE status='cancel_requested'"
             ).fetchall()
             for row in cancelled:
                 connection.execute(
@@ -1794,6 +1795,12 @@ class KnowledgeLibrary:
                     "cancelled",
                     "Cancellation completed during recovery",
                     "Controller",
+                )
+                self._fail_pending_candidate_tx(
+                    connection,
+                    row["document_id"],
+                    "Cancelled during controller restart",
+                    now,
                 )
         return len(interrupted) + len(cancelled)
 
@@ -1980,10 +1987,31 @@ class KnowledgeLibrary:
             self._append_index_event_tx(
                 connection, job_id, next_status, message, "Controller"
             )
+            if next_status == "cancelled":
+                self._fail_pending_candidate_tx(
+                    connection, current["document_id"], message, now
+                )
             updated = connection.execute(
                 "SELECT * FROM index_jobs WHERE id=?", (job_id,)
             ).fetchone()
         return self._index_job(updated)
+
+    @staticmethod
+    def _fail_pending_candidate_tx(
+        connection: sqlite3.Connection,
+        document_id: str,
+        message: str,
+        now: str,
+    ) -> None:
+        """Fail an unpublished candidate in the same transaction as cancellation."""
+
+        connection.execute(
+            "UPDATE documents SET semantic_status='failed', semantic_metadata=?, "
+            "semantic_updated_at=?, updated_at=?, etag=etag+1 WHERE id=? "
+            "AND published=0 AND semantic_status='pending' AND retired_at IS NULL "
+            "AND deleted_at IS NULL",
+            (canonical_json({"failure": message}), now, now, document_id),
+        )
 
     def retry_index_job(self, job_id: str) -> dict[str, Any]:
         now = utc_now()

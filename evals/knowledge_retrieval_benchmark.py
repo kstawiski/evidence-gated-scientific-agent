@@ -28,32 +28,33 @@ from scientific_agent.knowledge_visuals import register_document_visuals
 from scientific_agent.provenance import utc_now
 
 
-def _build_corpus(records: list[dict]) -> str:
+def _build_corpus(records: list[dict]) -> tuple[str, dict[str, str]]:
     sections = []
-    for record in records:
-        marker = f"[DOC:{record['id']}]"
+    markers: dict[str, str] = {}
+    for index, record in enumerate(records, start=1):
+        marker = f"[SOURCE {index:03d}]"
+        markers[record["id"]] = marker
         base = f"{marker}\n{record['title']}\n{record['text']}\n"
         boundary = (
-            f"Scope boundary for {record['id']}: this record must remain distinct "
+            "Scope boundary: this record must remain distinct "
             "from unrelated scientific records and does not support unstated claims. "
         )
         sections.append((base + boundary * 20)[:2_050])
-    return "\n\n".join(sections)
+    return "\n\n".join(sections), markers
 
 
-def _rank(result: dict, relevant: str, limit: int) -> int | None:
-    marker = f"[DOC:{relevant}]"
+def _rank(result: dict, marker: str, limit: int) -> int | None:
     for index, passage in enumerate(result["passages"][:limit], start=1):
         if marker in passage["untrusted_source_text"]:
             return index
     return None
 
 
-def _evaluate(library, snapshot, queries, limit: int = 10) -> list[dict]:
+def _evaluate(library, snapshot, queries, markers, limit: int = 10) -> list[dict]:
     rows = []
     for item in queries:
         result = library.search(item["query"], snapshot, limit)
-        rank = _rank(result, item["relevant"], limit)
+        rank = _rank(result, markers[item["relevant"]], limit)
         rows.append(
             {
                 **item,
@@ -66,6 +67,25 @@ def _evaluate(library, snapshot, queries, limit: int = 10) -> list[dict]:
             }
         )
     return rows
+
+
+def _descriptor_evidence_audit(
+    library, snapshot, queries: list[str], corpus: str, limit: int = 10
+) -> tuple[int, int]:
+    """Prove every semantically retrieved passage remains an exact source slice."""
+
+    violations = 0
+    passages_inspected = 0
+    forbidden_fields = {"descriptor", "search_text", "semantic_descriptor"}
+    for query in queries:
+        for passage in library.search(query, snapshot, limit)["passages"]:
+            passages_inspected += 1
+            source_text = passage.get("untrusted_source_text")
+            if forbidden_fields.intersection(passage) or not isinstance(
+                source_text, str
+            ) or source_text not in corpus:
+                violations += 1
+    return violations, passages_inspected
 
 
 def _visual_presentation(path: Path, visuals: list[dict]) -> None:
@@ -243,7 +263,7 @@ def _bootstrap_difference(
 async def run_benchmark(fixture: Path) -> dict:
     fixture = fixture.resolve()
     case = json.loads(fixture.read_text(encoding="utf-8"))
-    corpus = _build_corpus(case["records"])
+    corpus, markers = _build_corpus(case["records"])
     with tempfile.TemporaryDirectory(prefix="evidence-knowledge-benchmark-") as raw:
         library = KnowledgeLibrary(
             Path(raw) / "knowledge", "retrieval-benchmark", "https://benchmark.invalid"
@@ -256,7 +276,7 @@ async def run_benchmark(fixture: Path) -> dict:
             source_type="dataset",
         )
         lexical_snapshot = library.snapshot([document["id"]])
-        lexical = _evaluate(library, lexical_snapshot, case["queries"])
+        lexical = _evaluate(library, lexical_snapshot, case["queries"], markers)
         settings = Settings()
         indexer = KnowledgeSemanticIndexer(settings)
         candidate = library.reindex(
@@ -277,7 +297,7 @@ async def run_benchmark(fixture: Path) -> dict:
         )
         text_indexing_seconds = time.monotonic() - started
         hybrid_snapshot = library.snapshot([candidate["id"]])
-        hybrid = _evaluate(library, hybrid_snapshot, case["queries"])
+        hybrid = _evaluate(library, hybrid_snapshot, case["queries"], markers)
         immutable_baseline_preserved = bool(
             library.search(case["queries"][0]["query"], lexical_snapshot, 10)[
                 "passages"
@@ -321,13 +341,9 @@ async def run_benchmark(fixture: Path) -> dict:
             "published_baseline_snapshot_remains_searchable": immutable_baseline_preserved,
         }
         no_answer_rows = []
-        descriptor_evidence_violations = 0
         for query in case.get("no_answer_queries", []):
             lexical_result = library.search(query, lexical_snapshot, 10)
             hybrid_result = library.search(query, hybrid_snapshot, 10)
-            for passage in hybrid_result["passages"]:
-                if "search_text" in passage or "descriptor" in passage:
-                    descriptor_evidence_violations += 1
             no_answer_rows.append(
                 {
                     "query": query,
@@ -341,8 +357,20 @@ async def run_benchmark(fixture: Path) -> dict:
         thresholds["no_answer_false_positive_rate_is_zero"] = (
             no_answer_false_positive_rate == 0
         )
+        descriptor_evidence_violations, descriptor_evidence_passages_inspected = (
+            _descriptor_evidence_audit(
+                library,
+                hybrid_snapshot,
+                [item["query"] for item in case["queries"]]
+                + list(case.get("no_answer_queries", [])),
+                corpus,
+            )
+        )
         thresholds["descriptor_prose_never_returned_as_evidence"] = (
             descriptor_evidence_violations == 0
+        )
+        thresholds["descriptor_evidence_audit_is_nonvacuous"] = (
+            descriptor_evidence_passages_inspected > 0
         )
         visual = await _evaluate_visuals(library, indexer, case, Path(raw))
         thresholds["visual_asset_extraction_complete"] = (
@@ -403,6 +431,9 @@ async def run_benchmark(fixture: Path) -> dict:
             "no_answer": {
                 "false_positive_rate": no_answer_false_positive_rate,
                 "descriptor_evidence_violations": descriptor_evidence_violations,
+                "descriptor_evidence_passages_inspected": (
+                    descriptor_evidence_passages_inspected
+                ),
                 "queries": no_answer_rows,
             },
             "queries": [

@@ -28,6 +28,7 @@ from scientific_agent.orchestrator import (
     _without_validation_conflicts,
     _prepare_task_spec,
     _register_computation_path_evidence,
+    _review_deferred_by_deterministic_gate,
     _remove_display_ids_from_claim_evidence,
     _requires_pubmed_literature,
     _write_attempt_bundle,
@@ -3337,6 +3338,26 @@ def test_deterministic_only_repair_exhaustion_requires_human_decision():
         _final_run_status(validation, review, quality_gate_exhausted=True)
         == "requires_human_decision"
     )
+
+
+def test_deterministic_failure_defers_gemma_review_until_repaired():
+    validation = DeterministicValidation(
+        passed=False,
+        findings=[
+            LintFinding(
+                code="table_excessive_precision",
+                location="Table 1",
+                message="Reader-facing precision remains excessive.",
+            )
+        ],
+    )
+
+    review = _review_deferred_by_deterministic_gate(validation)
+
+    assert review.verdict == "inconclusive"
+    assert review.blocking_findings == []
+    assert "table_excessive_precision" in review.unsupported_claims[0]
+    assert _needs_repair(validation, review)
 
 
 def test_research_repair_instruction_disambiguates_significant_digits():

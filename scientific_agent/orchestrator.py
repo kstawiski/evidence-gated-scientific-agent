@@ -121,6 +121,23 @@ TABLE_PRECISION_REPAIR_GUIDANCE = (
     "as inequalities such as p < 0.001 rather than rounding them to zero."
 )
 
+
+def _review_deferred_by_deterministic_gate(
+    validation: DeterministicValidation,
+) -> VerificationReport:
+    """Represent a review that cannot start until objective checks pass."""
+
+    codes = ", ".join(sorted({finding.code for finding in validation.findings}))
+    return VerificationReport(
+        verdict="inconclusive",
+        unsupported_claims=[
+            "Gemma review was deferred because deterministic validation failed"
+            + (f" ({codes})." if codes else ".")
+            + " The objective findings must be repaired before model review."
+        ],
+    )
+
+
 ActivityCallback = Callable[[str, str, str, str, str | None], None]
 PRESENTATION_ONLY_FINDINGS = {
     "computed_without_artifact",
@@ -4068,22 +4085,35 @@ async def run_scientific_task(
         controller_artifacts=controller_artifacts,
         controller_dates=controller_dates,
     )
-    report_progress("scientific-review", "Gemma is independently auditing the result")
-    review = await _audit_report_resilient(
-        settings,
-        planning,
-        report,
-        validation,
-        retrieval,
-        computation,
-        ledger,
-        controller_artifacts,
-        controller_dates,
-        simple_mode,
-        run_dir / "live",
-        activity,
-        cancel_event,
-    )
+    if validation.passed:
+        report_progress(
+            "scientific-review", "Gemma is independently auditing the result"
+        )
+        review = await _audit_report_resilient(
+            settings,
+            planning,
+            report,
+            validation,
+            retrieval,
+            computation,
+            ledger,
+            controller_artifacts,
+            controller_dates,
+            simple_mode,
+            run_dir / "live",
+            activity,
+            cancel_event,
+        )
+    else:
+        review = _review_deferred_by_deterministic_gate(validation)
+        report_progress(
+            "validation",
+            "Deterministic findings must be repaired before Gemma review",
+        )
+        ledger.append(
+            "gemma_review_deferred",
+            {"finding_codes": sorted({item.code for item in validation.findings})},
+        )
     _write_attempt_bundle(
         run_dir, 0, report, validation, review, retrieval, computation
     )
@@ -4197,22 +4227,35 @@ async def run_scientific_task(
             controller_artifacts=controller_artifacts,
             controller_dates=controller_dates,
         )
-        report_progress("scientific-review", "Gemma is auditing the repaired result")
-        review = await _audit_report_resilient(
-            settings,
-            planning,
-            report,
-            validation,
-            retrieval,
-            computation,
-            ledger,
-            controller_artifacts,
-            controller_dates,
-            simple_mode,
-            run_dir / "live",
-            activity,
-            cancel_event,
-        )
+        if validation.passed:
+            report_progress(
+                "scientific-review", "Gemma is auditing the repaired result"
+            )
+            review = await _audit_report_resilient(
+                settings,
+                planning,
+                report,
+                validation,
+                retrieval,
+                computation,
+                ledger,
+                controller_artifacts,
+                controller_dates,
+                simple_mode,
+                run_dir / "live",
+                activity,
+                cancel_event,
+            )
+        else:
+            review = _review_deferred_by_deterministic_gate(validation)
+            report_progress(
+                "validation",
+                "Deterministic findings must be repaired before Gemma review",
+            )
+            ledger.append(
+                "gemma_review_deferred",
+                {"finding_codes": sorted({item.code for item in validation.findings})},
+            )
         _write_attempt_bundle(
             run_dir,
             repair_rounds,

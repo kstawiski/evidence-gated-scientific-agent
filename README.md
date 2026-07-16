@@ -506,9 +506,11 @@ uv run scientific-agent run \
 `--mode simple` is the default for bounded retrieval, calculation, and evidence
 extraction: one lean Qwen plan, deterministic plan lint, a fixed five-criterion
 Gemma plan audit, and independent Gemma audits of the final article and displays,
-followed by another audit after every repair. It does not ask Gemma to generate a
-redundant long-form plan, but a concrete blocking critic finding enters the
-same bounded Qwen repair → deterministic validation → Gemma re-audit loop;
+followed by another audit after every deterministically admissible repair. An
+objective validation failure returns directly to Qwen with exact findings before
+Gemma is called. It does not ask Gemma to generate a redundant long-form plan,
+but a concrete blocking critic finding enters the same bounded Qwen repair →
+deterministic validation → Gemma re-audit loop;
 unsupported disagreement alone is not a blocker. Use
 `--mode full` for genuinely multi-stage scientific design.
 Research model/tool budgets are cumulative across repair rounds. Exhausting a

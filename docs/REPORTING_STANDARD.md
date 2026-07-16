@@ -170,8 +170,11 @@ computation, or display surface. Qwen receives the exact findings and may read
 prior-attempt artifacts only through `/history`; a real figure/table defect must
 be regenerated and cannot be repaired by changing its caption alone. The
 controller then reruns deterministic validation and gives the changed report and
-actual displays to Gemma again. This repeats up to `MAX_REPAIR_ROUNDS` (four by
-default; accepted range 0–8).
+actual displays to Gemma only after the objective checks pass. A deterministic
+failure therefore returns directly to Qwen with its exact codes and examples;
+Gemma cannot override it and is not asked to spend a maximal-thinking review on
+an already inadmissible artifact. This repeats up to `MAX_REPAIR_ROUNDS` (four
+by default; accepted range 0–8).
 
 Display-only repair rounds reuse prior machine-readable results and are limited
 to eight sandbox calls. They must not repeat valid Python/R estimation,

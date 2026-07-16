@@ -2487,7 +2487,11 @@ def validate_report(
                             location=location,
                             message=(
                                 "Reader-facing tables must use scientific display "
-                                "precision; preserve full precision in JSON. Examples: "
+                                "precision of at most four significant digits (not "
+                                "four decimal places); preserve full precision in "
+                                "JSON. For example, use 10.9 or 10.90 instead of "
+                                "10.897, 0.9801 instead of 0.980132, and 5.000 "
+                                "instead of 5.0000. Offending cells: "
                                 + "; ".join(precision_examples)
                             ),
                         )

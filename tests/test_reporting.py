@@ -407,9 +407,15 @@ def test_reader_table_rejects_raw_computational_precision(tmp_path: Path):
 
     validation = validate_report(report, computation=computation)
 
-    assert "table_excessive_precision" in {
-        finding.code for finding in validation.findings
-    }
+    precision_finding = next(
+        finding
+        for finding in validation.findings
+        if finding.code == "table_excessive_precision"
+    )
+    assert "four significant digits (not four decimal places)" in (
+        precision_finding.message
+    )
+    assert "10.897" in precision_finding.message
 
     table.write_text("group,estimate\nA,1.2345\ncontrol,0.000\n", encoding="utf-8")
     computation.artifacts[1] = computation.artifacts[1].model_copy(

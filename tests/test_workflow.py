@@ -3339,6 +3339,13 @@ def test_deterministic_only_repair_exhaustion_requires_human_decision():
     )
 
 
+def test_research_repair_instruction_disambiguates_significant_digits():
+    guidance = orchestrator_module.TABLE_PRECISION_REPAIR_GUIDANCE
+
+    assert "at most four significant digits, not four decimal places" in guidance
+    assert "10.897 -> 10.9 or 10.90" in guidance
+
+
 @pytest.mark.anyio
 async def test_schema_invalid_repair_preserves_audited_report_and_escalates(
     tmp_path, monkeypatch

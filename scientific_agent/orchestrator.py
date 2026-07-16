@@ -112,6 +112,15 @@ REQUESTED_OUTPUT_EXTENSIONS = {
     "data_bundle": ".zip",
 }
 
+TABLE_PRECISION_REPAIR_GUIDANCE = (
+    "Reader-facing numeric tables are limited to at most four significant "
+    "digits, not four decimal places. When the deterministic validator reports "
+    "`table_excessive_precision`, regenerate every offending table cell "
+    "accordingly (for example, 10.897 -> 10.9 or 10.90; 0.980132 -> 0.9801; "
+    "5.0000 -> 5.000). Keep exact values in JSON and express very small p-values "
+    "as inequalities such as p < 0.001 rather than rounding them to zero."
+)
+
 ActivityCallback = Callable[[str, str, str, str, str | None], None]
 PRESENTATION_ONLY_FINDINGS = {
     "computed_without_artifact",
@@ -2691,7 +2700,7 @@ async def _produce_report(
                     "reconciliation, or provenance generation. If that call fails, "
                     "make at most one direct retry from stderr. Execute only a "
                     "falsification test, display correction, or missing analysis "
-                    "required by a concrete finding."
+                    "required by a concrete finding. " + TABLE_PRECISION_REPAIR_GUIDANCE
                 ),
             }
         )

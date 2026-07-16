@@ -20,7 +20,15 @@ from scientific_agent.schemas import ComputationEvidence
 def _state(tmp_path: Path) -> tuple[WorkerState, Path, Path]:
     workspace_id = str(uuid.uuid4())
     workspace = tmp_path / "workspaces" / workspace_id / "files"
-    root = tmp_path / "workspaces" / workspace_id / "runs" / "run-1" / "computations"
+    root = (
+        tmp_path
+        / "workspaces"
+        / workspace_id
+        / "runs"
+        / "run-1"
+        / "computations"
+        / "attempt-0"
+    )
     workspace.mkdir(parents=True)
     root.mkdir(parents=True)
     state = WorkerState(tmp_path, "x" * 32, SandboxSettings())
@@ -125,7 +133,7 @@ def test_worker_uses_root_owned_staging_for_history_bind(tmp_path, monkeypatch):
 
 def test_worker_stages_prior_attempts_at_expected_history_paths(tmp_path, monkeypatch):
     state, workspace, base_root = _state(tmp_path)
-    history = base_root.parent / "computations"
+    history = base_root.parent
     current = history / "attempt-1"
     prior = history / "attempt-0" / "exec-001" / "output"
     prior.mkdir(parents=True)
@@ -304,6 +312,40 @@ def test_handoff_tolerates_root_squashed_nfs_chown(tmp_path, monkeypatch):
     state._handoff_ownership(root)
 
 
+def test_execute_hands_back_shared_computation_traversal_directory(
+    tmp_path, monkeypatch
+):
+    state, workspace, root = _state(tmp_path)
+    chowned: list[Path] = []
+
+    monkeypatch.setattr(
+        "scientific_agent.sandbox_worker.AnalysisExecutor.execute",
+        lambda self, language, code, timeout_seconds=120: {"status": "succeeded"},
+    )
+    monkeypatch.setattr(
+        "scientific_agent.sandbox_worker.AnalysisExecutor.evidence",
+        lambda self: ComputationEvidence(),
+    )
+    monkeypatch.setattr(
+        "scientific_agent.sandbox_worker.os.chown",
+        lambda path, uid, gid: chowned.append(Path(path)),
+    )
+
+    state.execute(
+        ExecuteRequest(
+            request_id=str(uuid.uuid4()),
+            workspace=str(workspace),
+            computation_root=str(root),
+            language="python",
+            code="print(1)",
+            timeout_seconds=10,
+        )
+    )
+
+    assert root in chowned
+    assert root.parent in chowned
+
+
 def test_worker_cancel_sets_only_the_matching_request_event(tmp_path):
     state, _, _ = _state(tmp_path)
     request_id = str(uuid.uuid4())
@@ -345,7 +387,7 @@ def _ocr_request(path: Path) -> FigureOcrRequest:
 
 def test_worker_accepts_only_generated_run_figure(tmp_path):
     state, _, root = _state(tmp_path)
-    figure = root / "attempt-0" / "exec-001" / "output" / "figures" / "effect.png"
+    figure = root / "exec-001" / "output" / "figures" / "effect.png"
     figure.parent.mkdir(parents=True)
     figure.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
 
@@ -361,7 +403,7 @@ def test_worker_rejects_generated_figure_symlink(tmp_path):
     state, _, root = _state(tmp_path)
     outside = tmp_path / "outside.png"
     outside.write_bytes(b"\x89PNG\r\n\x1a\nfixture")
-    figure = root / "attempt-0" / "exec-001" / "output" / "figures" / "effect.png"
+    figure = root / "exec-001" / "output" / "figures" / "effect.png"
     figure.parent.mkdir(parents=True)
     figure.symlink_to(outside)
 

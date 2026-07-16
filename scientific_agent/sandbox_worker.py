@@ -95,10 +95,14 @@ class WorkerState:
             and workspace_parts[2] == "files"
         )
         valid_root = (
-            len(root_parts) >= 4
+            len(root_parts) == 6
             and root_parts[0] == "workspaces"
             and root_parts[1] == workspace_parts[1]
             and root_parts[2] == "runs"
+            and root_parts[3]
+            and root_parts[4] == "computations"
+            and root_parts[5].startswith("attempt-")
+            and root_parts[5].removeprefix("attempt-").isdigit()
         )
         try:
             uuid.UUID(workspace_parts[1] if valid_workspace else "")
@@ -615,7 +619,7 @@ class WorkerState:
                 )
                 staged_root = self.staging_roots[key]
                 shutil.copytree(staged_root, root, dirs_exist_ok=True)
-                self._handoff_ownership(root)
+                self._handoff_ownership(root, include_parent=True)
                 result = self._rewrite_paths(result, staged_root, root)
                 evidence = self._rewrite_paths(
                     executor.evidence().model_dump(mode="json"), staged_root, root
@@ -686,10 +690,17 @@ class WorkerState:
                 shutil.rmtree(staging_dir or staged_root.parent, ignore_errors=True)
         return True
 
-    def _handoff_ownership(self, root: Path) -> None:
+    def _handoff_ownership(self, root: Path, *, include_parent: bool = False) -> None:
         """Return worker-created provenance to the unprivileged web service."""
 
-        for path in [*root.rglob("*"), root]:
+        paths = [*root.rglob("*"), root]
+        if include_parent:
+            # The privileged worker may have created the shared `computations`
+            # traversal directory. Without handing it back, its 0700 root
+            # ownership makes otherwise correctly owned artifacts unreadable to
+            # the unprivileged controller during deterministic validation.
+            paths.append(root.parent)
+        for path in paths:
             if not path.is_symlink():
                 try:
                     os.chown(path, self.output_uid, self.output_gid)

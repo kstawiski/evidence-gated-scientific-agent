@@ -20,6 +20,7 @@ python3 <skill-dir>/scripts/evidence_bench.py run \
   --workspace-name "short descriptive name" \
   --objective "Analyze the uploaded data, report effect sizes with uncertainty, and distinguish confirmatory from exploratory findings." \
   --file data.csv \
+  --requested-output pptx_presentation \
   --wait \
   --download-dir ./evidence-bench-result
 ```
@@ -35,6 +36,13 @@ Defaults are intentional:
 - Context7, Brave Search, and Chrome DevTools are enabled.
 - The client streams controller events to stderr while keeping machine-readable JSON on stdout.
 - `--download-dir` saves the complete ZIP provenance bundle when the run reaches a terminal state.
+
+Repeat `--file` for multiple inputs. Files upload sequentially with a 4 GiB
+per-file service default; prefer one ZIP for a large directory or hundreds of
+related files so intake can inventory the collection before planning. Repeat
+`--requested-output` with `pptx_presentation`, `analysis_notebook`, or
+`data_bundle` to make those additional artifacts deterministic acceptance
+requirements. They require code execution and appear in the live artifact browser.
 
 Use `--no-code` only for work that must not compute. Use `--no-research` when task text or inputs must not result in external searches. Context7 and Brave receive generated queries; do not submit PHI, credentials, or confidential identifiers to external MCP services.
 

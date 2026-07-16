@@ -90,6 +90,79 @@ def test_worker_uses_caller_attempt_budget_and_rejects_budget_changes(
         state.execute(changed)
 
 
+def test_worker_uses_root_owned_staging_for_history_bind(tmp_path, monkeypatch):
+    state, workspace, root = _state(tmp_path)
+    observed = {}
+
+    def execute(self, language, code, timeout_seconds=120):
+        del language, code, timeout_seconds
+        observed["history_dir"] = self.history_dir
+        observed["workspace"] = self.workspace
+        return {"status": "succeeded"}
+
+    monkeypatch.setattr(
+        "scientific_agent.sandbox_worker.AnalysisExecutor.execute", execute
+    )
+    monkeypatch.setattr(
+        "scientific_agent.sandbox_worker.AnalysisExecutor.evidence",
+        lambda self: ComputationEvidence(),
+    )
+    request = ExecuteRequest(
+        request_id=str(uuid.uuid4()),
+        workspace=str(workspace),
+        computation_root=str(root),
+        language="python",
+        code="print(1)",
+        timeout_seconds=10,
+    )
+
+    state.execute(request)
+
+    assert observed["history_dir"] == observed["workspace"].parent / "history"
+    assert observed["history_dir"] != root.parent.resolve()
+    assert observed["history_dir"].parent.name.startswith("evidence-worker-")
+
+
+def test_worker_stages_prior_attempts_at_expected_history_paths(tmp_path, monkeypatch):
+    state, workspace, base_root = _state(tmp_path)
+    history = base_root.parent / "computations"
+    current = history / "attempt-1"
+    prior = history / "attempt-0" / "exec-001" / "output"
+    prior.mkdir(parents=True)
+    (prior / "result.json").write_text('{"estimate": 2.5}', encoding="utf-8")
+    current.mkdir(parents=True)
+    observed = {}
+
+    def execute(self, language, code, timeout_seconds=120):
+        del language, code, timeout_seconds
+        prior_result = (
+            self.history_dir / "attempt-0" / "exec-001" / "output" / "result.json"
+        )
+        observed["prior"] = prior_result.read_text(encoding="utf-8")
+        observed["current_root"] = self.root.name
+        return {"status": "succeeded"}
+
+    monkeypatch.setattr(
+        "scientific_agent.sandbox_worker.AnalysisExecutor.execute", execute
+    )
+    monkeypatch.setattr(
+        "scientific_agent.sandbox_worker.AnalysisExecutor.evidence",
+        lambda self: ComputationEvidence(),
+    )
+    request = ExecuteRequest(
+        request_id=str(uuid.uuid4()),
+        workspace=str(workspace),
+        computation_root=str(current),
+        language="python",
+        code="print(1)",
+        timeout_seconds=10,
+    )
+
+    state.execute(request)
+
+    assert observed == {"prior": '{"estimate": 2.5}', "current_root": "attempt-1"}
+
+
 def test_worker_call_budget_is_capped_by_worker_configuration(tmp_path, monkeypatch):
     state, workspace, root = _state(tmp_path)
     observed = []
@@ -374,3 +447,31 @@ def test_pdf_parser_command_has_one_input_one_output_and_no_network(
     assert ["--ro-bind", "/usr", "/usr"] not in [
         sandbox[index : index + 3] for index in range(max(0, len(sandbox) - 2))
     ]
+
+
+def test_pdf_extraction_stages_private_workspace_input(tmp_path, monkeypatch):
+    state, workspace, _ = _state(tmp_path)
+    pdf = workspace / "references" / "pdfs" / "article.pdf"
+    pdf.parent.mkdir(parents=True)
+    payload = b"%PDF-1.7\nprivate-workspace-fixture"
+    pdf.write_bytes(payload)
+    observed = {}
+
+    def command(parser_input, output_dir):
+        observed["path"] = parser_input
+        observed["bytes"] = parser_input.read_bytes()
+        observed["mode"] = parser_input.stat().st_mode & 0o777
+        assert parser_input != pdf.resolve()
+        (output_dir / "article.txt").write_text(
+            "Controller-staged article text", encoding="utf-8"
+        )
+        return ["/bin/true"]
+
+    monkeypatch.setattr(state, "_pdf_bwrap_command", command)
+
+    result = state.extract_pdf_text(_pdf_request(pdf))
+
+    assert observed["bytes"] == payload
+    assert observed["mode"] == 0o600
+    assert result["text"] == "Controller-staged article text"
+    assert observed["path"].name == "input.pdf"

@@ -241,6 +241,14 @@ def test_ui_api_auth_workspace_upload_and_run(tmp_path):
             files={"upload": ("values.csv", b"x,y\n1,2\n", "text/csv")},
         )
         assert uploaded.status_code == 201
+        streamed = client.put(
+            f"/api/workspaces/{workspace_id}/files/large%20input.bin",
+            auth=("researcher", "correct horse"),
+            content=b"streamed-without-multipart-spooling",
+            headers={"Content-Type": "application/octet-stream"},
+        )
+        assert streamed.status_code == 201
+        assert streamed.json() == {"name": "large input.bin", "bytes": 35}
         input_preview = client.get(
             f"/api/workspaces/{workspace_id}/file-preview",
             params={"filename": "values.csv"},
@@ -262,11 +270,13 @@ def test_ui_api_auth_workspace_upload_and_run(tmp_path):
                 "objective": "Analyze the uploaded values",
                 "enable_code": True,
                 "mcp_servers": [],
+                "requested_outputs": ["pptx_presentation"],
             },
         )
         assert queued.status_code == 202
         result = _wait_for_run(client, queued.json()["id"])
         assert result["status"] == "supported"
+        assert result["requested_outputs"] == ["pptx_presentation"]
         assert result["report"]["title"] == "Validated test report"
         assert result["reference_manifest"]["references"][0]["pmid"] == "123"
         imported = client.get(
@@ -507,6 +517,10 @@ def test_browser_ui_uses_structured_dom_without_inner_html():
     assert "/discussion" in script
     assert 'id="active-run-capabilities"' in page
     assert "reflectActiveProtocol" in script
+    assert "appendCitationMarker" in script
+    assert 'document.createElement(local?.markdown ? "button" : "a")' in script
+    assert 'request.open("PUT"' in script
+    assert 'id="requested-output-options"' in page
     assert ".run-facts dd { white-space: normal; overflow-wrap: anywhere; }" in style
     assert ".task-panel.is-locked .mcp-options input:disabled + span" in style
 
@@ -627,10 +641,21 @@ def test_a2a_omission_uses_service_defaults_and_empty_list_opts_out():
     assert _run_options(SimpleNamespace(metadata={}, message=None), defaults) == (
         False,
         defaults,
+        (),
     )
     assert _run_options(
         SimpleNamespace(metadata={"mcp_servers": []}, message=None), defaults
-    ) == (False, ())
+    ) == (False, (), ())
+    assert _run_options(
+        SimpleNamespace(
+            metadata={
+                "enable_code": True,
+                "requested_outputs": ["pptx_presentation", "data_bundle"],
+            },
+            message=None,
+        ),
+        defaults,
+    ) == (True, defaults, ("pptx_presentation", "data_bundle"))
 
 
 def test_browser_auth_flag_loads_from_environment(tmp_path, monkeypatch):
@@ -643,6 +668,7 @@ def test_browser_auth_flag_loads_from_environment(tmp_path, monkeypatch):
     settings = WebSettings()
     settings.validate()
     assert settings.auth_enabled is False
+    assert settings.max_upload_bytes == 4 * 1024**3
 
 
 def test_a2a_card_and_jsonrpc_execution(tmp_path):

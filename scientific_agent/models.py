@@ -24,7 +24,9 @@ def _model(
         temperature=endpoint.temperature if temperature is None else temperature,
         top_p=endpoint.top_p,
         timeout=endpoint.request_timeout_seconds or timeout,
-        max_retries=1,
+        # An admitted request waits in the backend queue under ``timeout``.
+        # These retries cover only transient rejection before inference starts.
+        max_retries=8,
     )
     if selected_max_tokens is not None:
         kwargs["max_tokens"] = selected_max_tokens

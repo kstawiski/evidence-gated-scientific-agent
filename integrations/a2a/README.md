@@ -21,10 +21,14 @@ read -rsp 'A2A token: ' A2A_TOKEN && export A2A_TOKEN && printf '\n'
 ```bash
 python3 a2a_client.py \
   --objective 'Review the evidence for this scientific question and audit every claim.' \
+  --enable-code --requested-output pptx_presentation \
   --mcp context7 --mcp brave-search --mcp chrome-devtools
 ```
 
 Add `--enable-code` only when the task may execute sandboxed Python or R. The
+repeatable `--requested-output` flag accepts `pptx_presentation`,
+`analysis_notebook`, or `data_bundle` and sends the typed A2A metadata required
+by the service. Requested artifacts require `--enable-code`. The
 client waits for the scientific task to finish and prints the full A2A response
 as JSON. For raw file transfer, task cancellation, streaming updates, or durable
 workspace management, use an A2A 1.0 SDK and the published Agent Card.

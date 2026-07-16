@@ -125,11 +125,24 @@ The safe Compose default publishes only on loopback. Bind directly only on a
 trusted private LAN/Tailnet; use an authenticated TLS reverse proxy for any
 publicly reachable interface.
 
+Workspace intake accepts any number of sequential files and streams each upload
+to private persistent storage with browser-visible progress. The default per-file
+ceiling is 4 GiB (`WEB_MAX_UPLOAD_BYTES=4294967296`). For directories or hundreds
+of related inputs, upload one ZIP so the controller can inventory member names and
+sizes before planning; archive contents remain untrusted data and are opened only
+inside bounded inspection/execution paths. The WebUI always creates the scientific
+article and can additionally require an editable PPTX presentation, reproducible
+`.ipynb`, and/or machine-readable result ZIP. Missing or structurally invalid
+requested artifacts fail the deterministic gate, and every generated file appears
+in the live artifact browser and final provenance bundle.
+
 The service exposes:
 
 - `GET /.well-known/agent-card.json` — public A2A 1.0 Agent Card;
 - `POST /a2a` — JSON-RPC A2A endpoint using `Authorization: Bearer <A2A_TOKEN>`;
 - `POST /api/workspaces/{id}/runs`, `GET /api/runs/{run_id}` — start and poll a run;
+- `PUT /api/workspaces/{id}/files/{filename}` — atomic raw-body streaming upload
+  for large inputs without multipart temp-file duplication;
 - `GET`, `POST`, `PATCH`, `DELETE /api/knowledge...` — manage, preview,
   version, enable/disable, reindex, and test-search the instance-local knowledge
   library, including exact chunk and verified run-acquisition history; run
@@ -208,6 +221,9 @@ python3 ~/.claude/skills/evidence-bench/scripts/evidence_bench.py run \
   --objective "Analyze the uploaded data and produce an evidence-linked report." \
   --file data.csv --wait --download-dir ./evidence-bench-result
 ```
+
+Add `--requested-output pptx_presentation` (repeatable with
+`analysis_notebook` or `data_bundle`) to make those files required outputs.
 
 This optional lab profile is intentionally deployment-specific. The container,
 A2A protocol, application configuration, and public integration sample remain
@@ -327,22 +343,24 @@ If the repair sample also repeats, the planning transition is recorded as
 `inconclusive` with a `plan-critic-unavailable` finding and research does not
 begin. Critic failure can never be converted into approval.
 Maximum reasoning remains operationally bounded by cooperative cancellation,
-no-progress detection, and per-call wall time. The example deployment allows up
-to 7,200 seconds per model transition through `QWEN_REQUEST_TIMEOUT_SECONDS` and
-`GEMMA_REQUEST_TIMEOUT_SECONDS`. This is a finite, cancellable wall-time safety
-limit rather than a token or reasoning budget. The two-hour ceiling accommodates
-maximum-thinking critics near a 150K context window; the UI/A2A cancellation path
-remains responsive throughout. Plan review itself uses a fixed five-criterion
-contract so unrestricted reasoning does not become an open-ended review scope.
+no-progress detection, and per-call wall time. The example deployment keeps an
+admitted model request attached for up to 21,600 seconds through
+`QWEN_REQUEST_TIMEOUT_SECONDS` and `GEMMA_REQUEST_TIMEOUT_SECONDS`. Backend queue
+time is part of that wall time: a busy local model is waited for, not treated as
+scientific disagreement. This six-hour safety limit is not a token or reasoning
+budget, and the UI/A2A cancellation path remains responsive throughout. Plan
+review itself uses a fixed five-criterion contract so unrestricted reasoning does
+not become an open-ended review scope.
 
-Model transport is also bounded. Connection failures and HTTP 429, 500, 502, 503,
-and 504 responses receive at most three total attempts with bounded backoff. The
-500 retry covers gateways that map an upstream inference-host restart to an
-internal-server error; retries remain bounded and never change the requested model. A
-streamed request is retried only before it has emitted any answer or reasoning
-chunk, preventing a
-partly observed response from being silently replayed. Exhausted retries fail
-the current scientific transition closed; they do not manufacture critic
+Model transport distinguishes capacity from invalid work. Connection failures
+and HTTP 429, 502, 503, and 504 responses received before any model output wait
+with exponential backoff for up to `QWEN_CAPACITY_WAIT_SECONDS` or
+`GEMMA_CAPACITY_WAIT_SECONDS` (21,600 seconds by default). The wait is visible in
+the live stream and immediately cancellable. HTTP 500 retains three bounded
+restart attempts; HTTP 400 is never retried as capacity. A streamed request is
+retried only before it has emitted any answer or reasoning chunk, preventing a
+partly observed response from being silently replayed. Exhausted capacity waits
+fail the current scientific transition closed; they do not manufacture critic
 approval while an independently hosted model is restarting.
 When a streaming gateway omits or delays its terminal `[DONE]` event, Evidence
 Bench closes the stream as soon as the final channel contains exactly one value

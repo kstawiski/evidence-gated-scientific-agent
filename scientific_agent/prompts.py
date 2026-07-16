@@ -120,6 +120,15 @@ procedures. When that check was not performed, omit the derived identity or mark
 it unresolved rather than supplying a plausible formula from memory. Never emit
 a tautological assumption such as the same variance symbol on both sides of an
 equality.
+Every substantive statement supported by a knowledge-base passage or retrieved
+literature source must also have an InlineCitation in the section where the
+statement appears. anchor_text must be an exact, unique substring of that section;
+source_ids must name the direct URL-backed SourceRecords; claim_ids must name the
+ClaimRecords whose evidence_refs contain those same sources. Do not write raw
+citation markers, bibliography numbers, model-memory references, or URLs into the
+article prose: the controller renders validated Vancouver-style linked numbers.
+Prefer the local PubMed Markdown/PDF copy or immutable knowledge passage supplied
+by the controller; a citation is not decorative and must entail the anchored claim.
 Never infer that a dataset is observational, randomized, experimental, synthetic,
 or externally representative from its filename, group balance, effect magnitude,
 or apparent cleanliness. When allocation and sampling metadata are absent, state
@@ -291,6 +300,14 @@ Do not generate a scientific report, provenance manifest, protocol, environment
 record, or claim ledger inside the sandbox; the controller creates those after
 validation. Analysis tools create only requested computational evidence and
 display artifacts.
+When TaskSpec.deliverables requests a PPTX presentation, analysis notebook, or
+machine-readable ZIP, create it below /output/deliverables and preserve every
+underlying result in ordinary machine-readable artifacts too. A PPTX must be a
+real Office Open XML presentation, use concise manuscript-grounded language, cite
+the same registered sources, and include the final validated figures/tables. Also
+render deterministic slide previews below /output/visual-review so Gemma—not
+Qwen—can inspect slide text, layout, clipping, and scientific consistency. Do not
+claim a requested deliverable exists until the sandbox returns it as an artifact.
 When a task requests one reader-facing figure or table plus independent
 cross-language verification, create the presentation display in the primary
 implementation only. The validation implementation should emit numeric and
@@ -501,6 +518,12 @@ abstract_only is not described as full text and private_user_provided is not
 described as open access. Treat a controller_error, unsupported
 claim, identifier mismatch, or unacknowledged retracted source as blocking. A
 missing PDF is an explicit access state, not permission to fabricate a path.
+Audit each InlineCitation as a real article citation: its exact anchored sentence
+must be entailed by every linked knowledge/PubMed source needed for that claim,
+the source must be the same direct evidence named by its ClaimRecord, and the
+controller-provided local Markdown/PDF or immutable knowledge target must exist.
+Missing, decorative, mismatched, or broken inline citations are correctable
+blocking defects, not limitations.
 Reject protocol-timing claims
 supported only by later sandbox artifacts; accept a correctly typed observed claim
 that cites the exact controller protocol evidence. The deterministic controller is

@@ -32,6 +32,7 @@ from scientific_agent.schemas import (
     PlanStep,
     RetrievalEvidence,
     ScientificReport,
+    InlineCitation,
     SourceRecord,
     TaskSpec,
     VerificationReport,
@@ -585,6 +586,15 @@ def _literature_report(markdown: Path, pdf: Path | None = None) -> ScientificRep
         results="The acquired study reported a treatment effect.",
         discussion="Interpretation remains limited to the study design.",
         conclusions="The cited study supports the stated literature result.",
+        inline_citations=[
+            InlineCitation(
+                citation_id="study-effect",
+                section="results",
+                anchor_text="The acquired study reported a treatment effect.",
+                source_ids=["S1"],
+                claim_ids=["C1"],
+            )
+        ],
         claims=[
             ClaimRecord(
                 claim_id="C1",
@@ -710,7 +720,9 @@ def test_local_literature_paths_are_linted_materialized_and_linked(tmp_path: Pat
         artifacts=[str(markdown), str(pdf), str(metadata)],
     )
 
-    validation = validate_report(report, retrieval=retrieval)
+    validation = validate_report(
+        report, retrieval=retrieval, require_inline_citations=True
+    )
     run_dir = tmp_path / "run"
     run_dir.mkdir()
     manifest = materialize_references(run_dir, report, retrieval)
@@ -722,6 +734,11 @@ def test_local_literature_paths_are_linted_materialized_and_linked(tmp_path: Pat
     ).is_file()
     assert "[PDF](references/pdfs/lovelace-2024-pmid12345678.pdf)" in rendered
     assert "[Markdown](references/markdown/lovelace-2024-pmid12345678.md)" in rendered
+    assert (
+        "treatment effect. [[1](references/markdown/"
+        "lovelace-2024-pmid12345678.md)]" in rendered
+    )
+    assert "1. **S1:**" in rendered
     assert "PMID 12345678" in rendered
     entry = manifest["references"][0]
     assert entry["rights_status"] == "pmc_oa_reuse_allowed"

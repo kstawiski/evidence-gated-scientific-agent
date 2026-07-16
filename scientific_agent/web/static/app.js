@@ -123,6 +123,7 @@ async function loadConfig() {
   document.querySelectorAll("#mcp-options input").forEach((input) => {
     input.checked = state.config.default_mcp_servers.includes(input.value) && state.config.mcp[input.value];
   });
+  el("upload-guidance").textContent = `Select many files, or ZIP a large directory · ${formatBytes(state.config.max_upload_bytes)} per file`;
   configureResearchBrowser();
   configureIntegrationDownloads();
   renderKnowledgeSelection();
@@ -628,6 +629,9 @@ function reflectActiveProtocol() {
   el("enable-code").checked = Boolean(active.enable_code);
   document.querySelectorAll("#mcp-options input").forEach((input) => {
     input.checked = active.mcp_servers.includes(input.value);
+  });
+  document.querySelectorAll("#requested-output-options input").forEach((input) => {
+    input.checked = (active.requested_outputs || []).includes(input.value);
   });
   if (active.knowledge_snapshot?.documents) {
     state.knowledgeSelection = new Set(active.knowledge_snapshot.documents.map((item) => item.document_id));
@@ -1160,22 +1164,80 @@ async function submitDiscussion(event, runId, message) {
   }
 }
 
-function appendParagraphs(section, text) {
+function externalSourceNumbers(report) {
+  const numbers = new Map();
+  let number = 0;
+  for (const source of report.sources || []) {
+    if (!source.url) continue;
+    number += 1;
+    numbers.set(source.source_id, number);
+  }
+  return numbers;
+}
+
+function appendCitationMarker(parent, citation, report, run) {
+  const sources = new Map((report.sources || []).map((source) => [source.source_id, source]));
+  const numbers = externalSourceNumbers(report);
+  const marker = document.createElement("span");
+  marker.className = "inline-citation";
+  marker.append(document.createTextNode(" ["));
+  citation.source_ids.forEach((sourceId, index) => {
+    const source = sources.get(sourceId);
+    const number = numbers.get(sourceId);
+    if (!source || !number) return;
+    if (index) marker.append(document.createTextNode(", "));
+    const local = (run.reference_manifest?.references || []).find((item) => item.source_id === sourceId);
+    const link = document.createElement(local?.markdown ? "button" : "a");
+    link.textContent = String(number);
+    link.title = source.title;
+    if (local?.markdown) {
+      link.type = "button";
+      link.addEventListener("click", () => openArtifactPreview(local.markdown.path, run.id));
+    } else {
+      link.href = source.url;
+      link.target = "_blank";
+      link.rel = "noreferrer";
+    }
+    marker.append(link);
+  });
+  marker.append(document.createTextNode("]"));
+  parent.append(marker);
+}
+
+function appendCitedText(parent, text, report, run, sectionName) {
+  const value = String(text || "Not reported.");
+  const citations = (report.inline_citations || [])
+    .filter((citation) => citation.section === sectionName)
+    .map((citation) => ({ citation, start: value.indexOf(citation.anchor_text) }))
+    .filter((item) => item.start >= 0)
+    .sort((a, b) => a.start - b.start);
+  let cursor = 0;
+  for (const item of citations) {
+    if (item.start < cursor) continue;
+    const end = item.start + item.citation.anchor_text.length;
+    parent.append(document.createTextNode(value.slice(cursor, end)));
+    appendCitationMarker(parent, item.citation, report, run);
+    cursor = end;
+  }
+  parent.append(document.createTextNode(value.slice(cursor)));
+}
+
+function appendParagraphs(section, text, report, run, sectionName) {
   const paragraphs = String(text || "Not reported.").split(/\n\s*\n/).filter(Boolean);
   for (const value of paragraphs) {
     const paragraph = document.createElement("p");
-    paragraph.textContent = value;
+    appendCitedText(paragraph, value, report, run, sectionName);
     section.append(paragraph);
   }
 }
 
-function articleSection(title, text) {
+function articleSection(title, text, report, run, sectionName) {
   const section = document.createElement("section");
   section.className = "article-section";
   const heading = document.createElement("h4");
   heading.textContent = title;
   section.append(heading);
-  appendParagraphs(section, text);
+  appendParagraphs(section, text, report, run, sectionName);
   return section;
 }
 
@@ -1186,17 +1248,24 @@ function renderArticle(report, run) {
   notice.className = "report-boundary";
   notice.textContent = "Standards-derived exploratory report. Tests and evidence records outrank both models; publication use requires independent human and manuscript gates.";
   article.append(notice);
-  article.append(articleSection("Abstract", report.executive_summary));
-  article.append(articleSection("Introduction", report.introduction || "The legacy parent report did not contain a distinct Introduction."));
-  const methods = articleSection("Methods", "");
+  article.append(articleSection("Abstract", report.executive_summary, report, run, "executive_summary"));
+  article.append(articleSection("Introduction", report.introduction || "The legacy parent report did not contain a distinct Introduction.", report, run, "introduction"));
+  const methods = articleSection("Methods", "", report, run, "methods");
   methods.querySelector("p")?.remove();
-  methods.append(makeList(report.methods || ["Methods were not separately recorded."]));
+  const methodList = document.createElement("ul");
+  methodList.className = "plain-list";
+  for (const method of report.methods || ["Methods were not separately recorded."]) {
+    const item = document.createElement("li");
+    appendCitedText(item, method, report, run, "methods");
+    methodList.append(item);
+  }
+  methods.append(methodList);
   appendDisplays(methods, run, "methods");
   article.append(methods);
-  const results = articleSection("Results", report.results || report.narrative);
+  const results = articleSection("Results", report.results || report.narrative, report, run, "results");
   appendDisplays(results, run, "results");
   article.append(results);
-  const discussion = articleSection("Discussion", report.discussion || "The legacy report did not contain a distinct Discussion.");
+  const discussion = articleSection("Discussion", report.discussion || "The legacy report did not contain a distinct Discussion.", report, run, "discussion");
   if (report.limitations?.length) {
     const heading = document.createElement("h5");
     heading.textContent = "Limitations";
@@ -1204,7 +1273,7 @@ function renderArticle(report, run) {
   }
   appendDisplays(discussion, run, "discussion");
   article.append(discussion);
-  article.append(articleSection("Conclusions", report.conclusions || report.executive_summary));
+  article.append(articleSection("Conclusions", report.conclusions || report.executive_summary, report, run, "conclusions"));
   return article;
 }
 
@@ -1321,7 +1390,9 @@ function makeList(items) {
 
 function sourceRow(source, run) {
   const row = document.createElement("div"); row.className = "source-row";
-  const id = document.createElement("code"); id.textContent = source.source_id;
+  const id = document.createElement("code");
+  const number = (run.report?.sources || []).filter((item) => item.url).findIndex((item) => item.source_id === source.source_id);
+  id.textContent = number >= 0 ? `[${number + 1}] ${source.source_id}` : source.source_id;
   const copy = document.createElement("div");
   const local = (run.reference_manifest?.references || []).find((item) => item.source_id === source.source_id);
   const knowledge = (run.result?.retrieval_evidence?.knowledge_passages || []).find((item) => item.source_url === source.url);
@@ -1444,9 +1515,33 @@ async function deleteWorkspace() {
 async function uploadFiles(files) {
   if (!state.workspace || !files.length) return;
   if (workspaceLocked()) { toast("Inputs are locked while a run is active.", "error"); return; }
-  for (const file of files) {
-    const body = new FormData(); body.append("upload", file);
-    await api(`/api/workspaces/${state.workspace.id}/files`, { method: "POST", body });
+  const guidance = el("upload-guidance");
+  try {
+    for (const [index, file] of files.entries()) {
+      if (file.size > state.config.max_upload_bytes) throw new Error(`${file.name} exceeds the ${formatBytes(state.config.max_upload_bytes)} per-file limit.`);
+      await new Promise((resolve, reject) => {
+      const request = new XMLHttpRequest();
+      request.open("PUT", `/api/workspaces/${encodeURIComponent(state.workspace.id)}/files/${encodeURIComponent(file.name)}`);
+      request.setRequestHeader("Content-Type", "application/octet-stream");
+      request.upload.addEventListener("progress", (event) => {
+        const progress = event.lengthComputable ? ` · ${Math.round((event.loaded / event.total) * 100)}%` : "";
+        guidance.textContent = `Uploading ${index + 1}/${files.length}: ${file.name}${progress}`;
+      });
+      request.addEventListener("load", () => {
+        if (request.status >= 200 && request.status < 300) resolve();
+        else {
+          let message = `${request.status} ${request.statusText}`;
+          try { message = JSON.parse(request.responseText).detail || message; } catch (_) { /* not JSON */ }
+          reject(new Error(message));
+        }
+      });
+      request.addEventListener("error", () => reject(new Error(`Upload failed for ${file.name}`)));
+      request.addEventListener("abort", () => reject(new Error(`Upload cancelled for ${file.name}`)));
+      request.send(file);
+      });
+    }
+  } finally {
+    guidance.textContent = `Select many files, or ZIP a large directory · ${formatBytes(state.config.max_upload_bytes)} per file`;
   }
   await selectWorkspace(state.workspace.id, false);
   toast(`${files.length} file${files.length === 1 ? "" : "s"} added.`);
@@ -1463,11 +1558,14 @@ async function startRun(event) {
   event.preventDefault();
   if (workspaceLocked()) return;
   const mcp = [...document.querySelectorAll("#mcp-options input:checked")].map((input) => input.value);
+  const requestedOutputs = [...document.querySelectorAll("#requested-output-options input:checked")].map((input) => input.value);
+  if (requestedOutputs.length && !el("enable-code").checked) throw new Error("Additional PPTX/notebook/data artifacts require Python + R execution.");
   const body = {
     objective: el("objective").value,
     enable_code: el("enable-code").checked,
     mcp_servers: mcp,
     knowledge_document_ids: [...state.knowledgeSelection],
+    requested_outputs: requestedOutputs,
   };
   const run = await api(`/api/workspaces/${state.workspace.id}/runs`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   state.activeRun = await api(`/api/runs/${run.id}`);
@@ -1607,6 +1705,7 @@ function bindEvents() {
     el("objective").value = state.selectedRun.objective;
     el("enable-code").checked = state.selectedRun.enable_code;
     document.querySelectorAll("#mcp-options input").forEach((input) => { input.checked = state.selectedRun.mcp_servers.includes(input.value) && !input.disabled; });
+    document.querySelectorAll("#requested-output-options input").forEach((input) => { input.checked = (state.selectedRun.requested_outputs || []).includes(input.value); });
     state.knowledgeSelection = new Set((state.selectedRun.knowledge_snapshot?.documents || []).map((item) => item.document_id));
     renderKnowledgeSelection();
     renderKnowledgeCatalog();

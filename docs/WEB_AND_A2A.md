@@ -105,8 +105,14 @@ Every planner also receives the exact immutable input manifest through virtual
 input names absent from that manifest and absent from declared upstream outputs;
 generic terms such as “uploaded dataset” remain valid when no exact name is needed.
 Per-role request timeouts are wall-time and cancellation bounds, not reasoning
-budgets. The default is 7,200 seconds so an uncapped model can finish a long
-reasoning pass near a 150K context window; users can still cancel immediately.
+budgets. The default is 21,600 seconds so an uncapped model can wait in its local
+backend queue and then finish a long reasoning pass; users can still cancel
+immediately. A queued request therefore remains `running`, with the shared model
+load panel showing the authoritative backend queue. Immediate pre-output capacity
+responses (HTTP 429/502/503/504 or connection loss) use a separate, cancellable
+21,600-second backoff budget configured with `QWEN_CAPACITY_WAIT_SECONDS` and
+`GEMMA_CAPACITY_WAIT_SECONDS`. HTTP 400 and scientific/schema failures do not use
+that capacity budget.
 
 Gemma is the sole image-understanding model. The controller sends generated PNG,
 JPEG, and WebP figures only to Gemma in bounded batches; Qwen never receives
@@ -177,6 +183,32 @@ near-full-screen, 14 px monospace view and keeps it current while the file
 grows. The compact tail remains available in the provenance rail.
 Events never carry model chain-of-thought/reasoning traces, system prompts, raw
 code, or MCP/worker credentials.
+
+### Large and multi-file intake
+
+The file picker and drag-and-drop surface accept multiple files and upload them
+sequentially with per-file progress, so one failed file cannot hide which inputs
+were accepted. The portable default limit is 4 GiB per file and is exposed by
+`GET /api/config` as `max_upload_bytes`; operators may lower it with
+`WEB_MAX_UPLOAD_BYTES`. Uploads use a mode-0600 temporary file and an atomic rename,
+so interrupted or oversized bodies never become workspace inputs. For a large
+directory or hundreds of related files, prefer a ZIP: input intake records member
+count, bounded member inventory, compressed size, and explicit coverage limits
+before either model plans. Extraction remains sandboxed and resource bounded.
+The WebUI and bundled lab skill use
+`PUT /api/workspaces/{workspace_id}/files/{filename}` with the file as the raw
+request body, avoiding a second multipart spool in the read-only application
+container. The multipart POST remains available for small compatibility clients.
+
+`POST /api/workspaces/{workspace_id}/runs` accepts a `requested_outputs` array with
+`pptx_presentation`, `analysis_notebook`, and `data_bundle`. The article remains
+mandatory. Requested outputs require code execution, become locked TaskSpec
+deliverables before planning, must be returned as successful sandbox artifacts,
+and are visible/downloadable as soon as created. PPTX output receives an additional
+Office Open XML structural check; the generation contract also requires slide
+previews for Gemma-only visual review. A2A clients pass the same array as
+`message.metadata.requested_outputs`; the bundled clients expose repeatable
+`--requested-output` flags.
 
 ### Live artifact access
 

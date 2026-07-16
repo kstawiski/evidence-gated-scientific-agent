@@ -561,11 +561,11 @@ def _profile_text(path: Path, base: dict[str, Any]) -> InputFileProfile:
     )
 
 
-def _inspect_file(path: Path) -> InputFileProfile:
+def _inspect_file(path: Path, known_sha256: str | None = None) -> InputFileProfile:
     suffix = path.suffix.casefold()
     base = {
         "path": f"/workspace/{path.name}",
-        "sha256": sha256_file(path),
+        "sha256": known_sha256 or sha256_file(path),
         "bytes": path.stat().st_size,
     }
     if suffix in {".csv", ".tsv", ".tab"}:
@@ -601,7 +601,9 @@ def _inspect_file(path: Path) -> InputFileProfile:
     )
 
 
-def build_input_profile(workspace: Path) -> InputProfile:
+def build_input_profile(
+    workspace: Path, known_hashes: dict[str, str] | None = None
+) -> InputProfile:
     """Inspect top-level immutable inputs with explicit bounded-coverage limits."""
 
     root = workspace.resolve()
@@ -614,12 +616,12 @@ def build_input_profile(workspace: Path) -> InputProfile:
     limitations: list[str] = []
     for path in candidates[:MAX_PROFILE_FILES]:
         try:
-            files.append(_inspect_file(path))
+            files.append(_inspect_file(path, (known_hashes or {}).get(path.name)))
         except (OSError, csv.Error) as exc:
             files.append(
                 InputFileProfile(
                     path=f"/workspace/{path.name}",
-                    sha256=sha256_file(path),
+                    sha256=(known_hashes or {}).get(path.name) or sha256_file(path),
                     bytes=path.stat().st_size,
                     detected_format=path.suffix.lstrip(".") or "unknown",
                     media_type=mimetypes.guess_type(path.name)[0]

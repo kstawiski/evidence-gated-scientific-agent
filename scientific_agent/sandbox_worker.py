@@ -71,6 +71,7 @@ class WorkerState:
     output_gid: int = 10001
     executors: dict[str, AnalysisExecutor] = field(default_factory=dict)
     staging_roots: dict[str, Path] = field(default_factory=dict)
+    staging_dirs: dict[str, Path] = field(default_factory=dict)
     executor_locks: dict[str, threading.Lock] = field(default_factory=dict)
     cancellation_events: dict[str, threading.Event] = field(default_factory=dict)
     lock: threading.Lock = field(default_factory=threading.Lock)
@@ -341,8 +342,15 @@ class WorkerState:
         with tempfile.TemporaryDirectory(prefix="evidence-pdf-parser-") as temporary:
             output_dir = Path(temporary)
             output_dir.chmod(0o700)
+            # Bubblewrap enters a user namespace before resolving bind sources.
+            # Workspace files are deliberately private to the web-service UID,
+            # so stage one root-owned immutable parser input inside this disposable
+            # directory rather than weakening workspace permissions.
+            parser_input = output_dir / "input.pdf"
+            shutil.copyfile(pdf, parser_input)
+            parser_input.chmod(0o600)
             stderr_path = output_dir / "parser.stderr"
-            command = self._pdf_bwrap_command(pdf, output_dir)
+            command = self._pdf_bwrap_command(parser_input, output_dir)
             with stderr_path.open("wb") as stderr:
                 process = subprocess.Popen(
                     command,
@@ -504,8 +512,11 @@ class WorkerState:
         with tempfile.TemporaryDirectory(prefix="evidence-figure-ocr-") as temporary:
             output_dir = Path(temporary)
             output_dir.chmod(0o700)
+            ocr_input = output_dir / f"input{figure.suffix.lower()}"
+            shutil.copyfile(figure, ocr_input)
+            ocr_input.chmod(0o600)
             completed = subprocess.run(
-                self._ocr_bwrap_command(figure, output_dir),
+                self._ocr_bwrap_command(ocr_input, output_dir),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
@@ -556,9 +567,15 @@ class WorkerState:
                 if executor is None:
                     staging = Path(tempfile.mkdtemp(prefix="evidence-worker-"))
                     staged_workspace = staging / "workspace"
-                    staged_root = staging / "computations"
+                    staged_history = staging / "history"
+                    staged_root = staged_history / root.name
                     staged_workspace.mkdir(mode=0o700)
+                    staged_history.mkdir(mode=0o700)
                     self._stage_workspace_inputs(workspace, staged_workspace)
+                    self._stage_attempt_history(
+                        root.parent, staged_history, current_attempt=root.name
+                    )
+                    staged_root.mkdir(mode=0o700)
                     environment_dir = None
                     if self.environments_dir is not None:
                         candidate = (
@@ -575,10 +592,14 @@ class WorkerState:
                             max_calls_per_attempt=effective_call_budget,
                         ),
                         environment_dir=environment_dir,
-                        history_dir=root.parent,
+                        # Mirror /history/attempt-N in a worker-owned tree. Directly
+                        # binding the controller-owned run directory would cross the
+                        # private UID boundary inside bwrap.
+                        history_dir=staged_history,
                     )
                     self.executors[key] = executor
                     self.staging_roots[key] = staged_root
+                    self.staging_dirs[key] = staging
                     self.executor_locks[key] = threading.Lock()
                 elif executor.settings.max_calls_per_attempt != effective_call_budget:
                     raise ValueError(
@@ -620,6 +641,24 @@ class WorkerState:
                 raise ValueError("workspace inputs must be regular files")
             shutil.copy2(source, staged_workspace / source.name)
 
+    @staticmethod
+    def _stage_attempt_history(
+        history: Path, staged_history: Path, *, current_attempt: str
+    ) -> None:
+        """Copy only prior controller attempt directories into staged /history."""
+
+        for source in history.iterdir():
+            if source.name == current_attempt:
+                continue
+            prefix, separator, number = source.name.partition("-")
+            if prefix != "attempt" or separator != "-" or not number.isdigit():
+                continue
+            if source.is_symlink() or not source.is_dir():
+                raise ValueError("computation history must contain regular directories")
+            if any(path.is_symlink() for path in source.rglob("*")):
+                raise ValueError("computation history must not contain symlinks")
+            shutil.copytree(source, staged_history / source.name)
+
     def cancel(self, request_id: str) -> bool:
         with self.lock:
             event = self.cancellation_events.get(request_id)
@@ -641,9 +680,10 @@ class WorkerState:
                     return False
                 self.executors.pop(key, None)
                 staged_root = self.staging_roots.pop(key, None)
+                staging_dir = self.staging_dirs.pop(key, None)
                 self.executor_locks.pop(key, None)
             if staged_root is not None:
-                shutil.rmtree(staged_root.parent, ignore_errors=True)
+                shutil.rmtree(staging_dir or staged_root.parent, ignore_errors=True)
         return True
 
     def _handoff_ownership(self, root: Path) -> None:

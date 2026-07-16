@@ -748,33 +748,69 @@ def render_report_markdown(
     for display in displays:
         by_placement[display["placement"]].append(display)
 
+    local_references = {
+        item["source_id"]: item
+        for item in (reference_manifest or {}).get("references", [])
+    }
+    external_sources = [source for source in report.sources if source.url is not None]
+    citation_numbers = {
+        source.source_id: index
+        for index, source in enumerate(external_sources, start=1)
+    }
+
+    def citation_target(source_id: str) -> str:
+        source = next(item for item in external_sources if item.source_id == source_id)
+        local = local_references.get(source_id, {})
+        markdown = local.get("markdown")
+        return markdown["path"] if markdown else str(source.url)
+
+    def cited_text(section: str, value: str) -> str:
+        rendered = value
+        for citation in report.inline_citations:
+            if citation.section != section:
+                continue
+            links = ", ".join(
+                f"[{citation_numbers[source_id]}]({citation_target(source_id)})"
+                for source_id in citation.source_ids
+                if source_id in citation_numbers
+            )
+            if links:
+                rendered = rendered.replace(
+                    citation.anchor_text,
+                    f"{citation.anchor_text} [{links}]",
+                    1,
+                )
+        return rendered
+
     lines = [
         f"# {report.title}",
         "",
         "## Abstract",
         "",
-        report.executive_summary,
+        cited_text("executive_summary", report.executive_summary),
         "",
         "## Introduction",
         "",
-        report.introduction,
+        cited_text("introduction", report.introduction),
         "",
         "## Methods",
         "",
     ]
-    lines.extend(f"- {method}" for method in report.methods)
+    lines.extend(f"- {cited_text('methods', method)}" for method in report.methods)
     for entry in by_placement["methods"]:
         lines.extend(_display_markdown(entry))
-    lines.extend(["", "## Results", "", report.results])
+    lines.extend(["", "## Results", "", cited_text("results", report.results)])
     for entry in by_placement["results"]:
         lines.extend(_display_markdown(entry))
-    lines.extend(["", "## Discussion", "", report.discussion])
+    lines.extend(["", "## Discussion", "", cited_text("discussion", report.discussion)])
     if report.limitations:
         lines.extend(["", "### Limitations", ""])
         lines.extend(f"- {item}" for item in report.limitations)
     for entry in by_placement["discussion"]:
         lines.extend(_display_markdown(entry))
-    lines.extend(["", "## Conclusions", "", report.conclusions])
+    lines.extend(
+        ["", "## Conclusions", "", cited_text("conclusions", report.conclusions)]
+    )
     lines.extend(["", "## Evidence ledger", ""])
     for claim in report.claims:
         refs = ", ".join(claim.evidence_refs) or "none"
@@ -783,41 +819,38 @@ def render_report_markdown(
             f"(evidence: {refs})"
         )
     lines.extend(["", "## Sources", ""])
-    local_references = {
-        item["source_id"]: item
-        for item in (reference_manifest or {}).get("references", [])
-    }
-    for source in report.sources:
-        if source.url is not None:
-            local = local_references.get(source.source_id, {})
-            markdown = local.get("markdown")
-            pdf = local.get("pdf")
-            title = (
-                f"[{source.title}]({markdown['path']})" if markdown else source.title
+    for source in external_sources:
+        local = local_references.get(source.source_id, {})
+        markdown = local.get("markdown")
+        pdf = local.get("pdf")
+        title = f"[{source.title}]({markdown['path']})" if markdown else source.title
+        links = []
+        if pdf:
+            links.append(f"[PDF]({pdf['path']})")
+        if markdown:
+            label = (
+                "Local abstract"
+                if source.full_text_status == "abstract_only"
+                else "Markdown"
             )
-            links = []
-            if pdf:
-                links.append(f"[PDF]({pdf['path']})")
-            if markdown:
-                label = (
-                    "Local abstract"
-                    if source.full_text_status == "abstract_only"
-                    else "Markdown"
-                )
-                links.append(f"[{label}]({markdown['path']})")
-            links.append(f"[Canonical record]({source.url})")
-            identifiers = []
-            if source.pmid:
-                identifiers.append(f"PMID {source.pmid}")
-            if source.doi:
-                identifiers.append(f"DOI {source.doi}")
-            suffix = "; ".join([*identifiers, *links])
-            lines.append(f"- **{source.source_id}:** {title} — {suffix}")
-        else:
-            # Artifact locations are deliberately rendered as non-clickable labels;
-            # the portable bundle exposes registered files through its manifest.
-            artifact_name = Path(source.artifact_path or "artifact").name
-            lines.append(f"- **{source.source_id}:** {source.title} ({artifact_name})")
+            links.append(f"[{label}]({markdown['path']})")
+        links.append(f"[Canonical record]({source.url})")
+        identifiers = []
+        if source.pmid:
+            identifiers.append(f"PMID {source.pmid}")
+        if source.doi:
+            identifiers.append(f"DOI {source.doi}")
+        suffix = "; ".join([*identifiers, *links])
+        number = citation_numbers[source.source_id]
+        lines.append(f"{number}. **{source.source_id}:** {title} — {suffix}")
+    artifact_sources = [source for source in report.sources if source.url is None]
+    if artifact_sources:
+        lines.extend(["", "### Computational and controller evidence", ""])
+    for source in artifact_sources:
+        # Artifact locations are deliberately rendered as non-clickable labels;
+        # the portable bundle exposes registered files through its manifest.
+        artifact_name = Path(source.artifact_path or "artifact").name
+        lines.append(f"- **{source.source_id}:** {source.title} ({artifact_name})")
     if report.unresolved_issues:
         lines.extend(["", "## Unresolved issues", ""])
         lines.extend(f"- {item}" for item in report.unresolved_issues)

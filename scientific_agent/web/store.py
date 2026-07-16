@@ -10,7 +10,7 @@ import sqlite3
 import uuid
 from contextlib import contextmanager
 from pathlib import Path
-from typing import BinaryIO, Iterator
+from typing import AsyncIterable, BinaryIO, Iterator
 
 from ..provenance import utc_now
 
@@ -107,6 +107,10 @@ class WorkspaceStore:
                 "knowledge_snapshot": (
                     "ALTER TABLE runs ADD COLUMN knowledge_snapshot TEXT NOT NULL "
                     "DEFAULT '{}'"
+                ),
+                "requested_outputs": (
+                    "ALTER TABLE runs ADD COLUMN requested_outputs TEXT NOT NULL "
+                    "DEFAULT '[]'"
                 ),
             }
             for column, statement in migrations.items():
@@ -349,6 +353,60 @@ class WorkspaceStore:
             raise
         return {"name": name, "bytes": written}
 
+    async def save_streamed_file(
+        self,
+        workspace_id: str,
+        filename: str,
+        chunks: AsyncIterable[bytes],
+        max_bytes: int,
+        *,
+        overwrite: bool = False,
+    ) -> dict:
+        """Persist a raw request body without multipart temp-file duplication."""
+
+        files_dir, _ = self.paths(workspace_id)
+        name = self._safe_filename(filename)
+        destination = files_dir / name
+        temporary = files_dir / f".upload-{uuid.uuid4().hex}"
+        written = 0
+        try:
+            # Stream before taking SQLite's service-wide write lock. The short
+            # final transaction below serializes the active-run check and atomic
+            # rename with create_run(), so a run that starts during a long upload
+            # wins and the incomplete input is discarded.
+            with temporary.open("xb") as handle:
+                async for chunk in chunks:
+                    written += len(chunk)
+                    if written > max_bytes:
+                        raise ValueError(f"file exceeds {max_bytes} byte upload limit")
+                    handle.write(chunk)
+            temporary.chmod(0o600)
+            with self._connection() as connection:
+                connection.execute("BEGIN IMMEDIATE")
+                active = connection.execute(
+                    """
+                    SELECT 1 FROM runs
+                    WHERE workspace_id=?
+                      AND status IN ('queued','running','cancel_requested')
+                    LIMIT 1
+                    """,
+                    (workspace_id,),
+                ).fetchone()
+                if active is not None:
+                    raise RuntimeError("cannot upload files while a run is active")
+                if destination.exists() and not overwrite:
+                    raise FileExistsError(name)
+                temporary.replace(destination)
+                destination.chmod(0o600)
+                connection.execute(
+                    "UPDATE workspaces SET updated_at=? WHERE id=?",
+                    (utc_now(), workspace_id),
+                )
+        except Exception:
+            temporary.unlink(missing_ok=True)
+            raise
+        return {"name": name, "bytes": written}
+
     def list_files(self, workspace_id: str) -> list[dict]:
         files_dir, _ = self.paths(workspace_id)
         return [
@@ -407,6 +465,7 @@ class WorkspaceStore:
         parent_run_id: str | None = None,
         run_kind: str = "analysis",
         knowledge_snapshot: dict | None = None,
+        requested_outputs: tuple[str, ...] = (),
     ) -> dict:
         self.get_workspace(workspace_id)
         objective = objective.strip()
@@ -435,9 +494,9 @@ class WorkspaceStore:
                     INSERT INTO runs
                     (id, workspace_id, objective, enable_code, mcp_servers, status,
                      phase, message, created_at, parent_run_id, run_kind,
-                     knowledge_snapshot)
+                    knowledge_snapshot, requested_outputs)
                     VALUES (?, ?, ?, ?, ?, 'queued', 'queued',
-                            'Waiting for an execution slot', ?, ?, ?, ?)
+                            'Waiting for an execution slot', ?, ?, ?, ?, ?)
                     """,
                     (
                         run_id,
@@ -449,6 +508,7 @@ class WorkspaceStore:
                         parent_run_id,
                         run_kind,
                         json.dumps(knowledge_snapshot or {}, sort_keys=True),
+                        json.dumps(list(requested_outputs)),
                     ),
                 )
                 connection.execute(
@@ -823,6 +883,7 @@ class WorkspaceStore:
         value["knowledge_snapshot"] = json.loads(
             value.get("knowledge_snapshot") or "{}"
         )
+        value["requested_outputs"] = json.loads(value.get("requested_outputs") or "[]")
         return value
 
     def list_runs(self, workspace_id: str) -> list[dict]:

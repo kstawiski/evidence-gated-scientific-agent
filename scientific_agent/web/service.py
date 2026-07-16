@@ -85,6 +85,7 @@ class TaskService:
         run_kind: str = "analysis",
         knowledge_document_ids: list[str] | None = None,
         knowledge_snapshot: dict | None = None,
+        requested_outputs: tuple[str, ...] = (),
     ) -> dict:
         if knowledge_snapshot is None and self.knowledge_library is not None:
             knowledge_snapshot = self.knowledge_library.snapshot(knowledge_document_ids)
@@ -96,6 +97,7 @@ class TaskService:
             parent_run_id=parent_run_id,
             run_kind=run_kind,
             knowledge_snapshot=knowledge_snapshot,
+            requested_outputs=requested_outputs,
         )
         cancellation = threading.Event()
         with self._lock:
@@ -138,6 +140,7 @@ class TaskService:
             parent_run_id=parent_run_id,
             run_kind="revision",
             knowledge_snapshot=parent.get("knowledge_snapshot") or {},
+            requested_outputs=tuple(parent.get("requested_outputs") or ()),
         )
 
     async def execute(
@@ -244,6 +247,7 @@ class TaskService:
             # independent final report/display audits. The CLI retains explicit
             # full dual-plan mode for exceptional investigations.
             "simple_mode": True,
+            "requested_outputs": tuple(run.get("requested_outputs") or ()),
         }
         if run.get("parent_run_id"):
             parent = self.store.get_run(run["parent_run_id"])

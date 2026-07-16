@@ -81,6 +81,12 @@ def build_parser() -> argparse.ArgumentParser:
     objective.add_argument("--objective-file")
     parser.add_argument("--context-id", default=None)
     parser.add_argument("--enable-code", action="store_true")
+    parser.add_argument(
+        "--requested-output",
+        action="append",
+        choices=("pptx_presentation", "analysis_notebook", "data_bundle"),
+        default=[],
+    )
     parser.add_argument("--mcp", action="append", choices=DEFAULT_MCPS)
     parser.add_argument("--no-research", action="store_true")
     parser.add_argument("--timeout", type=float, default=7200.0)
@@ -104,6 +110,7 @@ def main() -> int:
             "metadata": {
                 "enable_code": args.enable_code,
                 "mcp_servers": mcps,
+                "requested_outputs": args.requested_output,
             },
         }
         if args.context_id:

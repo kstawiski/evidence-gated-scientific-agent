@@ -1,5 +1,6 @@
 import json
 import asyncio
+from dataclasses import replace
 from pathlib import Path
 import threading
 
@@ -434,6 +435,147 @@ async def test_transient_model_restart_status_is_retried(
 
     assert result.value == "recovered"
     assert calls == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("streaming", [False, True])
+async def test_capacity_rejection_waits_beyond_old_three_attempt_limit(
+    monkeypatch, streaming
+):
+    calls = 0
+    visible: list[str] = []
+
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr("scientific_agent.structured_client.asyncio.sleep", no_sleep)
+
+    def handler(request: httpx.Request):
+        nonlocal calls
+        calls += 1
+        if calls <= 4:
+            return httpx.Response(429, request=request)
+        if streaming:
+            lines = [
+                'data: {"choices":[{"delta":{"content":"{\\"value\\":\\"admitted\\"}"},"finish_reason":"stop"}]}',
+                "data: [DONE]",
+            ]
+            return httpx.Response(200, text="\n\n".join(lines) + "\n\n")
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": '{"value":"admitted"}'},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    result = await request_structured(
+        _endpoint(),
+        system_prompt="Return an answer.",
+        payload={},
+        output_type=Answer,
+        temperature=0.2,
+        max_tokens=100,
+        timeout=2,
+        repair_attempts=0,
+        on_visible_text=visible.append if streaming else None,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.value == "admitted"
+    assert calls == 5
+    if streaming:
+        rendered = "".join(visible)
+        assert "waiting for local model capacity after HTTP 429" in rendered
+        assert "run remains cancellable" in rendered
+
+
+@pytest.mark.asyncio
+async def test_capacity_wait_budget_exhaustion_fails_closed(monkeypatch):
+    calls = 0
+    endpoint = replace(_endpoint(), capacity_wait_seconds=9)
+
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr("scientific_agent.structured_client.asyncio.sleep", no_sleep)
+
+    def handler(request: httpx.Request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(503, request=request)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await request_structured(
+            endpoint,
+            system_prompt="Return an answer.",
+            payload={},
+            output_type=Answer,
+            temperature=0.2,
+            timeout=2,
+            repair_attempts=0,
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert calls == 2
+
+
+@pytest.mark.asyncio
+async def test_invalid_request_does_not_enter_capacity_wait():
+    calls = 0
+
+    def handler(request: httpx.Request):
+        nonlocal calls
+        calls += 1
+        return httpx.Response(400, request=request)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await request_structured(
+            _endpoint(),
+            system_prompt="Return an answer.",
+            payload={},
+            output_type=Answer,
+            temperature=0.2,
+            timeout=2,
+            repair_attempts=0,
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_capacity_backoff_is_immediately_cancellable():
+    cancel_event = threading.Event()
+    visible: list[str] = []
+
+    def record(text: str) -> None:
+        visible.append(text)
+        if "waiting for local model capacity" in text:
+            cancel_event.set()
+
+    def handler(request: httpx.Request):
+        return httpx.Response(429, request=request)
+
+    with pytest.raises(asyncio.CancelledError):
+        await request_structured(
+            _endpoint(),
+            system_prompt="Return an answer.",
+            payload={},
+            output_type=Answer,
+            temperature=0.2,
+            timeout=2,
+            repair_attempts=0,
+            on_visible_text=record,
+            cancel_event=cancel_event,
+            transport=httpx.MockTransport(handler),
+        )
+
+    assert "run remains cancellable" in "".join(visible)
 
 
 @pytest.mark.asyncio

@@ -13,6 +13,7 @@ import tempfile
 import zipfile
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
 from urllib.parse import quote
 
 import uvicorn
@@ -116,6 +117,9 @@ class RunCreate(BaseModel):
     enable_code: bool = True
     mcp_servers: list[str] | None = Field(default=None, max_length=3)
     knowledge_document_ids: list[str] | None = Field(default=None, max_length=10_000)
+    requested_outputs: list[
+        Literal["pptx_presentation", "analysis_notebook", "data_bundle"]
+    ] = Field(default_factory=list, max_length=3)
 
 
 class FollowUpCreate(BaseModel):
@@ -547,6 +551,31 @@ def create_app(
             overwrite=overwrite,
         )
 
+    @app.put("/api/workspaces/{workspace_id}/files/{filename}", status_code=201)
+    async def upload_file_streamed(
+        workspace_id: str,
+        filename: str,
+        request: Request,
+        overwrite: bool = Query(default=False),
+    ) -> dict:
+        content_length = request.headers.get("content-length")
+        if content_length is not None:
+            try:
+                announced = int(content_length)
+            except ValueError as exc:
+                raise ValueError("invalid Content-Length") from exc
+            if announced < 0 or announced > web.max_upload_bytes:
+                raise ValueError(
+                    f"file exceeds {web.max_upload_bytes} byte upload limit"
+                )
+        return await store.save_streamed_file(
+            workspace_id,
+            filename,
+            request.stream(),
+            web.max_upload_bytes,
+            overwrite=overwrite,
+        )
+
     @app.get("/api/workspaces/{workspace_id}/files/{filename}")
     async def download_file(workspace_id: str, filename: str) -> FileResponse:
         path = store.file_path(workspace_id, filename)
@@ -566,6 +595,10 @@ def create_app(
 
     @app.post("/api/workspaces/{workspace_id}/runs", status_code=202)
     async def create_run(workspace_id: str, request: RunCreate) -> dict:
+        if request.requested_outputs and not request.enable_code:
+            raise ValueError(
+                "requested PPTX/notebook/data artifacts require Python/R execution"
+            )
         selected = _validate_mcp_servers(
             request.mcp_servers
             if request.mcp_servers is not None
@@ -577,6 +610,7 @@ def create_app(
             request.enable_code,
             selected,
             knowledge_document_ids=request.knowledge_document_ids,
+            requested_outputs=tuple(dict.fromkeys(request.requested_outputs)),
         )
 
     @app.get("/api/runs/{run_id}")

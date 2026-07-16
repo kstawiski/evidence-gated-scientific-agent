@@ -109,6 +109,7 @@ class ModelEndpoint:
     enable_thinking: bool | None = None
     native_json_schema: bool = True
     request_timeout_seconds: int | None = None
+    capacity_wait_seconds: int | None = 21_600
 
 
 @dataclass(frozen=True)
@@ -241,7 +242,10 @@ class Settings:
             enable_thinking=_optional_bool_env("QWEN_ENABLE_THINKING"),
             native_json_schema=_bool_env("QWEN_NATIVE_JSON_SCHEMA", True),
             request_timeout_seconds=_optional_positive_int_env(
-                "QWEN_REQUEST_TIMEOUT_SECONDS", "7200"
+                "QWEN_REQUEST_TIMEOUT_SECONDS", "21600"
+            ),
+            capacity_wait_seconds=_optional_positive_int_env(
+                "QWEN_CAPACITY_WAIT_SECONDS", "21600"
             ),
         )
     )
@@ -256,7 +260,10 @@ class Settings:
             enable_thinking=_optional_bool_env("GEMMA_ENABLE_THINKING"),
             native_json_schema=_bool_env("GEMMA_NATIVE_JSON_SCHEMA", True),
             request_timeout_seconds=_optional_positive_int_env(
-                "GEMMA_REQUEST_TIMEOUT_SECONDS", "7200"
+                "GEMMA_REQUEST_TIMEOUT_SECONDS", "21600"
+            ),
+            capacity_wait_seconds=_optional_positive_int_env(
+                "GEMMA_CAPACITY_WAIT_SECONDS", "21600"
             ),
         )
     )

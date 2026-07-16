@@ -35,6 +35,11 @@ from .store import WorkspaceStore
 
 
 ALLOWED_MCP_SERVERS = {"context7", "brave-search", "chrome-devtools"}
+ALLOWED_REQUESTED_OUTPUTS = {
+    "pptx_presentation",
+    "analysis_notebook",
+    "data_bundle",
+}
 SUCCESS_STATES = {
     "supported",
     "supported_with_comments",
@@ -104,7 +109,7 @@ def _message_metadata(context: RequestContext) -> dict[str, Any]:
 def _run_options(
     context: RequestContext,
     default_mcp_servers: tuple[str, ...],
-) -> tuple[bool, tuple[str, ...]]:
+) -> tuple[bool, tuple[str, ...], tuple[str, ...]]:
     metadata = _message_metadata(context)
     enable_code = metadata.get("enable_code", False)
     if not isinstance(enable_code, bool):
@@ -117,7 +122,23 @@ def _run_options(
     unknown = set(requested) - ALLOWED_MCP_SERVERS
     if unknown:
         raise ValueError(f"unsupported MCP servers: {', '.join(sorted(unknown))}")
-    return enable_code, tuple(dict.fromkeys(requested))
+    requested_outputs = metadata.get("requested_outputs", [])
+    if not isinstance(requested_outputs, list) or any(
+        not isinstance(item, str) for item in requested_outputs
+    ):
+        raise ValueError("metadata.requested_outputs must be a list of strings")
+    unknown_outputs = set(requested_outputs) - ALLOWED_REQUESTED_OUTPUTS
+    if unknown_outputs:
+        raise ValueError(
+            "unsupported requested outputs: " + ", ".join(sorted(unknown_outputs))
+        )
+    if requested_outputs and not enable_code:
+        raise ValueError("requested output artifacts require enable_code=true")
+    return (
+        enable_code,
+        tuple(dict.fromkeys(requested)),
+        tuple(dict.fromkeys(requested_outputs)),
+    )
 
 
 class EvidenceBenchExecutor(AgentExecutor):
@@ -152,7 +173,9 @@ class EvidenceBenchExecutor(AgentExecutor):
             )
             return
         try:
-            enable_code, mcp_servers = _run_options(context, self.default_mcp_servers)
+            enable_code, mcp_servers, requested_outputs = _run_options(
+                context, self.default_mcp_servers
+            )
             workspace = self.store.get_or_create_external_workspace(
                 context.context_id,
                 f"A2A {context.context_id[:12]}",
@@ -176,7 +199,11 @@ class EvidenceBenchExecutor(AgentExecutor):
                 new_text_message("Planning and evidence collection started.")
             )
             run = self.service.submit(
-                workspace["id"], objective, enable_code, mcp_servers
+                workspace["id"],
+                objective,
+                enable_code,
+                mcp_servers,
+                requested_outputs=requested_outputs,
             )
             self._task_runs[task.id] = run["id"]
             try:

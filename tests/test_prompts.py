@@ -102,6 +102,10 @@ def test_reporter_keeps_literature_acquisition_fields_off_artifact_sources():
     assert "For every artifact-backed SourceRecord" in REPORTER
     assert "full_text_status" in REPORTER
     assert "fields apply only to external literature records" in REPORTER
+    assert (
+        "Every substantive statement supported by a knowledge-base passage" in REPORTER
+    )
+    assert "controller renders validated Vancouver-style linked numbers" in REPORTER
 
 
 def test_reporter_forbids_browser_snapshots_from_impersonating_acquired_articles():

@@ -1,5 +1,6 @@
 import builtins
 import json
+import zipfile
 
 from PIL import Image
 
@@ -15,6 +16,7 @@ from scientific_agent.schemas import (
     ComputationEvidence,
     ComputationRecord,
     EvidenceStatus,
+    InlineCitation,
     ArtifactRef,
     PlanProposal,
     PlanStep,
@@ -220,6 +222,157 @@ def test_report_validator_accepts_linked_claim():
         retrieval_dates=["2026-07-13"],
     )
     assert validate_report(report, evidence).passed
+
+
+def test_report_validator_requires_exact_inline_literature_citations():
+    source = SourceRecord(
+        source_id="s1",
+        title="Acquired source",
+        url="https://example.com/source",
+        source_type="web_page",
+        retrieved_at="2026-07-13T00:00:00Z",
+        supporting_passage="The study reported the bounded finding.",
+    )
+    claim = ClaimRecord(
+        claim_id="c1",
+        text="The study reported the bounded finding.",
+        claim_type="literature_supported",
+        evidence_refs=["s1"],
+        status=EvidenceStatus.SUPPORTED,
+    )
+    report = article_report(
+        introduction="The study reported the bounded finding.",
+        claims=[claim],
+        sources=[source],
+        inline_citations=[
+            InlineCitation(
+                citation_id="bounded-finding",
+                section="introduction",
+                anchor_text="The study reported the bounded finding.",
+                source_ids=["s1"],
+                claim_ids=["c1"],
+            )
+        ],
+    )
+    evidence = RetrievalEvidence(
+        successful_calls=1,
+        tools=["brave_web_search"],
+        urls=["https://example.com/source"],
+        retrieval_dates=["2026-07-13"],
+    )
+
+    assert validate_report(report, evidence, require_inline_citations=True).passed
+
+    missing = validate_report(
+        report.model_copy(update={"inline_citations": []}),
+        evidence,
+        require_inline_citations=True,
+    )
+    assert "literature_claim_missing_inline_citation" in {
+        item.code for item in missing.findings
+    }
+
+    wrong_anchor = report.inline_citations[0].model_copy(
+        update={"anchor_text": "A sentence absent from this section."}
+    )
+    invalid = validate_report(
+        report.model_copy(update={"inline_citations": [wrong_anchor]}),
+        evidence,
+        require_inline_citations=True,
+    )
+    assert "inline_citation_anchor_not_unique" in {
+        item.code for item in invalid.findings
+    }
+
+
+def test_report_validator_rejects_overlapping_inline_citation_anchors():
+    report = article_report(
+        introduction="A bounded literature finding supports the method.",
+        claims=[
+            ClaimRecord(
+                claim_id="c1",
+                text="A bounded literature finding supports the method.",
+                claim_type="literature_supported",
+                evidence_refs=["s1"],
+                status=EvidenceStatus.SUPPORTED,
+            )
+        ],
+        sources=[
+            SourceRecord(
+                source_id="s1",
+                title="Source",
+                url="https://example.com/source",
+                source_type="web_page",
+                retrieved_at="2026-07-13T00:00:00Z",
+                supporting_passage="A bounded literature finding supports the method.",
+            )
+        ],
+        inline_citations=[
+            InlineCitation(
+                citation_id="whole-finding",
+                section="introduction",
+                anchor_text="A bounded literature finding supports the method.",
+                source_ids=["s1"],
+                claim_ids=["c1"],
+            ),
+            InlineCitation(
+                citation_id="nested-finding",
+                section="introduction",
+                anchor_text="literature finding",
+                source_ids=["s1"],
+                claim_ids=["c1"],
+            ),
+        ],
+    )
+
+    validation = validate_report(report, require_inline_citations=True)
+
+    assert "overlapping_inline_citation_anchors" in {
+        item.code for item in validation.findings
+    }
+
+
+def test_requested_pptx_must_exist_and_be_structurally_valid(tmp_path):
+    report = article_report()
+    missing = validate_report(report, required_output_extensions=(".pptx",))
+    assert "requested_output_artifact_missing" in {
+        item.code for item in missing.findings
+    }
+
+    presentation = tmp_path / "presentation.pptx"
+    presentation.write_bytes(b"not-an-office-document")
+    artifact = ArtifactRef(
+        path=str(presentation),
+        sha256=sha256_file(presentation),
+        description="sandbox-generated analysis artifact",
+    )
+    malformed = validate_report(
+        report,
+        computation=ComputationEvidence(successful_calls=1, artifacts=[artifact]),
+        required_output_extensions=(".pptx",),
+    )
+    assert "requested_pptx_invalid" in {item.code for item in malformed.findings}
+
+    with zipfile.ZipFile(presentation, "w") as archive:
+        archive.writestr("[Content_Types].xml", "<Types/>")
+        archive.writestr("ppt/presentation.xml", "<p:presentation/>")
+    artifact = artifact.model_copy(update={"sha256": sha256_file(presentation)})
+    preview = tmp_path / "output" / "visual-review" / "presentation-slide-1.png"
+    preview.parent.mkdir(parents=True)
+    Image.new("RGB", (640, 360), color="white").save(preview)
+    preview_artifact = ArtifactRef(
+        path=str(preview),
+        sha256=sha256_file(preview),
+        description="sandbox-generated analysis artifact",
+    )
+    valid = validate_report(
+        report,
+        computation=ComputationEvidence(
+            successful_calls=1, artifacts=[artifact, preview_artifact]
+        ),
+        required_output_extensions=(".pptx",),
+    )
+    assert valid.passed, valid.findings
 
 
 def test_report_validator_rejects_tautological_scientific_equation():

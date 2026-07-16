@@ -982,6 +982,22 @@ def test_task_spec_exposes_controller_input_profile_to_planners():
     assert task.input_profile == profile
 
 
+def test_task_spec_binds_requested_output_artifacts_before_planning():
+    task = _prepare_task_spec(
+        "Analyze the uploaded dataset.",
+        enable_code=True,
+        requested_outputs=("pptx_presentation", "analysis_notebook", "data_bundle"),
+    )
+
+    assert task.deliverables == [
+        "Evidence-backed scientific report with claim and source ledgers",
+        "PowerPoint presentation (.pptx)",
+        "Reproducible analysis notebook (.ipynb)",
+        "Machine-readable result bundle (.zip)",
+    ]
+    assert orchestrator_module._task_requests_visual_evidence(task)
+
+
 def test_controller_task_cannot_be_shortened_by_plan_synthesis():
     full = normalize_task(
         "Analyze the dataset in Python and R, then save a reconciliation artifact."

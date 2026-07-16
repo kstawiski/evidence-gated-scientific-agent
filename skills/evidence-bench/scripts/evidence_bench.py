@@ -6,7 +6,6 @@ from __future__ import annotations
 import argparse
 import http.client
 import json
-import mimetypes
 import os
 import sys
 import time
@@ -88,15 +87,7 @@ class Client:
             raise ClientError(
                 f"upload input must be a regular non-symlink file: {source}"
             )
-        boundary = f"evidence-bench-{uuid.uuid4().hex}"
-        filename = source.name.replace('"', "_")
-        media_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-        preamble = (
-            f"--{boundary}\r\n"
-            f'Content-Disposition: form-data; name="upload"; filename="{filename}"\r\n'
-            f"Content-Type: {media_type}\r\n\r\n"
-        ).encode("utf-8")
-        closing = f"\r\n--{boundary}--\r\n".encode("ascii")
+        filename = source.name
         connection_type = (
             http.client.HTTPSConnection
             if self._parsed.scheme == "https"
@@ -108,23 +99,18 @@ class Client:
             timeout=max(self.timeout, 300.0),
         )
         prefix = self._parsed.path.rstrip("/")
-        endpoint = f"{prefix}/api/workspaces/{quote(workspace_id)}/files"
+        endpoint = (
+            f"{prefix}/api/workspaces/{quote(workspace_id)}/files/{quote(filename)}"
+        )
         try:
-            connection.putrequest("POST", endpoint)
-            connection.putheader(
-                "Content-Type", f"multipart/form-data; boundary={boundary}"
-            )
-            connection.putheader(
-                "Content-Length",
-                str(len(preamble) + source.stat().st_size + len(closing)),
-            )
+            connection.putrequest("PUT", endpoint)
+            connection.putheader("Content-Type", "application/octet-stream")
+            connection.putheader("Content-Length", str(source.stat().st_size))
             connection.putheader("Accept", "application/json")
             connection.endheaders()
-            connection.send(preamble)
             with source.open("rb") as handle:
                 while chunk := handle.read(1024 * 1024):
                     connection.send(chunk)
-            connection.send(closing)
             response = connection.getresponse()
             body = response.read()
             if response.status >= 400:
@@ -224,6 +210,12 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--workspace-name", default="Agent scientific task")
     run.add_argument("--file", action="append", default=[])
     run.add_argument("--no-code", action="store_true")
+    run.add_argument(
+        "--requested-output",
+        action="append",
+        choices=("pptx_presentation", "analysis_notebook", "data_bundle"),
+        default=[],
+    )
     run.add_argument("--mcp", action="append", choices=DEFAULT_MCPS)
     run.add_argument("--no-research", action="store_true")
     run.add_argument("--wait", action="store_true")
@@ -281,6 +273,7 @@ def main() -> int:
                     "objective": _objective(args, "objective"),
                     "enable_code": not args.no_code,
                     "mcp_servers": mcps,
+                    "requested_outputs": args.requested_output,
                 },
             )
             print(

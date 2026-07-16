@@ -14,6 +14,8 @@ import json
 from pathlib import Path
 import re
 import threading
+import time
+from email.utils import parsedate_to_datetime
 from typing import Any, Callable, TypeVar
 
 import httpx
@@ -33,9 +35,12 @@ IMAGE_MEDIA_TYPES = {
 MAX_IMAGE_COUNT = 5
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_TOTAL_IMAGE_BYTES = 20 * 1024 * 1024
-TRANSIENT_HTTP_STATUS_CODES = {429, 500, 502, 503, 504}
-TRANSPORT_ATTEMPTS = 3
-TRANSPORT_BACKOFF_SECONDS = (5.0, 15.0)
+CAPACITY_HTTP_STATUS_CODES = {429, 502, 503, 504}
+TRANSIENT_SERVER_STATUS_CODES = {500}
+TRANSIENT_SERVER_ATTEMPTS = 3
+CAPACITY_BACKOFF_INITIAL_SECONDS = 5.0
+CAPACITY_BACKOFF_MAX_SECONDS = 60.0
+CAPACITY_ATTEMPT_LIMIT = 512
 
 
 class _RepetitiveStreamError(RuntimeError):
@@ -191,6 +196,103 @@ async def _await_cancellable(
             task.cancel()
 
 
+async def _sleep_cancellable(
+    seconds: float, cancel_event: threading.Event | None
+) -> None:
+    """Wait without making a queued local-model request hard to cancel."""
+
+    if cancel_event is None:
+        await asyncio.sleep(seconds)
+        return
+    remaining = seconds
+    while remaining > 0:
+        if cancel_event.is_set():
+            raise asyncio.CancelledError
+        interval = min(1.0, remaining)
+        await asyncio.sleep(interval)
+        remaining -= interval
+
+
+def _retry_after_seconds(response: httpx.Response) -> float | None:
+    """Parse a bounded Retry-After value supplied by the local gateway."""
+
+    value = response.headers.get("Retry-After", "").strip()
+    if not value:
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(value)
+            if retry_at.tzinfo is None:
+                return None
+            seconds = retry_at.timestamp() - time.time()
+        except (TypeError, ValueError, OverflowError):
+            return None
+    if seconds <= 0:
+        return None
+    return min(seconds, CAPACITY_BACKOFF_MAX_SECONDS)
+
+
+def _capacity_delay(response: httpx.Response | None, attempt: int) -> float:
+    if response is not None and (retry_after := _retry_after_seconds(response)):
+        return retry_after
+    return min(
+        CAPACITY_BACKOFF_INITIAL_SECONDS * (2 ** min(attempt, 8)),
+        CAPACITY_BACKOFF_MAX_SECONDS,
+    )
+
+
+def _emit_capacity_notice(
+    callback: Callable[[str], None] | None,
+    *,
+    reason: str,
+    delay: float,
+    waited: float,
+    budget: float,
+) -> None:
+    if callback is None:
+        return
+    try:
+        callback(
+            "\n[Evidence Bench is waiting for local model capacity after "
+            f"{reason}; retrying in {delay:g}s "
+            f"({waited + delay:g}/{budget:g}s capacity-wait budget). "
+            "The run remains cancellable.]\n"
+        )
+    except Exception:
+        pass
+
+
+async def _wait_before_transport_retry(
+    endpoint: ModelEndpoint,
+    *,
+    response: httpx.Response | None,
+    attempt: int,
+    waited: float,
+    reason: str,
+    on_visible_text: Callable[[str], None] | None,
+    cancel_event: threading.Event | None,
+) -> float | None:
+    """Return updated capacity wait or ``None`` when its budget is exhausted."""
+
+    budget = float(endpoint.capacity_wait_seconds or 0)
+    if budget <= 0 or attempt >= CAPACITY_ATTEMPT_LIMIT - 1:
+        return None
+    delay = _capacity_delay(response, attempt)
+    if waited + delay > budget:
+        return None
+    _emit_capacity_notice(
+        on_visible_text,
+        reason=reason,
+        delay=delay,
+        waited=waited,
+        budget=budget,
+    )
+    await _sleep_cancellable(delay, cancel_event)
+    return waited + delay
+
+
 def _jsonable(value: Any) -> Any:
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
@@ -336,7 +438,9 @@ async def request_structured(
                 else None
             )
             if on_visible_text is None:
-                for transport_attempt in range(TRANSPORT_ATTEMPTS):
+                capacity_waited = 0.0
+                server_failures = 0
+                for transport_attempt in range(CAPACITY_ATTEMPT_LIMIT):
                     try:
                         response = await _await_cancellable(
                             client.post(url, json=request_body, headers=headers),
@@ -345,20 +449,44 @@ async def request_structured(
                         )
                         response.raise_for_status()
                         break
-                    except httpx.TransportError:
-                        if transport_attempt == TRANSPORT_ATTEMPTS - 1:
-                            raise
-                        await asyncio.sleep(
-                            TRANSPORT_BACKOFF_SECONDS[transport_attempt]
+                    except httpx.TransportError as exc:
+                        updated_wait = await _wait_before_transport_retry(
+                            endpoint,
+                            response=None,
+                            attempt=transport_attempt,
+                            waited=capacity_waited,
+                            reason=type(exc).__name__,
+                            on_visible_text=on_visible_text,
+                            cancel_event=cancel_event,
                         )
+                        if updated_wait is None:
+                            raise
+                        capacity_waited = updated_wait
                     except httpx.HTTPStatusError as exc:
+                        status = exc.response.status_code
+                        if status in CAPACITY_HTTP_STATUS_CODES:
+                            updated_wait = await _wait_before_transport_retry(
+                                endpoint,
+                                response=exc.response,
+                                attempt=transport_attempt,
+                                waited=capacity_waited,
+                                reason=f"HTTP {status}",
+                                on_visible_text=on_visible_text,
+                                cancel_event=cancel_event,
+                            )
+                            if updated_wait is None:
+                                raise
+                            capacity_waited = updated_wait
+                            continue
+                        server_failures += 1
                         if (
-                            exc.response.status_code not in TRANSIENT_HTTP_STATUS_CODES
-                            or transport_attempt == TRANSPORT_ATTEMPTS - 1
+                            status not in TRANSIENT_SERVER_STATUS_CODES
+                            or server_failures >= TRANSIENT_SERVER_ATTEMPTS
                         ):
                             raise
-                        await asyncio.sleep(
-                            TRANSPORT_BACKOFF_SECONDS[transport_attempt]
+                        await _sleep_cancellable(
+                            _capacity_delay(exc.response, server_failures - 1),
+                            cancel_event,
                         )
                 content, last_finish_reason = _message_content(response.json())
                 content = strip_reasoning_envelope(content)
@@ -446,7 +574,9 @@ async def request_structured(
                                     last_finish_reason = "schema_complete"
                                     raise _StructuredStreamComplete
 
-                for transport_attempt in range(TRANSPORT_ATTEMPTS):
+                capacity_waited = 0.0
+                server_failures = 0
+                for transport_attempt in range(CAPACITY_ATTEMPT_LIMIT):
                     try:
                         await _await_cancellable(
                             consume_stream(), effective_timeout, cancel_event
@@ -458,25 +588,48 @@ async def request_structured(
                         # stream here preserves all preceding reasoning and avoids
                         # waiting for a redundant transport terminator.
                         break
-                    except httpx.TransportError:
-                        if (
-                            stream_started
-                            or transport_attempt == TRANSPORT_ATTEMPTS - 1
-                        ):
+                    except httpx.TransportError as exc:
+                        if stream_started:
                             raise
-                        await asyncio.sleep(
-                            TRANSPORT_BACKOFF_SECONDS[transport_attempt]
+                        updated_wait = await _wait_before_transport_retry(
+                            endpoint,
+                            response=None,
+                            attempt=transport_attempt,
+                            waited=capacity_waited,
+                            reason=type(exc).__name__,
+                            on_visible_text=on_visible_text,
+                            cancel_event=cancel_event,
                         )
+                        if updated_wait is None:
+                            raise
+                        capacity_waited = updated_wait
                     except httpx.HTTPStatusError as exc:
+                        if stream_started:
+                            raise
+                        status = exc.response.status_code
+                        if status in CAPACITY_HTTP_STATUS_CODES:
+                            updated_wait = await _wait_before_transport_retry(
+                                endpoint,
+                                response=exc.response,
+                                attempt=transport_attempt,
+                                waited=capacity_waited,
+                                reason=f"HTTP {status}",
+                                on_visible_text=on_visible_text,
+                                cancel_event=cancel_event,
+                            )
+                            if updated_wait is None:
+                                raise
+                            capacity_waited = updated_wait
+                            continue
+                        server_failures += 1
                         if (
-                            stream_started
-                            or exc.response.status_code
-                            not in TRANSIENT_HTTP_STATUS_CODES
-                            or transport_attempt == TRANSPORT_ATTEMPTS - 1
+                            status not in TRANSIENT_SERVER_STATUS_CODES
+                            or server_failures >= TRANSIENT_SERVER_ATTEMPTS
                         ):
                             raise
-                        await asyncio.sleep(
-                            TRANSPORT_BACKOFF_SECONDS[transport_attempt]
+                        await _sleep_cancellable(
+                            _capacity_delay(exc.response, server_failures - 1),
+                            cancel_event,
                         )
                     except _RepetitiveStreamError:
                         # The current sample is unusable, but a bounded schema

@@ -60,6 +60,15 @@ def test_archive_intake_lists_members_without_extraction(tmp_path):
     assert not (tmp_path.parent / "escape.txt").exists()
 
 
+def test_input_profile_reuses_controller_manifest_hash(tmp_path):
+    source = tmp_path / "large.bin"
+    source.write_bytes(b"large-input-fixture")
+
+    profile = build_input_profile(tmp_path, {"large.bin": "a" * 64})
+
+    assert profile.files[0].sha256 == "a" * 64
+
+
 def test_xlsx_intake_profiles_first_sheet_missingness_without_cell_values(tmp_path):
     workbook = tmp_path / "cohort.xlsx"
     shared = """<?xml version="1.0" encoding="UTF-8"?>

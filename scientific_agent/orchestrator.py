@@ -48,6 +48,7 @@ from .prompts import (
     REVISION_REPORTER,
     SIMPLE_REPORTER,
 )
+
 from .provenance import (
     EventLedger,
     build_environment_snapshot,
@@ -90,6 +91,7 @@ from .workflow import (
     normalize_task,
     planning_status,
 )
+
 from .workspace_tools import build_workspace_tools
 from .structured_client import (
     MAX_IMAGE_BYTES,
@@ -98,6 +100,16 @@ from .structured_client import (
     request_structured,
 )
 
+REQUESTED_OUTPUT_DELIVERABLES = {
+    "pptx_presentation": "PowerPoint presentation (.pptx)",
+    "analysis_notebook": "Reproducible analysis notebook (.ipynb)",
+    "data_bundle": "Machine-readable result bundle (.zip)",
+}
+REQUESTED_OUTPUT_EXTENSIONS = {
+    "pptx_presentation": ".pptx",
+    "analysis_notebook": ".ipynb",
+    "data_bundle": ".zip",
+}
 
 ActivityCallback = Callable[[str, str, str, str, str | None], None]
 PRESENTATION_ONLY_FINDINGS = {
@@ -866,6 +878,8 @@ def _task_requests_visual_evidence(task: TaskSpec) -> bool:
             "visual",
             "scan",
             "slide",
+            "presentation",
+            "pptx",
             "tiff",
             "manuscript",
             "proof pdf",
@@ -3323,10 +3337,22 @@ def _prepare_task_spec(
     input_manifest: dict | None = None,
     input_profile: InputProfile | None = None,
     knowledge_snapshot: dict | None = None,
+    requested_outputs: tuple[str, ...] = (),
 ) -> TaskSpec:
     """Bind inferred computation requirements to the run's authorization."""
 
     task = normalize_task(objective)
+    unknown_outputs = set(requested_outputs) - set(REQUESTED_OUTPUT_DELIVERABLES)
+    if unknown_outputs:
+        raise ValueError(
+            "unsupported requested output: " + ", ".join(sorted(unknown_outputs))
+        )
+    if requested_outputs and not enable_code:
+        raise ValueError("requested output artifacts require code execution")
+    deliverables = [
+        *task.deliverables,
+        *(REQUESTED_OUTPUT_DELIVERABLES[item] for item in requested_outputs),
+    ]
     available_inputs = [
         ArtifactRef(
             path=f"/workspace/{item['path']}",
@@ -3378,6 +3404,7 @@ def _prepare_task_spec(
                 "available_inputs": available_inputs,
                 "input_profile": input_profile,
                 "knowledge_sources": knowledge_sources,
+                "deliverables": deliverables,
             }
         )
 
@@ -3392,6 +3419,7 @@ def _prepare_task_spec(
             "available_inputs": available_inputs,
             "input_profile": input_profile,
             "knowledge_sources": knowledge_sources,
+            "deliverables": deliverables,
         }
     )
 
@@ -3410,6 +3438,7 @@ async def run_scientific_task(
     cancel_event: threading.Event | None = None,
     parent_provenance_dir: Path | None = None,
     revision_request: str | None = None,
+    requested_outputs: tuple[str, ...] = (),
 ) -> RunResult:
     def report_progress(phase: str, message: str) -> None:
         if progress is None:
@@ -3449,7 +3478,16 @@ async def run_scientific_task(
     )
     input_manifest = build_input_manifest(settings.workspace)
     write_json(run_dir / "input_manifest.json", input_manifest)
-    input_profile = build_input_profile(settings.workspace)
+    input_profile = build_input_profile(
+        settings.workspace,
+        {
+            item["path"]: item["sha256"]
+            for item in input_manifest.get("files", [])
+            if isinstance(item, dict)
+            and isinstance(item.get("path"), str)
+            and isinstance(item.get("sha256"), str)
+        },
+    )
     write_json(run_dir / "input_profile.json", input_profile)
     knowledge_snapshot = settings.knowledge_snapshot
     if knowledge_snapshot is not None:
@@ -3691,6 +3729,7 @@ async def run_scientific_task(
             input_manifest=input_manifest,
             input_profile=input_profile,
             knowledge_snapshot=knowledge_snapshot,
+            requested_outputs=requested_outputs,
         )
         report_progress(
             "input-intake",
@@ -3895,6 +3934,14 @@ async def run_scientific_task(
         planning.master_plan.task
     )
     require_pubmed_literature = _requires_pubmed_literature(planning.master_plan.task)
+    required_output_extensions = tuple(
+        REQUESTED_OUTPUT_EXTENSIONS[item]
+        for item in requested_outputs
+        if item in REQUESTED_OUTPUT_EXTENSIONS
+    )
+    require_inline_citations = bool(
+        retrieval.knowledge_passages or "acquire_pubmed_article" in set(retrieval.tools)
+    )
     validation = validate_report(
         report,
         retrieval,
@@ -3902,6 +3949,8 @@ async def run_scientific_task(
         required_languages=required_languages,
         require_reconciliation=require_reconciliation,
         require_pubmed_literature=require_pubmed_literature,
+        require_inline_citations=require_inline_citations,
+        required_output_extensions=required_output_extensions,
         controller_artifacts=controller_artifacts,
         controller_dates=controller_dates,
     )
@@ -4018,6 +4067,10 @@ async def run_scientific_task(
             break
         retrieval = _merge_retrieval_evidence(retrieval, repair_retrieval)
         computation = _merge_computation_evidence(computation, repair_computation)
+        require_inline_citations = bool(
+            retrieval.knowledge_passages
+            or "acquire_pubmed_article" in set(retrieval.tools)
+        )
         validation = validate_report(
             report,
             retrieval,
@@ -4025,6 +4078,8 @@ async def run_scientific_task(
             required_languages=required_languages,
             require_reconciliation=require_reconciliation,
             require_pubmed_literature=require_pubmed_literature,
+            require_inline_citations=require_inline_citations,
+            required_output_extensions=required_output_extensions,
             controller_artifacts=controller_artifacts,
             controller_dates=controller_dates,
         )

@@ -59,6 +59,26 @@ The `ScientificReport.narrative` field is a legacy pre-v0.4 free-text field
 retained only so older reports still load; new reports use the typed article
 sections above instead.
 
+## Inline scientific citations
+
+Literature and knowledge evidence is cited in the article body with linked
+Vancouver-style numbers. The model never chooses bibliography numbers or writes
+raw citation markup. It emits an `InlineCitation` containing a short exact
+`anchor_text`, the article `section`, direct `source_ids`, and the corresponding
+`claim_ids`. Deterministic validation requires the anchor to occur exactly once,
+requires every source to be URL-backed knowledge or acquired literature, and
+requires the same source to be a direct `ClaimRecord.evidence_ref`. When a run has
+knowledge passages or acquired PubMed articles, every external source attached to
+a claim must appear in at least one valid inline citation.
+
+The renderer assigns numbers by Sources order. PubMed numbers open the run-local
+Markdown article (with separate PDF access when available); knowledge numbers open
+the exact immutable run-snapshot passage. The Sources section uses the same numbers
+and retains source IDs, PMID/DOI, local Markdown/PDF, and canonical record links.
+Gemma independently audits whether the anchored statement is actually entailed by
+the linked bytes. A missing, decorative, mismatched, or broken citation is a
+fixable blocking defect and enters the bounded repair/re-audit loop.
+
 ## Registered displays: figures and tables
 
 A figure or table only appears in the article if it is registered as a

@@ -8,6 +8,7 @@ import math
 import os
 import re
 import unicodedata
+import zipfile
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any
@@ -1043,6 +1044,8 @@ def validate_report(
     required_languages: tuple[str, ...] = (),
     require_reconciliation: bool = False,
     require_pubmed_literature: bool = False,
+    require_inline_citations: bool = False,
+    required_output_extensions: tuple[str, ...] = (),
     controller_artifacts: tuple[ArtifactRef, ...] = (),
     controller_dates: tuple[str, ...] = (),
 ) -> DeterministicValidation:
@@ -1087,6 +1090,103 @@ def validate_report(
                 )
             )
     records = computation.records if computation else []
+    generated_artifacts = [
+        Path(artifact.path)
+        for artifact in (computation.artifacts if computation else [])
+        if artifact.description == "sandbox-generated analysis artifact"
+    ]
+    for required_suffix in required_output_extensions:
+        candidates = [
+            path
+            for path in generated_artifacts
+            if path.suffix.casefold() == required_suffix.casefold()
+            and path.is_file()
+            and not path.is_symlink()
+        ]
+        if not candidates:
+            findings.append(
+                LintFinding(
+                    code="requested_output_artifact_missing",
+                    location="computation_evidence",
+                    message=(
+                        f"The user requested a {required_suffix} output, but no "
+                        "successful sandbox artifact of that type was produced."
+                    ),
+                )
+            )
+            continue
+        if required_suffix.casefold() == ".pptx":
+            try:
+                with zipfile.ZipFile(candidates[-1]) as archive:
+                    names = set(archive.namelist())
+                required_members = {"[Content_Types].xml", "ppt/presentation.xml"}
+                if not required_members.issubset(names):
+                    raise ValueError("required presentation members are absent")
+            except (OSError, ValueError, zipfile.BadZipFile) as exc:
+                findings.append(
+                    LintFinding(
+                        code="requested_pptx_invalid",
+                        location=str(candidates[-1]),
+                        message=f"The requested PPTX is not structurally valid: {exc}",
+                    )
+                )
+            visual_previews = [
+                path
+                for path in generated_artifacts
+                if "visual-review" in path.parts
+                and path.suffix.casefold() in FIGURE_MEDIA_TYPES
+                and path.is_file()
+                and not path.is_symlink()
+            ]
+            if not visual_previews:
+                findings.append(
+                    LintFinding(
+                        code="requested_pptx_preview_missing",
+                        location=str(candidates[-1]),
+                        message=(
+                            "A requested PPTX requires at least one deterministic "
+                            "slide preview below output/visual-review for Gemma-only "
+                            "visual inspection."
+                        ),
+                    )
+                )
+        elif required_suffix.casefold() == ".zip":
+            try:
+                with zipfile.ZipFile(candidates[-1]) as archive:
+                    if not any(not item.is_dir() for item in archive.infolist()):
+                        raise ValueError("the archive contains no files")
+            except (OSError, ValueError, zipfile.BadZipFile) as exc:
+                findings.append(
+                    LintFinding(
+                        code="requested_zip_invalid",
+                        location=str(candidates[-1]),
+                        message=f"The requested result ZIP is invalid: {exc}",
+                    )
+                )
+        elif required_suffix.casefold() == ".ipynb":
+            try:
+                notebook = (
+                    json.loads(candidates[-1].read_text(encoding="utf-8"))
+                    if candidates[-1].stat().st_size <= 64 * 1024 * 1024
+                    else None
+                )
+            except (OSError, UnicodeError, ValueError):
+                notebook = None
+            if (
+                notebook is None
+                or not isinstance(notebook.get("cells"), list)
+                or not isinstance(notebook.get("nbformat"), int)
+            ):
+                findings.append(
+                    LintFinding(
+                        code="requested_notebook_invalid",
+                        location=str(candidates[-1]),
+                        message=(
+                            "The requested notebook must be strict JSON with cells "
+                            "and an integer nbformat."
+                        ),
+                    )
+                )
     authoritative_json = _authoritative_json_outputs(records)
     for record in records:
         if record.status != "succeeded":
@@ -1732,6 +1832,165 @@ def validate_report(
                 message="Claim IDs must be unique.",
             )
         )
+
+    citation_ids = [citation.citation_id for citation in report.inline_citations]
+    if len(citation_ids) != len(set(citation_ids)):
+        findings.append(
+            LintFinding(
+                code="duplicate_inline_citation_id",
+                location="inline_citations",
+                message="Inline citation IDs must be unique.",
+            )
+        )
+    citation_anchors = [
+        (citation.section, citation.anchor_text) for citation in report.inline_citations
+    ]
+    if len(citation_anchors) != len(set(citation_anchors)):
+        findings.append(
+            LintFinding(
+                code="duplicate_inline_citation_anchor",
+                location="inline_citations",
+                message=(
+                    "Use one InlineCitation per anchored sentence and place all "
+                    "direct sources in that record."
+                ),
+            )
+        )
+    article_sections = {
+        "executive_summary": report.executive_summary,
+        "introduction": report.introduction,
+        "methods": "\n".join(report.methods),
+        "results": report.results,
+        "discussion": report.discussion,
+        "conclusions": report.conclusions,
+    }
+    for left_index, left in enumerate(report.inline_citations):
+        section_text = article_sections[left.section]
+        left_start = section_text.find(left.anchor_text)
+        if left_start < 0:
+            continue
+        left_end = left_start + len(left.anchor_text)
+        for right_index, right in enumerate(
+            report.inline_citations[left_index + 1 :], start=left_index + 1
+        ):
+            if right.section != left.section:
+                continue
+            right_start = section_text.find(right.anchor_text)
+            if right_start < 0:
+                continue
+            right_end = right_start + len(right.anchor_text)
+            if max(left_start, right_start) < min(left_end, right_end):
+                findings.append(
+                    LintFinding(
+                        code="overlapping_inline_citation_anchors",
+                        location=(
+                            f"inline_citations[{left_index}],"
+                            f"inline_citations[{right_index}]"
+                        ),
+                        message=(
+                            "Inline citation anchors in one article section must "
+                            "not overlap; use one combined citation or separate "
+                            "non-overlapping exact anchors."
+                        ),
+                    )
+                )
+    citations_by_claim: dict[str, set[str]] = {}
+    for index, citation in enumerate(report.inline_citations):
+        location = f"inline_citations[{index}]"
+        occurrences = article_sections[citation.section].count(citation.anchor_text)
+        if occurrences != 1:
+            findings.append(
+                LintFinding(
+                    code="inline_citation_anchor_not_unique",
+                    location=f"{location}.anchor_text",
+                    message=(
+                        "The citation anchor must occur exactly once in its declared "
+                        f"article section; found {occurrences}."
+                    ),
+                )
+            )
+        unknown_sources = sorted(set(citation.source_ids) - known)
+        if unknown_sources:
+            findings.append(
+                LintFinding(
+                    code="inline_citation_unknown_source",
+                    location=f"{location}.source_ids",
+                    message=(
+                        "Inline citation references unknown sources: "
+                        + ", ".join(unknown_sources)
+                    ),
+                )
+            )
+        nonliterature_sources = sorted(
+            source_id
+            for source_id in citation.source_ids
+            if source_id in sources_by_id and sources_by_id[source_id].url is None
+        )
+        if nonliterature_sources:
+            findings.append(
+                LintFinding(
+                    code="inline_citation_not_literature",
+                    location=f"{location}.source_ids",
+                    message=(
+                        "Article-style inline citations must resolve to knowledge "
+                        "or retrieved literature URLs, not computation artifacts: "
+                        + ", ".join(nonliterature_sources)
+                    ),
+                )
+            )
+        unknown_claims = sorted(set(citation.claim_ids) - set(claim_ids))
+        if unknown_claims:
+            findings.append(
+                LintFinding(
+                    code="inline_citation_unknown_claim",
+                    location=f"{location}.claim_ids",
+                    message=(
+                        "Inline citation references unknown claims: "
+                        + ", ".join(unknown_claims)
+                    ),
+                )
+            )
+        for claim_id in citation.claim_ids:
+            citations_by_claim.setdefault(claim_id, set()).update(citation.source_ids)
+            claim = next(
+                (item for item in report.claims if item.claim_id == claim_id), None
+            )
+            if claim is not None and not set(citation.source_ids).issubset(
+                claim.evidence_refs
+            ):
+                findings.append(
+                    LintFinding(
+                        code="inline_citation_claim_source_mismatch",
+                        location=location,
+                        message=(
+                            f"Citation sources for {claim_id} must be direct "
+                            "evidence_refs on that claim."
+                        ),
+                    )
+                )
+    if require_inline_citations:
+        for index, claim in enumerate(report.claims):
+            external_refs = {
+                source_id
+                for source_id in claim.evidence_refs
+                if source_id in sources_by_id
+                and sources_by_id[source_id].url is not None
+            }
+            missing_inline = external_refs - citations_by_claim.get(
+                claim.claim_id, set()
+            )
+            if external_refs and missing_inline:
+                findings.append(
+                    LintFinding(
+                        code="literature_claim_missing_inline_citation",
+                        location=f"claims[{index}]",
+                        message=(
+                            "Every knowledge- or literature-backed claim must be "
+                            "cited in the article body. Missing inline sources: "
+                            + ", ".join(sorted(missing_inline))
+                        ),
+                    )
+                )
 
     provenance_text = " ".join(
         [

@@ -33,6 +33,53 @@ def test_workspace_files_are_confined_and_have_an_upload_limit(tmp_path):
     ).exists()
 
 
+@pytest.mark.asyncio
+async def test_raw_stream_upload_is_atomic_and_size_bounded(tmp_path):
+    store = _store(tmp_path)
+    workspace = store.create_workspace("Large stream")
+
+    async def chunks():
+        yield b"a" * 7
+        yield b"b" * 5
+
+    saved = await store.save_streamed_file(workspace["id"], "large.bin", chunks(), 12)
+    assert saved == {"name": "large.bin", "bytes": 12}
+    assert store.file_path(workspace["id"], "large.bin").read_bytes() == (
+        b"a" * 7 + b"b" * 5
+    )
+
+    async def oversized():
+        yield b"1234"
+
+    with pytest.raises(ValueError, match="upload limit"):
+        await store.save_streamed_file(workspace["id"], "oversized.bin", oversized(), 3)
+    assert not any(
+        item.name.startswith(".upload-")
+        for item in store.paths(workspace["id"])[0].iterdir()
+    )
+
+
+@pytest.mark.asyncio
+async def test_run_started_during_stream_upload_wins_without_partial_input(tmp_path):
+    store = _store(tmp_path)
+    workspace = store.create_workspace("Upload and run race")
+
+    async def chunks():
+        yield b"first"
+        store.create_run(workspace["id"], "Lock the immutable inputs", True, ())
+        yield b"second"
+
+    with pytest.raises(RuntimeError, match="run is active"):
+        await store.save_streamed_file(workspace["id"], "racing.bin", chunks(), 64)
+
+    assert not (store.paths(workspace["id"])[0] / "racing.bin").exists()
+    assert not any(
+        item.name.startswith(".upload-")
+        for item in store.paths(workspace["id"])[0].iterdir()
+    )
+    assert len(store.list_runs(workspace["id"])) == 1
+
+
 def test_only_one_active_run_can_be_created_per_workspace(tmp_path):
     store = _store(tmp_path)
     workspace = store.create_workspace("Race test")
@@ -46,6 +93,21 @@ def test_only_one_active_run_can_be_created_per_workspace(tmp_path):
     with ThreadPoolExecutor(max_workers=2) as executor:
         results = list(executor.map(lambda _: create(), range(2)))
     assert sum(result is not None for result in results) == 1
+
+
+def test_requested_output_artifacts_round_trip_with_run(tmp_path):
+    store = _store(tmp_path)
+    workspace = store.create_workspace("Presentation analysis")
+
+    run = store.create_run(
+        workspace["id"],
+        "Analyze and present the results",
+        True,
+        (),
+        requested_outputs=("pptx_presentation", "data_bundle"),
+    )
+
+    assert run["requested_outputs"] == ["pptx_presentation", "data_bundle"]
 
 
 def test_artifact_paths_cannot_escape_a_run(tmp_path):

@@ -132,6 +132,15 @@
                       </button>
                     </fieldset>
                   </div>
+                  <fieldset class="requested-output-fieldset">
+                    <legend>Additional output artifacts</legend>
+                    <div class="requested-output-options" id="requested-output-options">
+                      <label><input type="checkbox" value="pptx_presentation" data-run-mutable><span><strong>PPTX presentation</strong><small>Editable slide deck with validated figures, tables, and citations</small></span></label>
+                      <label><input type="checkbox" value="analysis_notebook" data-run-mutable><span><strong>Analysis notebook</strong><small>Reproducible .ipynb companion</small></span></label>
+                      <label><input type="checkbox" value="data_bundle" data-run-mutable><span><strong>Result data ZIP</strong><small>Machine-readable outputs in one archive</small></span></label>
+                    </div>
+                    <p class="field-help">The scientific article is always produced. Additional artifacts are deterministic acceptance requirements and appear live in Workspace files.</p>
+                  </fieldset>
                   <fieldset class="knowledge-run-fieldset">
                     <legend>Grounding library</legend>
                     <div class="knowledge-run-summary">
@@ -208,7 +217,7 @@
                 </header>
                 <label class="drop-zone" id="drop-zone" for="file-input" data-run-mutable>
                   <input id="file-input" type="file" multiple data-run-mutable>
-                  <span class="drop-icon">＋</span><strong>Add source files</strong><small>Click or drop files here</small>
+                  <span class="drop-icon">＋</span><strong>Add source files</strong><small id="upload-guidance">Select many files, or ZIP a large directory</small>
                 </label>
                 <div class="file-list" id="file-list"></div>
               </section>

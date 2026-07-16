@@ -487,6 +487,31 @@ class ReportDisplay(BaseModel):
     alt_text: str = Field(default="", max_length=1200)
 
 
+class InlineCitation(BaseModel):
+    """Controller-validated location of one article-style evidence citation."""
+
+    citation_id: str = Field(pattern=r"^[a-z][a-z0-9-]{0,63}$")
+    section: Literal[
+        "executive_summary",
+        "introduction",
+        "methods",
+        "results",
+        "discussion",
+        "conclusions",
+    ]
+    anchor_text: str = Field(min_length=3, max_length=500)
+    source_ids: list[str] = Field(min_length=1, max_length=12)
+    claim_ids: list[str] = Field(min_length=1, max_length=12)
+
+    @model_validator(mode="after")
+    def references_are_unique(self) -> "InlineCitation":
+        if len(self.source_ids) != len(set(self.source_ids)):
+            raise ValueError("inline citation source IDs must be unique")
+        if len(self.claim_ids) != len(set(self.claim_ids)):
+            raise ValueError("inline citation claim IDs must be unique")
+        return self
+
+
 class ScientificReport(BaseModel):
     title: str = Field(min_length=3, max_length=300)
     executive_summary: str = Field(min_length=3)
@@ -495,6 +520,7 @@ class ScientificReport(BaseModel):
     results: str = Field(min_length=3)
     discussion: str = Field(min_length=3)
     conclusions: str = Field(min_length=3)
+    inline_citations: list[InlineCitation] = Field(default_factory=list)
     displays: list[ReportDisplay] = Field(default_factory=list)
     claims: list[ClaimRecord]
     sources: list[SourceRecord]

@@ -40,7 +40,7 @@ class WebSettings:
     port: int = field(default_factory=lambda: int(os.environ.get("WEB_PORT", "8080")))
     max_upload_bytes: int = field(
         default_factory=lambda: int(
-            os.environ.get("WEB_MAX_UPLOAD_BYTES", str(256 * 1024**2))
+            os.environ.get("WEB_MAX_UPLOAD_BYTES", str(4 * 1024**3))
         )
     )
     max_workers: int = field(

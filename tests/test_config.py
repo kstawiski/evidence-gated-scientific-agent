@@ -102,7 +102,8 @@ def test_zero_model_token_ceiling_preserves_proxy_maximum_thinking(monkeypatch):
     assert endpoint.max_tokens is None
     assert endpoint.enable_thinking is None
     assert endpoint.native_json_schema is False
-    assert endpoint.request_timeout_seconds == 7200
+    assert endpoint.request_timeout_seconds == 21600
+    assert endpoint.capacity_wait_seconds == 21600
 
 
 @pytest.mark.parametrize("name", ["QWEN_MAX_TOKENS", "GEMMA_MAX_TOKENS"])

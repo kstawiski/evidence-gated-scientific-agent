@@ -226,7 +226,7 @@ legend { padding: 0 7px; color: var(--muted); font-size: 10px; font-weight: 700;
 .model-output-monitor > div { display: flex; justify-content: space-between; gap: 10px; padding: 9px 11px; border-bottom: 1px solid #315556; }
 .model-output-monitor h3 { margin: 0; font: 700 10px "DejaVu Sans Mono", monospace; text-transform: uppercase; letter-spacing: .08em; }.model-output-monitor > div span { color: var(--cyan); font-size: 9px; }
 .model-output-heading > div { display: flex; align-items: center; gap: 10px; }.model-output-heading button { border: 1px solid #5c8988; background: transparent; color: #e7f4f1; padding: 5px 7px; font: 700 8px "DejaVu Sans Mono", monospace; text-transform: uppercase; letter-spacing: .07em; cursor: pointer; }.model-output-heading button:hover { border-color: var(--cyan); color: var(--cyan); }
-.model-output-monitor pre { min-height: 280px; max-height: 480px; overflow: auto; margin: 0; padding: 14px; color: #d9e9e6; white-space: pre-wrap; overflow-wrap: anywhere; font: 10.5px/1.62 "DejaVu Sans Mono", monospace; }
+.model-output-monitor pre { height: clamp(420px, 60vh, 760px); min-height: 420px; max-height: none; overflow: auto; margin: 0; padding: 16px; color: #d9e9e6; white-space: pre-wrap; overflow-wrap: anywhere; font: 12.5px/1.62 "DejaVu Sans Mono", monospace; }
 .model-output-monitor > p { margin: 0; padding: 8px 11px; border-top: 1px solid #315556; color: #9db7b4; font-size: 8px; line-height: 1.4; }
 .activity-event { border-left: 3px solid var(--line); border-radius: 0 9px 9px 0; padding: 9px 10px; margin: 0 0 7px; background: #f7faf9; }
 .activity-event.running { border-color: var(--cyan); }.activity-event.supported { border-color: var(--teal-2); }.activity-event.failed { border-color: var(--red); }.activity-event.warning { border-color: var(--amber); }
@@ -383,7 +383,7 @@ legend { padding: 0 7px; color: var(--muted); font-size: 10px; font-weight: 700;
   .follow-up-presets, .revision-lineage { display: grid; grid-template-columns: 1fr; }.follow-up-presets button, .revision-lineage button { width: 100%; }
   .discussion-message { max-width: 96%; }.discussion-form > div { align-items: stretch; flex-direction: column; }.discussion-form .primary-button { width: 100%; }
   .cancel-dialog form > div { flex-direction: column-reverse; }.cancel-dialog form > div button { min-height: 42px; }
-  .model-output-monitor pre { min-height: 220px; max-height: 380px; }.artifact-preview-dialog footer { align-items: stretch; flex-direction: column; }.artifact-preview-dialog .download-button { text-align: center; }
+  .model-output-monitor pre { height: 54vh; min-height: 300px; max-height: none; font-size: 11.5px; }.artifact-preview-dialog footer { align-items: stretch; flex-direction: column; }.artifact-preview-dialog .download-button { text-align: center; }
   .research-browser-dialog header { align-items: flex-start; }.research-browser-actions > button:not(.icon-button), .research-browser-actions .download-button { display: none; }.research-browser-dialog > section > p { font-size: 9px; }
 }
 

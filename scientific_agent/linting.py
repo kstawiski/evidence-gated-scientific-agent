@@ -30,6 +30,7 @@ from .schemas import (
     ArtifactRef,
     DeterministicValidation,
     ComputationEvidence,
+    ComputationRecord,
     LintFinding,
     PlanLintReport,
     PlanProposal,
@@ -104,7 +105,12 @@ def _inferential_consistency_findings(path: Path, document: Any) -> list[LintFin
                 "welch_df",
                 "df",
             ),
-            "p-value": ("p_value", "welch_p_value", "welch_pvalue"),
+            "p-value": (
+                "p_value",
+                "p_value_two_sided",
+                "welch_p_value",
+                "welch_pvalue",
+            ),
         }
         present = {
             label: [(key, node[key]) for key in aliases if key in node]
@@ -682,6 +688,27 @@ def _logical_json_output_key(path: Path) -> str:
     return str(path.resolve())
 
 
+def _authoritative_json_outputs(
+    records: list[ComputationRecord],
+) -> dict[tuple[str, str], str]:
+    """Return the latest successful path for each language/logical JSON output."""
+
+    latest: dict[tuple[str, str], str] = {}
+    for record in records:
+        if record.status != "succeeded":
+            continue
+        for artifact in record.artifacts:
+            path = Path(artifact.path)
+            if (
+                artifact.description == "sandbox-generated analysis artifact"
+                and path.suffix.lower() == ".json"
+            ):
+                latest[(record.language, _logical_json_output_key(path))] = (
+                    os.path.normpath(str(path))
+                )
+    return latest
+
+
 def _collect_json_numbers(
     value: Any,
     destination: dict[str, list[Decimal]],
@@ -706,16 +733,22 @@ def _machine_json_numbers(
 ) -> dict[str, list[Decimal]]:
     """Read numeric fields from the latest version of each generated JSON output."""
 
-    latest: dict[str, Path] = {}
-    for artifact in computation.artifacts if computation else []:
-        path = Path(artifact.path)
-        if (
-            path.suffix.lower() != ".json"
-            or _is_report_output(path, "figures")
-            or _is_report_output(path, "tables")
-        ):
-            continue
-        latest[_logical_json_output_key(path)] = path
+    if computation and computation.records:
+        latest = {
+            key: Path(path)
+            for key, path in _authoritative_json_outputs(computation.records).items()
+        }
+    else:
+        latest = {}
+        for artifact in computation.artifacts if computation else []:
+            path = Path(artifact.path)
+            if (
+                path.suffix.lower() != ".json"
+                or _is_report_output(path, "figures")
+                or _is_report_output(path, "tables")
+            ):
+                continue
+            latest[("", _logical_json_output_key(path))] = path
 
     numbers: dict[str, list[Decimal]] = {}
     for path in latest.values():
@@ -756,6 +789,46 @@ def _numeric_cell_agrees(cell: str, source: Decimal) -> bool:
     digits = min(len(significant) if significant else 1, 4)
     rounding_unit = Decimal(1).scaleb(source.copy_abs().adjusted() - digits + 1)
     return abs(displayed - source) <= rounding_unit / 2
+
+
+def _reported_degrees_of_freedom_findings(
+    results_text: str,
+    machine_numbers: dict[str, list[Decimal]],
+) -> list[LintFinding]:
+    candidates = {
+        value
+        for key in (
+            "df",
+            "df_welch",
+            "welch_df",
+            "degrees_freedom",
+            "degrees_of_freedom",
+        )
+        for value in machine_numbers.get(key, [])
+    }
+    if not candidates:
+        return []
+    findings = []
+    for match in re.finditer(
+        r"\bdf\s*(?:[=:≈~]\s*)?([0-9]+(?:\.[0-9]+)?)",
+        results_text,
+        flags=re.IGNORECASE,
+    ):
+        reported = match.group(1)
+        if any(_numeric_cell_agrees(reported, candidate) for candidate in candidates):
+            continue
+        findings.append(
+            LintFinding(
+                code="reported_degrees_of_freedom_not_in_machine_results",
+                location="results",
+                message=(
+                    f"Reported df={reported} does not match any degrees of freedom "
+                    "in the latest successful machine-readable results; correct the "
+                    "article from the authoritative computation artifact."
+                ),
+            )
+        )
+    return findings
 
 
 def _table_json_numeric_mismatches(
@@ -1014,6 +1087,7 @@ def validate_report(
                 )
             )
     records = computation.records if computation else []
+    authoritative_json = _authoritative_json_outputs(records)
     for record in records:
         if record.status != "succeeded":
             continue
@@ -1045,13 +1119,14 @@ def validate_report(
                 or path.suffix.lower() != ".json"
             ):
                 continue
+            artifact_findings: list[LintFinding] = []
             try:
                 generated_document = json.loads(
                     path.read_text(encoding="utf-8"),
                     parse_constant=_reject_nonfinite_json,
                 )
             except (OSError, UnicodeError, ValueError) as exc:
-                findings.append(
+                artifact_findings.append(
                     LintFinding(
                         code="invalid_generated_json",
                         location=str(path),
@@ -1062,8 +1137,27 @@ def validate_report(
                     )
                 )
             else:
-                findings.extend(
+                artifact_findings.extend(
                     _inferential_consistency_findings(path, generated_document)
+                )
+            is_authoritative = authoritative_json.get(
+                (record.language, _logical_json_output_key(path))
+            ) == os.path.normpath(str(path))
+            if is_authoritative:
+                findings.extend(artifact_findings)
+            else:
+                findings.extend(
+                    finding.model_copy(
+                        update={
+                            "code": f"superseded_{finding.code}",
+                            "message": (
+                                "A later successful artifact superseded this finding; "
+                                f"historical issue retained for audit: {finding.message}"
+                            ),
+                            "blocking": False,
+                        }
+                    )
+                    for finding in artifact_findings
                 )
     for language in required_languages:
         successful_outputs = [
@@ -1207,6 +1301,10 @@ def validate_report(
         )
     )
     report_text = " ".join(report_text.split())
+    machine_numbers = _machine_json_numbers(computation)
+    findings.extend(
+        _reported_degrees_of_freedom_findings(report.results, machine_numbers)
+    )
     if _OVERSTATED_SENSITIVITY_LANGUAGE.search(report_text):
         findings.append(
             LintFinding(
@@ -1601,7 +1699,6 @@ def validate_report(
     article_text = "\n".join(
         [" ".join(report.methods), report.results, report.discussion]
     )
-    machine_numbers = _machine_json_numbers(computation)
     known_claim_ids = set(claim_ids)
     known_source_ids = set(source_ids)
     for index, display in enumerate(report.displays):

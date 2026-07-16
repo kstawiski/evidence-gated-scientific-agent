@@ -242,9 +242,14 @@ artifact-producing call in every required computation language and any required
 cross-language reconciliation before retrieving optional additional papers.
 use run_python_analysis and/or run_r_analysis. Read inputs from /workspace and
 write all result tables, figures, and machine-readable summaries under /output.
-For list_workspace, read_text_file, and search_workspace, pass a workspace-relative
-path such as `known_effect.csv`; the `/workspace/...` form is the equivalent path
-inside Python/R sandbox code, not a requirement for inspection-tool arguments.
+For list_workspace and search_workspace, pass a workspace-relative path such as
+`known_effect.csv`. read_text_file normally uses the same workspace-relative form;
+during repair it may also receive an exact controller-registered absolute host path
+shown in existing_computation_evidence for a successful generated CSV, JSON, JSONL,
+Markdown, TSV, or text artifact. Arbitrary absolute paths remain denied. The
+`/workspace/...`, `/prior/...`, and `/history/...` forms use a separate namespace.
+They are available inside Python/R sandbox code and must not be passed to workspace
+listing or search tools.
 Put final report figures below /output/figures and final report tables below
 /output/tables; put intermediate data and diagnostics below /output/data.
 The output subdirectories are not precreated: before every write, Python must use
@@ -300,9 +305,12 @@ for example `xerr=[[estimate-low], [high-estimate]]`.
 When a later analysis needs an earlier call's artifact, read it from
 /prior/<execution-id>/output/<filename>. During a repair, outputs from an earlier
 attempt are read-only at /history/attempt-N/<execution-id>/output/<filename>;
-map the attempt name from the recorded host artifact path. If a needed Python or R package is not
-available, use the corresponding isolated package-install tool and then retry;
-only canonical PyPI, CRAN, and Bioconductor packages are permitted.
+map the attempt name from the recorded host artifact path. These `/prior` and
+`/history` paths are only for code submitted to run_python_analysis or
+run_r_analysis. For direct bounded inspection without a computation call, pass the
+exact registered host artifact path to read_text_file. If a needed Python or R
+package is not available, use the corresponding isolated package-install tool and
+then retry; only canonical PyPI, CRAN, and Bioconductor packages are permitted.
 Each analysis-tool response already includes bounded previews of text outputs and
 the exact host artifact paths needed by the report. Do not try to reopen /output
 with workspace tools. A failed or timed-out call does not satisfy a requested
@@ -501,7 +509,10 @@ instead of stopping after the first defect. Primary estimates and uncertainty
 belong in Results; Discussion must interpret rather than duplicate the Results
 paragraph; Conclusions must lead with the scientific answer rather than workflow
 machinery. Explicitly audit recommendations, dominance/robustness language, and
-each precise number wherever they appear in the abstract or body. Treat
+each precise number wherever they appear in the abstract or body. Recompute or
+cross-check every reported test statistic, degrees of freedom, p-value, and
+confidence interval against the latest successful machine-readable artifact; an
+earlier superseded execution is provenance, not the result. Treat
 nonsignificant Shapiro-Wilk or Levene tests as failure to detect a departure,
 not proof that assumptions are met. Similar primary and adjusted estimates support
 a bounded numerical comparison, not absence of confounding, algorithmic
@@ -579,6 +590,10 @@ metadata together.
 For figures, compare the actual chart type, x/y variables, axis labels and units,
 groups, colors/symbols, legends, annotations, sample sizes, estimates, and
 uncertainty encodings with the title, caption, alt text, and article. Explicitly
+verify every caption claim about mark orientation and geometry (horizontal versus
+vertical bars, lines, intervals, panels, or brackets) against the pixels; a short
+perpendicular cap is not the same mark as the interval or error-bar stem.
+Explicitly
 block any panel that places quantities with incompatible units or meanings on a
 single numeric axis (for example, a raw mean difference and a standardized
 effect size), unless separate scales are unmistakably encoded and justified.

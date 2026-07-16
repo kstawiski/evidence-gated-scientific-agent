@@ -1,0 +1,19 @@
+{
+  "case": "known-effect",
+  "commit": "6162ba99a09f181771e705b327ed0f0d4ecfd037",
+  "deployed_image": "sha256:38a1243043b069bfb9d7e928120fad94ffd9200d4acda5d816af6654b3ca981f",
+  "evaluated_at": "2026-07-16T03:43:43Z",
+  "evaluator_after_provenance_fix": {
+    "passed": true,
+    "score": 18,
+    "total": 18
+  },
+  "manual_scientific_merit_review": {
+    "passed": false,
+    "blocking_issue": "Final Results reported df approximately 564.06 while both corrected Python and R artifacts reported df=38.",
+    "lesson": "Artifact correctness is insufficient when narrative numbers are not deterministically checked against the latest machine-readable result."
+  },
+  "run_id": "3d186baf-7a30-437a-900a-9fbc03e89b66",
+  "service_status": "supported",
+  "workspace_id": "a066091f-0fc3-455c-bc23-069682c83aee"
+}

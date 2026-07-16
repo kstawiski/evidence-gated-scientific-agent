@@ -2207,14 +2207,29 @@ async def _produce_report(
 ]:
     _cancel_checkpoint(cancel_event)
     toolsets = build_mcp_toolsets(settings, mcp_names) if mcp_names else []
-    workspace_tools = build_workspace_tools(settings.workspace)
+    repairing = prior_report is not None
+    executor = None
+
+    def registered_generated_artifacts() -> tuple[ArtifactRef, ...]:
+        artifacts = (
+            list(existing_computation.artifacts)
+            if repairing and existing_computation is not None
+            else []
+        )
+        if executor is not None:
+            artifacts.extend(executor.evidence().artifacts)
+        return tuple(artifacts)
+
+    workspace_tools = build_workspace_tools(
+        settings.workspace,
+        registered_artifacts=registered_generated_artifacts,
+    )
     literature = LiteratureAcquirer(
         settings.workspace,
         settings.literature,
         pdf_text_extractor=RemotePdfTextExtractor(settings.sandbox),
     )
     literature_tools = build_literature_tools(literature)
-    executor = None
     analysis_tools = []
     environment_tools = []
     packages_enabled = bool(
@@ -2348,7 +2363,6 @@ async def _produce_report(
             )
         return policy_response
 
-    repairing = prior_report is not None
     research_agent = Agent(
         name="qwen_research_repairer" if repairing else "qwen_researcher",
         model=qwen_model(

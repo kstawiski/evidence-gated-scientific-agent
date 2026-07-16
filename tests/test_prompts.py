@@ -20,8 +20,13 @@ def test_researcher_forbids_mixed_effect_scales_and_zero_rounded_p_values():
     assert "never as zero after fixed-decimal rounding" in RESEARCHER
     assert "workspace-relative" in RESEARCHER
     assert "inside Python/R sandbox code" in RESEARCHER
+    assert "exact controller-registered absolute host path" in RESEARCHER
+    assert "Arbitrary absolute paths remain denied" in RESEARCHER
+    assert "only for code submitted to run_python_analysis" in RESEARCHER
     assert "parent.mkdir(parents=True, exist_ok=True)" in RESEARCHER
     assert "dir.create(dirname(target), recursive=TRUE" in RESEARCHER
+    assert "cross-check every reported test statistic" in REPORT_AUDITOR
+    assert "horizontal versus\nvertical bars" in DISPLAY_AUDITOR
 
 
 def test_planners_do_not_invent_input_names_or_qwen_visual_audits():

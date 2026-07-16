@@ -1334,6 +1334,136 @@ def test_t_df_and_p_value_must_be_arithmetically_consistent(tmp_path):
         finding.code for finding in valid.findings
     }
 
+    mismatched_prose = validate_report(
+        article_report(
+            results=(
+                "The Welch test gave t=10.90 (df ≈ 564.06), p=2.97e-13, "
+                "with a mean difference of 5.0."
+            )
+        ),
+        computation=ComputationEvidence(records=[record], artifacts=[artifact]),
+    )
+    assert "reported_degrees_of_freedom_not_in_machine_results" in {
+        finding.code for finding in mismatched_prose.findings
+    }
+
+    matching_prose = validate_report(
+        article_report(results="The Welch test gave t=10.90 (df = 38)."),
+        computation=ComputationEvidence(records=[record], artifacts=[artifact]),
+    )
+    assert "reported_degrees_of_freedom_not_in_machine_results" not in {
+        finding.code for finding in matching_prose.findings
+    }
+
+
+def test_inferential_check_rejects_impossible_two_sided_p_value_alias(tmp_path):
+    findings = _inferential_consistency_findings(
+        tmp_path / "python_results.json",
+        {
+            "welch_t_test": {
+                "t_statistic": 10.897247358851683,
+                "degrees_of_freedom": 564.0624999999999,
+                "p_value_two_sided": 2.971749478841818e-13,
+            }
+        },
+    )
+
+    assert "inferential_statistic_inconsistent" in {
+        finding.code for finding in findings
+    }
+
+
+def test_report_df_check_preserves_same_logical_output_from_each_language(tmp_path):
+    artifacts = []
+    records = []
+    for language, degrees_freedom in (("python", 10.0), ("r", 20.0)):
+        path = tmp_path / language / "exec-001" / "output" / "data" / "results.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            json.dumps({"degrees_of_freedom": degrees_freedom}), encoding="utf-8"
+        )
+        artifact = ArtifactRef(
+            path=str(path),
+            sha256=sha256_file(path),
+            description="sandbox-generated analysis artifact",
+        )
+        artifacts.append(artifact)
+        records.append(
+            ComputationRecord(
+                execution_id=f"exec-{language}",
+                language=language,
+                code_sha256="a" * 64,
+                started_at="2026-07-15T00:00:00Z",
+                duration_seconds=1,
+                exit_code=0,
+                status="succeeded",
+                stdout_path=str(tmp_path / language / "stdout.txt"),
+                stderr_path=str(tmp_path / language / "stderr.txt"),
+                artifacts=[artifact],
+            )
+        )
+
+    validation = validate_report(
+        article_report(results="Python reported df = 10."),
+        computation=ComputationEvidence(records=records, artifacts=artifacts),
+    )
+
+    assert "reported_degrees_of_freedom_not_in_machine_results" not in {
+        finding.code for finding in validation.findings
+    }
+
+
+def test_corrected_logical_json_supersedes_bad_inferential_tuple(tmp_path):
+    artifacts = []
+    records = []
+    for attempt, degrees_freedom in (("attempt-0", 564.0625), ("attempt-1", 38.0)):
+        path = tmp_path / attempt / "exec-001" / "output" / "data" / "results.json"
+        path.parent.mkdir(parents=True)
+        path.write_text(
+            json.dumps(
+                {
+                    "t_statistic": 10.897247358851683,
+                    "degrees_of_freedom": degrees_freedom,
+                    "p_value_two_sided": 2.971749478841818e-13,
+                }
+            ),
+            encoding="utf-8",
+        )
+        artifact = ArtifactRef(
+            path=str(path),
+            sha256=sha256_file(path),
+            description="sandbox-generated analysis artifact",
+        )
+        artifacts.append(artifact)
+        records.append(
+            ComputationRecord(
+                execution_id=f"exec-{attempt}",
+                language="python",
+                code_sha256="a" * 64,
+                started_at="2026-07-15T00:00:00Z",
+                duration_seconds=1,
+                exit_code=0,
+                status="succeeded",
+                stdout_path=str(tmp_path / attempt / "stdout.txt"),
+                stderr_path=str(tmp_path / attempt / "stderr.txt"),
+                artifacts=[artifact],
+            )
+        )
+
+    validation = validate_report(
+        article_report(),
+        computation=ComputationEvidence(records=records, artifacts=artifacts),
+    )
+
+    assert validation.passed
+    superseded = [
+        finding
+        for finding in validation.findings
+        if finding.code == "superseded_inferential_statistic_inconsistent"
+    ]
+    assert len(superseded) == 1
+    assert superseded[0].blocking is False
+
 
 def test_inferential_check_supports_repo_aliases_and_signed_one_sided_tests(tmp_path):
     path = tmp_path / "inferential.json"

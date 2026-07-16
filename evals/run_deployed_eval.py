@@ -142,7 +142,53 @@ def _language_result(
     computation: dict,
     generated: dict[str, object],
     language: str,
+    reconciliation: dict | None = None,
 ) -> dict | None:
+    if isinstance(reconciliation, dict):
+        comparisons = reconciliation.get("comparisons")
+        bound_digests = []
+        for comparison in comparisons if isinstance(comparisons, list) else []:
+            if not isinstance(comparison, dict):
+                continue
+            source = comparison.get(language)
+            if isinstance(source, dict) and isinstance(
+                source.get("artifact_sha256"), str
+            ):
+                bound_digests.append(source["artifact_sha256"].lower())
+        bound_values = []
+        for digest in sorted(set(bound_digests)):
+            bound_paths = [
+                artifact.get("path", "")
+                for record in computation.get("records", [])
+                if record.get("language") == language
+                and record.get("status") == "succeeded"
+                for artifact in record.get("artifacts", [])
+                if artifact.get("description") == "sandbox-generated analysis artifact"
+                and str(artifact.get("sha256", "")).lower() == digest
+            ]
+            if not bound_paths:
+                return None
+            digest_values = []
+            for manifest_path, value in generated.items():
+                if isinstance(value, dict) and any(
+                    path.endswith(manifest_path) for path in bound_paths
+                ):
+                    digest_values.append(value)
+            if not digest_values:
+                return None
+            bound_values.extend(digest_values)
+        if bound_digests:
+            return next(
+                (
+                    value
+                    for value in bound_values
+                    if _known_effect_matches_reference(value)
+                ),
+                None,
+            )
+        if isinstance(comparisons, list):
+            return None
+
     artifact_paths = [
         artifact["path"]
         for record in computation.get("records", [])
@@ -176,18 +222,22 @@ def _known_effect_matches_reference(value: dict) -> bool:
     expected = {
         ("n_treatment", "treatment_n"): 20.0,
         ("n_control", "control_n"): 20.0,
-        ("treatment_mean_change",): 5.0,
-        ("control_mean_change",): 0.0,
+        ("treatment_mean_change", "mean_change_treatment"): 5.0,
+        ("control_mean_change", "mean_change_control"): 0.0,
         (
             "mean_difference",
             "mean_difference_treatment_minus_control",
         ): 5.0,
         ("welch_t_statistic", "t_statistic"): 10.897247358851683,
-        ("degrees_of_freedom", "welch_df"): 38.0,
-        ("ci_95_lower",): 4.071144254485707,
-        ("ci_95_upper",): 5.928855745514293,
+        ("degrees_of_freedom", "welch_df", "df_welch"): 38.0,
+        ("ci_95_lower", "ci_lower_95"): 4.071144254485707,
+        ("ci_95_upper", "ci_upper_95"): 5.928855745514293,
         ("pooled_sd",): 1.4509525002200232,
-        ("hedges_g_correction_J", "j_correction"): 0.9801324503311258,
+        (
+            "hedges_g_correction_J",
+            "j_correction",
+            "J_correction",
+        ): 0.9801324503311258,
         ("hedges_g",): 3.3775483697174717,
     }
     if not all(
@@ -196,7 +246,7 @@ def _known_effect_matches_reference(value: dict) -> bool:
     ):
         return False
     return math.isclose(
-        _metric(value, "p_value"),
+        _metric(value, "p_value", "p_value_two_sided"),
         2.971749478841818e-13,
         rel_tol=1e-6,
         abs_tol=1e-18,
@@ -364,9 +414,13 @@ def score(
                 break
         generated_paths = {item["path"] for item in computation.get("artifacts", [])}
         if case_name == "known-effect":
-            python_result = _language_result(computation, generated_json, "python")
-            r_result = _language_result(computation, generated_json, "r")
             reconciliation = _latest_reconciliation(computation, generated_json)
+            python_result = _language_result(
+                computation, generated_json, "python", reconciliation
+            )
+            r_result = _language_result(
+                computation, generated_json, "r", reconciliation
+            )
             checks["planted_effect_recovered"] = bool(
                 isinstance(python_result, dict)
                 and isinstance(r_result, dict)

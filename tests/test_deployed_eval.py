@@ -109,6 +109,216 @@ def test_language_result_prefers_complete_reference_over_display_values():
     assert selected is complete
 
 
+def test_language_result_follows_reconciliation_artifact_hash():
+    full_path = "computations/a/output/data/python_results.json"
+    rounded_path = "computations/b/output/data/rounded_results.json"
+    full = {
+        "n_treatment": 20,
+        "n_control": 20,
+        "treatment_mean_change": 5.0,
+        "control_mean_change": 0.0,
+        "mean_difference": 5.0,
+        "welch_t_statistic": 10.897247358851683,
+        "degrees_of_freedom": 38.0,
+        "p_value": 2.971749478841818e-13,
+        "ci_95_lower": 4.071144254485707,
+        "ci_95_upper": 5.928855745514293,
+        "pooled_sd": 1.4509525002200232,
+        "hedges_g_correction_J": 0.9801324503311258,
+        "hedges_g": 3.3775483697174717,
+    }
+    rounded = {"mean_difference": 5.0, "hedges_g": 3.378}
+    computation = {
+        "records": [
+            {
+                "language": "python",
+                "status": "succeeded",
+                "artifacts": [
+                    {
+                        "path": full_path,
+                        "sha256": "a" * 64,
+                        "description": "sandbox-generated analysis artifact",
+                    },
+                    {
+                        "path": rounded_path,
+                        "sha256": "b" * 64,
+                        "description": "sandbox-generated analysis artifact",
+                    },
+                ],
+            }
+        ]
+    }
+    reconciliation = {
+        "comparisons": [
+            {"python": {"artifact_sha256": "a" * 64}},
+        ]
+    }
+
+    selected = _language_result(
+        computation,
+        {rounded_path: rounded, full_path: full},
+        "python",
+        reconciliation,
+    )
+
+    assert selected is full
+
+
+def test_language_result_uses_complete_bound_artifact_independent_of_order():
+    partial_path = "computations/a/output/data/partial.json"
+    complete_path = "computations/b/output/data/complete.json"
+    partial = {"mean_difference": 5.0, "hedges_g": 3.378}
+    complete = {
+        "n_treatment": 20,
+        "n_control": 20,
+        "treatment_mean_change": 5.0,
+        "control_mean_change": 0.0,
+        "mean_difference": 5.0,
+        "welch_t_statistic": 10.897247358851683,
+        "degrees_of_freedom": 38.0,
+        "p_value": 2.971749478841818e-13,
+        "ci_95_lower": 4.071144254485707,
+        "ci_95_upper": 5.928855745514293,
+        "pooled_sd": 1.4509525002200232,
+        "hedges_g_correction_J": 0.9801324503311258,
+        "hedges_g": 3.3775483697174717,
+    }
+    computation = {
+        "records": [
+            {
+                "language": "python",
+                "status": "succeeded",
+                "artifacts": [
+                    {
+                        "path": partial_path,
+                        "sha256": "a" * 64,
+                        "description": "sandbox-generated analysis artifact",
+                    },
+                    {
+                        "path": complete_path,
+                        "sha256": "b" * 64,
+                        "description": "sandbox-generated analysis artifact",
+                    },
+                ],
+            }
+        ]
+    }
+    reconciliation = {
+        "comparisons": [
+            {"python": {"artifact_sha256": "b" * 64}},
+            {"python": {"artifact_sha256": "a" * 64}},
+        ]
+    }
+
+    selected = _language_result(
+        computation,
+        {partial_path: partial, complete_path: complete},
+        "python",
+        reconciliation,
+    )
+
+    assert selected is complete
+
+
+def test_language_result_fails_closed_for_unresolved_bound_digest():
+    result_path = "computations/a/output/data/complete.json"
+    complete = {
+        "n_treatment": 20,
+        "n_control": 20,
+        "treatment_mean_change": 5.0,
+        "control_mean_change": 0.0,
+        "mean_difference": 5.0,
+        "welch_t_statistic": 10.897247358851683,
+        "degrees_of_freedom": 38.0,
+        "p_value": 2.971749478841818e-13,
+        "ci_95_lower": 4.071144254485707,
+        "ci_95_upper": 5.928855745514293,
+        "pooled_sd": 1.4509525002200232,
+        "hedges_g_correction_J": 0.9801324503311258,
+        "hedges_g": 3.3775483697174717,
+    }
+    computation = {
+        "records": [
+            {
+                "language": "python",
+                "status": "succeeded",
+                "artifacts": [
+                    {
+                        "path": result_path,
+                        "sha256": "a" * 64,
+                        "description": "sandbox-generated analysis artifact",
+                    }
+                ],
+            }
+        ]
+    }
+    reconciliation = {"comparisons": [{"python": {"artifact_sha256": "c" * 64}}]}
+
+    assert (
+        _language_result(
+            computation,
+            {result_path: complete},
+            "python",
+            reconciliation,
+        )
+        is None
+    )
+
+
+def test_language_result_fails_closed_when_typed_reconciliation_omits_language():
+    result_path = "computations/a/output/data/r_complete.json"
+    complete = {
+        "n_treatment": 20,
+        "n_control": 20,
+        "treatment_mean_change": 5.0,
+        "control_mean_change": 0.0,
+        "mean_difference": 5.0,
+        "welch_t_statistic": 10.897247358851683,
+        "degrees_of_freedom": 38.0,
+        "p_value": 2.971749478841818e-13,
+        "ci_95_lower": 4.071144254485707,
+        "ci_95_upper": 5.928855745514293,
+        "pooled_sd": 1.4509525002200232,
+        "hedges_g_correction_J": 0.9801324503311258,
+        "hedges_g": 3.3775483697174717,
+    }
+    computation = {
+        "records": [
+            {
+                "language": "r",
+                "status": "succeeded",
+                "artifacts": [
+                    {
+                        "path": result_path,
+                        "sha256": "b" * 64,
+                        "description": "sandbox-generated analysis artifact",
+                    }
+                ],
+            }
+        ]
+    }
+    reconciliation = {
+        "comparisons": [
+            {
+                "metric": "mean_difference",
+                "python": {"artifact_sha256": "a" * 64},
+                "absolute_difference": 0.0,
+                "passed": True,
+            }
+        ]
+    }
+
+    assert (
+        _language_result(
+            computation,
+            {result_path: complete},
+            "r",
+            reconciliation,
+        )
+        is None
+    )
+
+
 def test_known_effect_accepts_nested_language_artifact_field_names():
     value = {
         "primary": {
@@ -126,6 +336,32 @@ def test_known_effect_accepts_nested_language_artifact_field_names():
             "j_correction": 0.9801324503311258,
             "hedges_g": 3.3775483697174717,
         }
+    }
+
+    assert _known_effect_matches_reference(value) is True
+
+
+def test_known_effect_accepts_deployed_python_and_r_field_names():
+    value = {
+        "primary": {
+            "mean_difference": 5.0,
+            "t_statistic": 10.897247358851683,
+            "df_welch": 38.0,
+            "p_value": 2.971749478841818e-13,
+            "ci_lower_95": 4.071144254485707,
+            "ci_upper_95": 5.928855745514293,
+        },
+        "effect_size": {
+            "pooled_sd": 1.4509525002200232,
+            "J_correction": 0.9801324503311258,
+            "hedges_g": 3.3775483697174717,
+        },
+        "descriptive": {
+            "n_treatment": 20,
+            "n_control": 20,
+            "mean_change_treatment": 5.0,
+            "mean_change_control": 0.0,
+        },
     }
 
     assert _known_effect_matches_reference(value) is True

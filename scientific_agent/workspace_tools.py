@@ -2,15 +2,24 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
+import stat
+from collections.abc import Callable, Iterable
 from pathlib import Path
+
+from .schemas import ArtifactRef
 
 
 MAX_READ_BYTES = 2 * 1024 * 1024
 MAX_SEARCH_HITS = 200
+GENERATED_TEXT_SUFFIXES = {".csv", ".json", ".jsonl", ".md", ".tsv", ".txt"}
 
 
-def build_workspace_tools(root: Path):
+def build_workspace_tools(
+    root: Path,
+    registered_artifacts: Callable[[], Iterable[ArtifactRef]] | None = None,
+):
     workspace = root.resolve()
 
     def resolve(path: str) -> Path:
@@ -28,6 +37,47 @@ def build_workspace_tools(root: Path):
         if resolved != workspace and workspace not in resolved.parents:
             raise ValueError(f"path escapes workspace: {path}")
         return resolved
+
+    def resolve_registered_artifact(path: str) -> tuple[Path, str]:
+        if registered_artifacts is None:
+            raise ValueError(f"path escapes workspace: {path}")
+        for artifact in registered_artifacts():
+            if (
+                path != artifact.path
+                or artifact.description != "sandbox-generated analysis artifact"
+                or not artifact.sha256
+                or not re.fullmatch(r"[0-9a-fA-F]{64}", artifact.sha256)
+            ):
+                continue
+            candidate = Path(path)
+            if (
+                not candidate.is_absolute()
+                or candidate.suffix.casefold() not in GENERATED_TEXT_SUFFIXES
+            ):
+                break
+            resolved = candidate.resolve(strict=True)
+            if resolved != candidate:
+                raise ValueError(
+                    f"registered computation artifact path contains a symlink: {path}"
+                )
+            current = candidate
+            while True:
+                if stat.S_ISLNK(current.lstat().st_mode):
+                    raise ValueError(
+                        "registered computation artifact path contains a symlink: "
+                        f"{path}"
+                    )
+                if current == current.parent:
+                    break
+                current = current.parent
+            if not stat.S_ISREG(candidate.lstat().st_mode):
+                raise ValueError(
+                    f"registered computation artifact is not a regular file: {path}"
+                )
+            return candidate, artifact.sha256.casefold()
+        raise ValueError(
+            f"absolute path is not an exact registered successful text artifact: {path}"
+        )
 
     def list_workspace(path: str = ".") -> dict:
         """List files and directories inside the assigned workspace.
@@ -49,22 +99,44 @@ def build_workspace_tools(root: Path):
             return {"error": str(exc)}
 
     def read_text_file(path: str) -> dict:
-        """Read a bounded UTF-8 text file inside the assigned workspace.
+        """Read bounded UTF-8 workspace or registered computation text.
 
         Args:
-            path: Relative file path within the assigned workspace.
+            path: A workspace-relative path, or the exact absolute path of a
+                controller-registered successful generated text artifact.
         """
         try:
-            target = resolve(path)
+            candidate = Path(path)
+            registered_hash = None
+            if candidate.is_absolute() and candidate.parts[:2] != ("/", "workspace"):
+                target, registered_hash = resolve_registered_artifact(path)
+            else:
+                target = resolve(path)
             size = target.stat().st_size
             if size > MAX_READ_BYTES:
                 return {
                     "error": f"file exceeds {MAX_READ_BYTES} byte read limit",
                     "bytes": size,
                 }
+            data = target.read_bytes()
+            if registered_hash is not None:
+                observed_hash = hashlib.sha256(data).hexdigest()
+                if observed_hash != registered_hash:
+                    return {
+                        "error": "registered computation artifact hash mismatch",
+                        "path": str(target),
+                        "expected_sha256": registered_hash,
+                        "observed_sha256": observed_hash,
+                    }
+                return {
+                    "path": str(target),
+                    "content": data.decode("utf-8", errors="replace"),
+                    "source": "registered_computation_artifact",
+                    "sha256": observed_hash,
+                }
             return {
                 "path": str(target.relative_to(workspace)),
-                "content": target.read_text(encoding="utf-8", errors="replace"),
+                "content": data.decode("utf-8", errors="replace"),
             }
         except Exception as exc:
             return {"error": str(exc)}

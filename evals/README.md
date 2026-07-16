@@ -65,6 +65,7 @@ repository does not embed them.
 | Managed browser boundary | **PASS** | The service-owned Chromium CDP session and passwordless trusted-network noVNC view were reachable through their intended gateways; CDP stayed unpublished, direct Internet and private proxy targets were denied, downloads/profile data survived restart, and the application saw downloads read-only. |
 | Manuscript-package stress run (pre-fix) | **FAILED MERIT GATE** | Run `18b7b94f-6d3a-4c0c-941c-cc6b96ce0aeb` correctly stopped at `requires_human_decision`, but consumed all four repairs. It recovered bounded Python failures and improved scientific scope/PubMed anchoring; however, the critic invented manuscript-plus-supplement word-count arithmetic, treated permitted placeholders as blockers, and later lost article review to invalid TIFF display preparation. This retained failure directly motivated task-scope critic constraints, controller TIFF/PDF/archive rendering, Gemma-only source-image review, and preservation of article audits when display preparation fails. |
 | Fresh planted-effect run (pre visual-clearance fix) | **FAILED MERIT GATE** | Run `4d143e16-3616-4f7b-8b38-7a9c1ea4f3fe` recovered and reconciled the exact Python/R statistics, but incorrectly labeled the prespecified task exploratory and accepted a visibly overlapping figure after a bare Gemma pass. The run is rejected despite its terminal `supported` status. It directly motivated controller-enforced task risk/method locks, exact per-display Gemma clearance attestations, and evaluator support for the valid nested result shapes. |
+| Fresh planted-effect run (pre narrative-number fix) | **FAILED MERIT GATE** | Run `3d186baf-7a30-437a-900a-9fbc03e89b66` repaired the computation, passed deterministic and Gemma artifact/display review, and rescored 18/18 after provenance-aware evaluator selection. Manual review still rejected it because Results retained an obsolete `df≈564.06` from the superseded Python execution while both corrected implementations reported `df=38`. This motivated deterministic report-to-artifact degrees-of-freedom checking and explicit critic instructions to use the latest successful machine result. |
 
 The PubMed gate's scored JSON and full provenance bundle are retained with the
 deployment evaluation artifacts. The local paper copies are hash verified and
@@ -85,6 +86,8 @@ The retained manuscript stress failure is summarized in
 [`results/v0.4.0-manuscript-stress-pre-fix.json`](results/v0.4.0-manuscript-stress-pre-fix.json).
 The rejected fresh planted-effect run and its implemented repairs are summarized in
 [`results/v0.4.0-known-effect-fresh-pre-visual-gate.json`](results/v0.4.0-known-effect-fresh-pre-visual-gate.json).
+The later artifact-passing but narrative-invalid planted-effect run is summarized in
+[`results/v0.4.0-known-effect-pre-narrative-gate.json`](results/v0.4.0-known-effect-pre-narrative-gate.json).
 
 The A2A evidence is retained as
 [`results/v0.4.0-a2a-live.json`](results/v0.4.0-a2a-live.json). The server uses

@@ -481,6 +481,14 @@ bare `all_pass: true` is invalid. Exact generated-artifact paths mistakenly plac
 in a claim's `evidence_refs` are converted to stable, inspectable `SourceRecord`
 IDs only when the path exactly matches successful computation evidence. Unknown
 paths still fail validation.
+Generated JSON containing a t statistic, degrees of freedom, and p-value is also
+checked against the Student-t distribution; an impossible tuple blocks the report.
+If a critic asks for more display decimals for the same table where the controller
+has found excessive precision, the raw critic response remains inspectable but the
+contradictory blocker is discarded. OCR alone cannot overrule direct visual review:
+a typo blocker is discarded only when Gemma gives two incompatible direct readings
+of the same exact display element and OCR from that display corroborates the
+proposed correction. Metadata-versus-raster disagreement remains a real defect.
 
 Each run creates a mode-0700 directory under `runs/` containing the typed plan,
 lint result, report, Gemma audit, run configuration, private size-bounded MCP

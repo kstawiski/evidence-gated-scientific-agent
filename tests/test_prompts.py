@@ -1,4 +1,5 @@
 from scientific_agent.prompts import (
+    DISPLAY_AUDITOR,
     INPUT_VISUAL_AUDITOR,
     PLAN_AUDITOR,
     PLANNER_A,
@@ -128,6 +129,13 @@ def test_report_auditor_does_not_invent_submission_readiness_rules():
     assert "A placeholder explicitly permitted" in REPORT_AUDITOR
     assert "unresolved nonblocking question" in REPORT_AUDITOR
     assert "fixed schema with task-specific top-level headings" in REPORT_AUDITOR
+    assert "deterministic display validator is authoritative" in REPORT_AUDITOR
+    assert "never demand more decimal" in REPORT_AUDITOR
+
+
+def test_display_auditor_does_not_force_ocr_contradicted_typo_repairs():
+    assert "controller OCR disagree" in DISPLAY_AUDITOR
+    assert "return inconclusive for that label" in DISPLAY_AUDITOR
 
 
 def test_report_contract_does_not_register_extracted_source_images_as_displays():
@@ -135,6 +143,13 @@ def test_report_contract_does_not_register_extracted_source_images_as_displays()
         assert "logical /output/figures or /output/tables" in prompt
         assert "archive extraction copy" in prompt
         assert "intermediate visual-review raster" in prompt
+
+
+def test_report_writer_respects_non_readiness_scope_and_separate_word_counts():
+    for prompt in (REPORTER, REPAIRER):
+        assert "excludes submission readiness" in prompt
+        assert "Never combine main-manuscript and supplement word counts" in prompt
+        assert "placeholder explicitly permitted" in prompt
 
 
 def test_report_contract_scopes_method_recommendations_and_literature_reviews():

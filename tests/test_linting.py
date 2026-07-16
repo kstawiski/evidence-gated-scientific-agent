@@ -1,8 +1,13 @@
+import builtins
 import json
 
 from PIL import Image
 
-from scientific_agent.linting import lint_plan, validate_report
+from scientific_agent.linting import (
+    _inferential_consistency_findings,
+    lint_plan,
+    validate_report,
+)
 from scientific_agent.provenance import sha256_file
 from scientific_agent.schemas import (
     CheckSpec,
@@ -1236,6 +1241,193 @@ def test_computed_diagnostic_must_exist_in_cited_artifact(tmp_path):
 
     assert "computed_diagnostic_not_in_artifact" in {
         finding.code for finding in validation.findings
+    }
+
+
+def test_t_df_and_p_value_must_be_arithmetically_consistent(tmp_path):
+    result_path = tmp_path / "inferential.json"
+    result_path.write_text(
+        json.dumps(
+            {
+                "primary": {
+                    "t_statistic": 12.809215162980795,
+                    "degrees_freedom": 76,
+                    "p_value": 2.3070327275079796e-15,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    artifact = ArtifactRef(
+        path=str(result_path),
+        sha256=sha256_file(result_path),
+        description="sandbox-generated analysis artifact",
+    )
+    record = ComputationRecord(
+        execution_id="exec-001",
+        language="python",
+        code_sha256="a" * 64,
+        started_at="2026-07-15T00:00:00Z",
+        duration_seconds=1,
+        exit_code=0,
+        status="succeeded",
+        stdout_path=str(tmp_path / "stdout.txt"),
+        stderr_path=str(tmp_path / "stderr.txt"),
+        artifacts=[artifact],
+    )
+
+    invalid = validate_report(
+        article_report(),
+        computation=ComputationEvidence(records=[record], artifacts=[artifact]),
+    )
+    assert "inferential_statistic_inconsistent" in {
+        finding.code for finding in invalid.findings
+    }
+
+    result_path.write_text(
+        json.dumps(
+            {
+                "primary": {
+                    "t_statistic": "12.809215162980795",
+                    "degrees_freedom": "38",
+                    "p_value": "2.3070327275079796e-15",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    string_bypass = validate_report(
+        article_report(),
+        computation=ComputationEvidence(records=[record], artifacts=[artifact]),
+    )
+    assert "inferential_statistic_inconsistent" in {
+        finding.code for finding in string_bypass.findings
+    }
+
+    result_path.write_text(
+        json.dumps(
+            {
+                "primary": {
+                    "t_statistic": 12.809215162980795,
+                    "degrees_freedom": 38,
+                    "p_value": 2.3070327275079796e-15,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    valid = validate_report(
+        article_report(),
+        computation=ComputationEvidence(records=[record], artifacts=[artifact]),
+    )
+    assert "inferential_statistic_inconsistent" not in {
+        finding.code for finding in valid.findings
+    }
+
+
+def test_inferential_check_supports_repo_aliases_and_signed_one_sided_tests(tmp_path):
+    path = tmp_path / "inferential.json"
+    invalid_alias_shape = _inferential_consistency_findings(
+        path,
+        {
+            "welch_t_statistic": 12.809215162980795,
+            "degrees_of_freedom": 76,
+            "p_value": 2.3070327275079796e-15,
+        },
+    )
+    assert {finding.code for finding in invalid_alias_shape} == {
+        "inferential_statistic_inconsistent"
+    }
+
+    directional = _inferential_consistency_findings(
+        path,
+        {
+            "welch_t_statistic": -2.0,
+            "welch_df": 20,
+            "welch_pvalue": 0.970367,
+            "alternative": "greater",
+        },
+    )
+    assert directional == []
+
+    two_sided_r_spelling = _inferential_consistency_findings(
+        path,
+        {
+            "t_statistic": 2.0,
+            "df": 20,
+            "p_value": 0.059265535,
+            "alternative": "two.sided",
+        },
+    )
+    assert two_sided_r_spelling == []
+
+
+def test_inferential_check_rejects_conflicting_aliases_and_invalid_ranges(tmp_path):
+    path = tmp_path / "inferential.json"
+    conflicting = _inferential_consistency_findings(
+        path,
+        {
+            "t_statistic": 2.0,
+            "welch_t_statistic": 3.0,
+            "degrees_freedom": 20,
+            "p_value": 0.058,
+        },
+    )
+    assert len(conflicting) == 1
+    assert "Conflicting aliases" in conflicting[0].message
+
+    invalid_range = _inferential_consistency_findings(
+        path,
+        {"t_statistic": 2.0, "df": 0, "p_value": 1.2},
+    )
+    assert len(invalid_range) == 1
+    assert "valid ranges" in invalid_range[0].message
+
+    unknown_alternative = _inferential_consistency_findings(
+        path,
+        {
+            "t_statistic": 2.0,
+            "df": 20,
+            "p_value": 0.058,
+            "alternative": "sometimes",
+        },
+    )
+    assert len(unknown_alternative) == 1
+    assert "alternative hypothesis" in unknown_alternative[0].message
+
+
+def test_inferential_check_rejects_p_value_error_that_crosses_alpha(tmp_path):
+    findings = _inferential_consistency_findings(
+        tmp_path / "inferential.json",
+        {
+            "t_statistic": 2.06638,
+            "df": 25,
+            "p_value": 0.0502367,
+            "alternative": "two-sided",
+        },
+    )
+
+    assert {finding.code for finding in findings} == {
+        "inferential_statistic_inconsistent"
+    }
+
+
+def test_inferential_check_fails_closed_without_scipy(tmp_path, monkeypatch):
+    real_import = builtins.__import__
+
+    def blocked_import(name, *args, **kwargs):
+        if name == "scipy.stats":
+            raise ImportError("test-only missing SciPy")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", blocked_import)
+    findings = _inferential_consistency_findings(
+        tmp_path / "inferential.json",
+        {"t_statistic": 2.0, "df": 20, "p_value": 0.058},
+    )
+
+    assert {finding.code for finding in findings} == {
+        "inferential_validator_unavailable"
     }
 
 

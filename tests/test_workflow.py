@@ -22,6 +22,8 @@ from scientific_agent.orchestrator import (
     _merge_reviews,
     _needs_repair,
     _merge_retrieval_evidence,
+    _without_ocr_contradicted_typography,
+    _without_validation_conflicts,
     _prepare_task_spec,
     _register_computation_path_evidence,
     _remove_display_ids_from_claim_evidence,
@@ -1017,6 +1019,627 @@ def test_noop_typography_correction_cannot_block_a_report():
     assert merged.verdict == "inconclusive"
     assert merged.blocking_findings == []
     assert any("no-op typography" in item for item in merged.unsupported_claims)
+
+
+def test_critic_cannot_reverse_deterministic_table_precision_rule():
+    review = VerificationReport(
+        verdict="fail",
+        blocking_findings=[
+            Finding(
+                finding_id="more-decimals",
+                location="Table 1",
+                problem="The table loses precision.",
+                why_it_matters="Exact verification allegedly requires more digits.",
+                evidence="5.00 (expected 5.0000+)",
+                falsification_test_or_correction=(
+                    "Use format(value, '.4f') so at least 4 decimal places remain."
+                ),
+            )
+        ],
+    )
+    validation = DeterministicValidation(
+        passed=False,
+        findings=[
+            LintFinding(
+                code="table_excessive_precision",
+                location="Table 1",
+                message="Reader table contains excessive precision.",
+            )
+        ],
+    )
+
+    filtered = _without_validation_conflicts(review, validation)
+
+    assert filtered.verdict == "inconclusive"
+    assert filtered.blocking_findings == []
+    assert any("contradictory blocker" in item for item in filtered.unsupported_claims)
+
+
+def test_live_update_instruction_cannot_reverse_table_precision_rule():
+    review = VerificationReport(
+        verdict="fail",
+        blocking_findings=[
+            Finding(
+                finding_id="live-more-decimals",
+                location="displays[1]",
+                problem="The table allegedly loses precision.",
+                why_it_matters="Exact verification allegedly requires more digits.",
+                evidence="5.00 (expected 5.0000+)",
+                falsification_test_or_correction=(
+                    "Update the Python/R table generation logic to use "
+                    "`format(value, '.4f')` or similar to ensure at least 4 "
+                    "decimal places are preserved in the CSV output."
+                ),
+            )
+        ],
+    )
+    validation = DeterministicValidation(
+        passed=False,
+        findings=[
+            LintFinding(
+                code="table_excessive_precision",
+                location="displays[1]",
+                message="Reader table contains excessive precision.",
+            )
+        ],
+    )
+
+    filtered = _without_validation_conflicts(review, validation)
+
+    assert filtered.verdict == "inconclusive"
+    assert filtered.blocking_findings == []
+
+
+def test_precision_filter_preserves_aligned_and_cross_location_findings():
+    review = VerificationReport(
+        verdict="fail",
+        blocking_findings=[
+            Finding(
+                finding_id="aligned-rounding",
+                location="displays[1]",
+                problem="The reader-facing estimate has excessive precision.",
+                why_it_matters="It implies unsupported numerical certainty.",
+                evidence="The table prints 5.0000.",
+                falsification_test_or_correction="Round 5.0000 to 5.00.",
+            ),
+            Finding(
+                finding_id="different-table",
+                location="displays[2]",
+                problem="A different table allegedly needs more precision.",
+                why_it_matters="Its values are difficult to compare.",
+                evidence="The table prints two decimals.",
+                falsification_test_or_correction="Use at least 4 decimal places.",
+            ),
+        ],
+    )
+    validation = DeterministicValidation(
+        passed=False,
+        findings=[
+            LintFinding(
+                code="table_excessive_precision",
+                location="displays[1]",
+                message="Reader table contains excessive precision.",
+            )
+        ],
+    )
+
+    filtered = _without_validation_conflicts(review, validation)
+
+    assert filtered.verdict == "fail"
+    assert [item.finding_id for item in filtered.blocking_findings] == [
+        "aligned-rounding",
+        "different-table",
+    ]
+
+
+def test_precision_filter_does_not_reverse_a_negated_correction():
+    review = VerificationReport(
+        verdict="fail",
+        blocking_findings=[
+            Finding(
+                finding_id="negated-more-decimals",
+                location="Table 1",
+                problem="The table has excessive precision.",
+                why_it_matters="It implies unsupported certainty.",
+                evidence="The table prints four decimals.",
+                falsification_test_or_correction=(
+                    "Do not use at least four decimal places; round to two."
+                ),
+            )
+        ],
+    )
+    validation = DeterministicValidation(
+        passed=False,
+        findings=[
+            LintFinding(
+                code="table_excessive_precision",
+                location="Table 1",
+                message="Reader table contains excessive precision.",
+            )
+        ],
+    )
+
+    filtered = _without_validation_conflicts(review, validation)
+
+    assert filtered.verdict == "fail"
+    assert [item.finding_id for item in filtered.blocking_findings] == [
+        "negated-more-decimals"
+    ]
+
+
+@pytest.mark.parametrize(
+    "correction",
+    [
+        "Rather than increase the precision to four decimals, round to two.",
+        "Instead of showing more decimal places, round to two.",
+        "There is no need for more decimal places; use two.",
+        ("Update the table logic to not use format(value, '.4f'); use '.2f'."),
+        (
+            "Set the table not to use format(value, '.4f'), because two "
+            "decimals are sufficient."
+        ),
+        (
+            "Modify the table so it does not use format(value, '.4f'); "
+            "round to two decimals."
+        ),
+        ("Update the table because it shouldn't use format(value, '.4f'); use '.2f'."),
+        ("Change the table because it cannot use format(value, '.4f'); round to two."),
+        "Set the table because it can't use format(value, '.4f'); use two decimals.",
+        "Use no more decimal places; round the table to two.",
+    ],
+)
+def test_precision_filter_preserves_contrastive_rounding_corrections(correction):
+    review = VerificationReport(
+        verdict="fail",
+        blocking_findings=[
+            Finding(
+                finding_id="contrastive-rounding",
+                location="Table 1",
+                problem="The table has excessive precision.",
+                why_it_matters="It implies unsupported certainty.",
+                evidence="The table prints four decimals.",
+                falsification_test_or_correction=correction,
+            )
+        ],
+    )
+    validation = DeterministicValidation(
+        passed=False,
+        findings=[
+            LintFinding(
+                code="table_excessive_precision",
+                location="Table 1",
+                message="Reader table contains excessive precision.",
+            )
+        ],
+    )
+
+    filtered = _without_validation_conflicts(review, validation)
+
+    assert filtered.verdict == "fail"
+    assert [item.finding_id for item in filtered.blocking_findings] == [
+        "contrastive-rounding"
+    ]
+
+
+def test_ocr_corroborated_correction_defeats_hallucinated_typo_blocker():
+    review = VerificationReport(
+        verdict="fail",
+        blocking_findings=[
+            Finding(
+                finding_id="manga-typo",
+                location="Panel B",
+                problem=(
+                    "Direct visual inspection of the same text label reads MANGA "
+                    "although visual inspection of that same label shows ANCOVA."
+                ),
+                why_it_matters="The alleged typo changes the method name.",
+                evidence="The figure allegedly says MANGA: 5.042.",
+                falsification_test_or_correction=(
+                    "Correct the plotting code from 'MANGA' to 'ANCOVA'."
+                ),
+            )
+        ],
+    )
+    inputs = [
+        {
+            "kind": "figure",
+            "ocr": {"available": True, "text": "Panel B ANCOVA 5.042"},
+        }
+    ]
+
+    filtered = _without_ocr_contradicted_typography(review, inputs)
+
+    assert filtered.verdict == "inconclusive"
+    assert filtered.blocking_findings == []
+    assert any("controller OCR" in item for item in filtered.unsupported_claims)
+
+
+def test_ocr_from_another_figure_cannot_suppress_typography_blocker():
+    review = VerificationReport(
+        verdict="fail",
+        blocking_findings=[
+            Finding(
+                finding_id="fig-1-typo",
+                location="Figure fig-1",
+                problem=(
+                    "The same text label is transcribed as MANGA although visual "
+                    "inspection of that same label shows ANCOVA."
+                ),
+                why_it_matters="The method name would be wrong.",
+                evidence="Figure fig-1 allegedly says MANGA.",
+                falsification_test_or_correction="Replace 'MANGA' with 'ANCOVA'.",
+            )
+        ],
+    )
+    inputs = [
+        {
+            "display_id": "fig-1",
+            "kind": "figure",
+            "ocr": {"available": True, "text": "Panel A treatment effect"},
+        },
+        {
+            "display_id": "fig-2",
+            "kind": "figure",
+            "ocr": {"available": True, "text": "Panel B ANCOVA"},
+        },
+    ]
+
+    filtered = _without_ocr_contradicted_typography(review, inputs)
+
+    assert filtered.verdict == "fail"
+    assert [item.finding_id for item in filtered.blocking_findings] == ["fig-1-typo"]
+
+
+def test_display_id_prefix_does_not_scope_ocr_to_the_wrong_figure():
+    review = VerificationReport(
+        verdict="fail",
+        blocking_findings=[
+            Finding(
+                finding_id="fig-10-typo",
+                location="Figure fig-10",
+                problem=(
+                    "The same text label is transcribed as MANGA although visual "
+                    "inspection of that same label shows ANCOVA."
+                ),
+                why_it_matters="The method name would be wrong.",
+                evidence="Figure fig-10 allegedly says MANGA.",
+                falsification_test_or_correction="Replace 'MANGA' with 'ANCOVA'.",
+            )
+        ],
+    )
+    inputs = [
+        {
+            "display_id": "fig-1",
+            "kind": "figure",
+            "ocr": {"available": True, "text": "ANCOVA"},
+        },
+        {
+            "display_id": "fig-2",
+            "kind": "figure",
+            "ocr": {"available": True, "text": "Other figure"},
+        },
+    ]
+
+    filtered = _without_ocr_contradicted_typography(review, inputs)
+
+    assert filtered.verdict == "fail"
+    assert [item.finding_id for item in filtered.blocking_findings] == ["fig-10-typo"]
+
+
+def test_figure_ocr_cannot_suppress_a_table_typography_blocker():
+    review = VerificationReport(
+        verdict="fail",
+        blocking_findings=[
+            Finding(
+                finding_id="table-typo",
+                location="Table table-1",
+                problem=(
+                    "The same text label is transcribed as MANGA although visual "
+                    "inspection of that same label shows ANCOVA."
+                ),
+                why_it_matters="The method name would be wrong.",
+                evidence="Table table-1 allegedly says MANGA.",
+                falsification_test_or_correction="Replace 'MANGA' with 'ANCOVA'.",
+            )
+        ],
+    )
+    inputs = [
+        {
+            "display_id": "fig-1",
+            "kind": "figure",
+            "ocr": {"available": True, "text": "ANCOVA"},
+        },
+        {"display_id": "table-1", "kind": "table", "preview": "MANGA"},
+    ]
+
+    filtered = _without_ocr_contradicted_typography(review, inputs)
+
+    assert filtered.verdict == "fail"
+    assert [item.finding_id for item in filtered.blocking_findings] == ["table-typo"]
+
+
+def test_caption_ocr_cannot_suppress_an_axis_label_blocker():
+    review = VerificationReport(
+        verdict="fail",
+        blocking_findings=[
+            Finding(
+                finding_id="axis-typo",
+                location="Figure fig-1 y-axis",
+                problem=(
+                    "This axis label says MANGA, while visual evidence elsewhere "
+                    "in the caption shows ANCOVA."
+                ),
+                why_it_matters="The axis method name would be wrong.",
+                evidence="The y-axis allegedly says MANGA.",
+                falsification_test_or_correction="Replace 'MANGA' with 'ANCOVA'.",
+            )
+        ],
+    )
+    inputs = [
+        {
+            "display_id": "fig-1",
+            "kind": "figure",
+            "ocr": {"available": True, "text": "Caption ANCOVA"},
+        }
+    ]
+
+    filtered = _without_ocr_contradicted_typography(review, inputs)
+
+    assert filtered.verdict == "fail"
+    assert [item.finding_id for item in filtered.blocking_findings] == ["axis-typo"]
+
+
+def test_metadata_raster_mismatch_remains_a_real_display_blocker():
+    review = VerificationReport(
+        verdict="fail",
+        blocking_findings=[
+            Finding(
+                finding_id="metadata-title-mismatch",
+                location="Figure fig-1 title",
+                problem=(
+                    "The ReportDisplay metadata title says MANGA, while visual "
+                    "inspection of that same title shows ANCOVA."
+                ),
+                why_it_matters="Metadata and the rendered figure disagree.",
+                evidence="The registered title is MANGA but the raster reads ANCOVA.",
+                falsification_test_or_correction=(
+                    "Replace the metadata title 'MANGA' with 'ANCOVA'."
+                ),
+            )
+        ],
+    )
+    inputs = [
+        {
+            "display_id": "fig-1",
+            "kind": "figure",
+            "ocr": {"available": True, "text": "ANCOVA"},
+        }
+    ]
+
+    filtered = _without_ocr_contradicted_typography(review, inputs)
+
+    assert filtered.verdict == "fail"
+    assert [item.finding_id for item in filtered.blocking_findings] == [
+        "metadata-title-mismatch"
+    ]
+
+
+def test_ocr_disagreement_alone_cannot_overrule_direct_visual_review():
+    review = VerificationReport(
+        verdict="fail",
+        blocking_findings=[
+            Finding(
+                finding_id="direct-visual-typo",
+                location="Figure fig-1",
+                problem="Direct raster review identifies a MANGA text-label typo.",
+                why_it_matters="The method name would be wrong.",
+                evidence="The raster allegedly says MANGA.",
+                falsification_test_or_correction="Replace 'MANGA' with 'ANCOVA'.",
+            )
+        ],
+    )
+    inputs = [
+        {
+            "display_id": "fig-1",
+            "kind": "figure",
+            "ocr": {"available": True, "text": "Panel B ANCOVA"},
+        }
+    ]
+
+    filtered = _without_ocr_contradicted_typography(review, inputs)
+
+    assert filtered.verdict == "fail"
+    assert [item.finding_id for item in filtered.blocking_findings] == [
+        "direct-visual-typo"
+    ]
+
+
+@pytest.mark.anyio
+async def test_raw_contradictory_critic_outputs_remain_browsable(tmp_path, monkeypatch):
+    planning, report = _display_audit_fixture()
+    image = tmp_path / "effect.png"
+    image.write_bytes(b"test image bytes")
+    monkeypatch.setattr(
+        "scientific_agent.orchestrator.prepare_display_audit",
+        lambda *_args: (
+            [image],
+            [
+                {
+                    "display_id": "effect-figure",
+                    "kind": "figure",
+                    "sha256": "a" * 64,
+                    "media_type": "image/png",
+                    "width": 800,
+                    "height": 600,
+                    "ocr": {
+                        "available": True,
+                        "text": "Panel B ANCOVA 5.042",
+                        "words": [],
+                    },
+                }
+            ],
+        ),
+    )
+    calls = 0
+
+    async def fake_request(_endpoint, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return VerificationReport(
+                verdict="fail",
+                blocking_findings=[
+                    Finding(
+                        finding_id="more-decimals",
+                        location="Table 1",
+                        problem="The table loses precision.",
+                        why_it_matters="Exact verification allegedly needs digits.",
+                        evidence="5.00 (expected 5.0000+)",
+                        falsification_test_or_correction=(
+                            "Use format(value, '.4f') for at least 4 decimal places."
+                        ),
+                    )
+                ],
+            )
+        return VerificationReport(
+            verdict="fail",
+            blocking_findings=[
+                Finding(
+                    finding_id="manga-typo",
+                    location="Panel B",
+                    problem=(
+                        "Direct visual inspection of the same text label reads MANGA "
+                        "although visual inspection of that same label shows ANCOVA."
+                    ),
+                    why_it_matters="The alleged typo changes the method name.",
+                    evidence="The raster allegedly says MANGA.",
+                    falsification_test_or_correction=(
+                        "Correct the plotting code from 'MANGA' to 'ANCOVA'."
+                    ),
+                )
+            ],
+        )
+
+    monkeypatch.setattr(
+        "scientific_agent.orchestrator.request_structured", fake_request
+    )
+    validation = DeterministicValidation(
+        passed=False,
+        findings=[
+            LintFinding(
+                code="table_excessive_precision",
+                location="Table 1",
+                message="Reader table contains excessive precision.",
+            )
+        ],
+    )
+    retrieval = RetrievalEvidence()
+    computation = ComputationEvidence()
+    review = await _audit_report_resilient(
+        Settings(),
+        planning,
+        report,
+        validation,
+        retrieval,
+        computation,
+        EventLedger(tmp_path / "events.jsonl"),
+        live_dir=tmp_path / "live",
+    )
+
+    assert review.verdict == "inconclusive"
+    assert (
+        json.loads((tmp_path / "live" / "gemma_report_review_raw.json").read_text())[
+            "verdict"
+        ]
+        == "fail"
+    )
+    assert (
+        json.loads((tmp_path / "live" / "gemma_report_review.json").read_text())[
+            "verdict"
+        ]
+        == "inconclusive"
+    )
+
+    _write_attempt_bundle(
+        tmp_path,
+        0,
+        report,
+        validation,
+        review,
+        retrieval,
+        computation,
+    )
+
+    async def passing_request(_endpoint, **_kwargs):
+        return VerificationReport(verdict="pass")
+
+    monkeypatch.setattr(
+        "scientific_agent.orchestrator.request_structured", passing_request
+    )
+    second_review = await _audit_report_resilient(
+        Settings(),
+        planning,
+        report,
+        DeterministicValidation(passed=True),
+        retrieval,
+        computation,
+        EventLedger(tmp_path / "events-second.jsonl"),
+        live_dir=tmp_path / "live",
+    )
+    _write_attempt_bundle(
+        tmp_path,
+        1,
+        report,
+        DeterministicValidation(passed=True),
+        second_review,
+        retrieval,
+        computation,
+    )
+
+    assert (
+        json.loads((tmp_path / "live" / "gemma_report_review_raw.json").read_text())[
+            "verdict"
+        ]
+        == "pass"
+    )
+    assert (
+        json.loads(
+            (
+                tmp_path / "attempts" / "attempt-0" / "gemma_report_review_raw.json"
+            ).read_text()
+        )["verdict"]
+        == "fail"
+    )
+    assert (
+        json.loads(
+            (
+                tmp_path / "attempts" / "attempt-1" / "gemma_report_review_raw.json"
+            ).read_text()
+        )["verdict"]
+        == "pass"
+    )
+    assert (
+        json.loads(
+            (tmp_path / "live" / "gemma_display_batch_001_raw.json").read_text()
+        )["verdict"]
+        == "pass"
+    )
+    assert (
+        json.loads(
+            (
+                tmp_path / "attempts" / "attempt-0" / "gemma_display_batch_001_raw.json"
+            ).read_text()
+        )["verdict"]
+        == "fail"
+    )
+    assert (
+        json.loads(
+            (
+                tmp_path / "attempts" / "attempt-1" / "gemma_display_batch_001_raw.json"
+            ).read_text()
+        )["verdict"]
+        == "pass"
+    )
 
 
 @pytest.mark.anyio

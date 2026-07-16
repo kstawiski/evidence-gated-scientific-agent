@@ -1,0 +1,39 @@
+{
+  "case": "inferential-and-critic-stress-pre-fix",
+  "release_candidate": "v0.4.0",
+  "started_at": "2026-07-15T23:48:50.810305+00:00",
+  "cancelled_at": "2026-07-16T00:44:31.290297+00:00",
+  "deployment_commit": "2b18b40fc0b1ac6b4d44e5816bcf8fe764f5287b",
+  "deployment_image_digest": "sha256:180b1bb42a6af769247b4919753e9c2ea275b37c32e56b7d0ada8cd43deee506",
+  "workspace_id": "75f70088-fd66-4e2e-a605-dc49bb96fccb",
+  "run_id": "2f05bdcc-f50b-41c5-8b5f-58217153aba7",
+  "terminal_status": "cancelled",
+  "merit_gate": "failed",
+  "productive_behavior": [
+    "The controller rejected an invalid first reconciliation artifact and misleading zero-formatted p-values.",
+    "The repair regenerated a reader-facing table with bounded precision and p < 0.001 formatting.",
+    "The repair generated a legible two-panel figure whose pixel text and OCR both said ANCOVA."
+  ],
+  "scientific_defect": {
+    "artifact": "computations/attempt-1/exec-002/output/data/primary_analysis_results.json",
+    "point_estimate": 5.0,
+    "t_statistic": 12.809215162980795,
+    "degrees_freedom": 75.99999999999999,
+    "p_value": 2.3070327275079796e-15,
+    "ci_lower": 4.222562590953782,
+    "ci_upper": 5.777437409046218,
+    "reason": "The p-value corresponds to approximately 38 degrees of freedom, while the reported degrees of freedom and confidence interval use approximately 76; the tuple cannot come from one Student-t test."
+  },
+  "critic_defects": [
+    "The article critic demanded at least four table decimals even though deterministic validation found excessive reader-table precision.",
+    "The display critic simultaneously said the raster showed ANCOVA and blocked a purported MANGA typo; controller OCR and manual pixel inspection contained ANCOVA only."
+  ],
+  "orchestration_defect": "After the repaired Python call, no new run event was emitted for more than 15 minutes; cooperative cancellation stopped the obsolete run and preserved partial artifacts.",
+  "disposition": "Retained as a failed scientific-quality fixture; not counted as a passing release evaluation.",
+  "implemented_repairs": [
+    "Generated JSON t/df/p tuples are recomputed against Student-t tails and fail closed when impossible.",
+    "The Qwen execution prompt requires inferential values to originate from one test object and documents compatible plotting APIs.",
+    "Critic requests that reverse an excessive-precision deterministic finding are discarded while the raw critic record remains available.",
+    "A typography blocker is discarded only when Gemma contradicts its own visual transcription and OCR from the exact same display contains the proposed correction but not the alleged typo; raw testimony remains preserved."
+  ]
+}

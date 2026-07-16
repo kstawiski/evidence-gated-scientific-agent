@@ -68,8 +68,15 @@ after all five statuses and return only PlanAuditChecklist."""
 SCIENTIFIC_REPORT_CONTRACT = """
 Write a standards-derived exploratory scientific report, never a claim of peer
 review, science lock, manuscript readiness, or submission readiness. The report
-must contain an Abstract (executive_summary), Introduction, Methods, Results,
-Discussion, and Conclusions with distinct jobs:
+must obey the user's task scope rather than invent an external readiness audit. If
+the task explicitly excludes submission readiness, administrative formatting or
+placeholder observations are not scientific blockers unless they prevent the
+requested analysis. Never combine main-manuscript and supplement word counts
+unless the task or an acquired authoritative requirement explicitly defines that
+combined denominator. A placeholder explicitly permitted by governed task
+evidence is not a defect.
+The report must contain an Abstract (executive_summary), Introduction, Methods,
+Results, Discussion, and Conclusions with distinct jobs:
 - Introduction: problem, knowledge gap, and objective or prespecified hypothesis;
   do not reveal observed results.
 - Methods: setting/data, eligibility and analysis unit, endpoints and variables,
@@ -276,6 +283,12 @@ Conceptual schematics must distinguish observation from hypothesis and must not 
 used as scientific evidence by themselves.
 Machine-readable JSON must be strict JSON: encode missing or non-finite values as
 null, never NaN or Infinity.
+Before writing inferential JSON, verify that every reported t statistic, degrees of
+freedom, and p-value comes from the same test object and is arithmetically
+consistent; do not hand-edit Welch-Satterthwaite degrees of freedom. For figures,
+avoid version-fragile Matplotlib calls: label boxplots with `tick_labels` (or set
+ticks after plotting), and pass singleton asymmetric error bars as shape `(2, 1)`,
+for example `xerr=[[estimate-low], [high-estimate]]`.
 When a later analysis needs an earlier call's artifact, read it from
 /prior/<execution-id>/output/<filename>. During a repair, outputs from an earlier
 attempt are read-only at /history/attempt-N/<execution-id>/output/<filename>;
@@ -510,7 +523,11 @@ assertion that a dataset is observational, randomized, experimental, synthetic,
 or representative as a correctable report defect; require design-unspecified
 language unless the evidence actually establishes the design. Conventional
 compatible rounding across prose, tables, and figures is consistent reporting;
-do not require identical trailing digits when the rounded values agree."""
+do not require identical trailing digits when the rounded values agree. The
+deterministic display validator is authoritative about excessive reader-table
+precision: if it reports `table_excessive_precision`, never demand more decimal
+places in that table. Exact machine precision belongs in the cited JSON artifact,
+not in a reader-facing summary table."""
     + SCIENTIFIC_REPORT_CONTRACT
 )
 
@@ -552,6 +569,9 @@ blocking. Before reporting a spelling error, transcribe the visible label twice
 and block only when the typo is unmistakable rather than an OCR uncertainty. If
 the alleged original and correction are identical, omit the finding immediately;
 never narrate repeated self-checking or emit a no-op correction.
+If direct visual interpretation and controller OCR disagree about a proposed typo,
+return inconclusive for that label rather than asserting that both contradictory
+transcriptions are visible or forcing a speculative repair.
 
 For tables, compare the exact preview column names and rows with every metadata
 claim. A caption or alt text that describes columns, denominators, estimates, or

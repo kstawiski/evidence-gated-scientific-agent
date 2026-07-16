@@ -77,6 +77,168 @@ def _json_path_number(document: Any, json_path: str) -> float | None:
     return _json_number(current)
 
 
+def _nested_json_objects(value: Any, path: str = "$"):
+    if isinstance(value, dict):
+        yield path, value
+        for key, child in value.items():
+            yield from _nested_json_objects(child, f"{path}.{key}")
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            yield from _nested_json_objects(child, f"{path}[{index}]")
+
+
+def _inferential_consistency_findings(path: Path, document: Any) -> list[LintFinding]:
+    """Check that reported t, df, and p-value tuples are arithmetically possible."""
+
+    try:
+        from scipy.stats import t as student_t
+    except ImportError:  # pragma: no cover - release runtimes include SciPy
+        student_t = None
+    findings: list[LintFinding] = []
+    for json_path, node in _nested_json_objects(document):
+        alias_groups = {
+            "t statistic": ("t_statistic", "welch_t_statistic"),
+            "degrees of freedom": (
+                "degrees_freedom",
+                "degrees_of_freedom",
+                "welch_df",
+                "df",
+            ),
+            "p-value": ("p_value", "welch_p_value", "welch_pvalue"),
+        }
+        present = {
+            label: [(key, node[key]) for key in aliases if key in node]
+            for label, aliases in alias_groups.items()
+        }
+        if not all(present.values()):
+            continue
+        raw_values = tuple(value for values in present.values() for _, value in values)
+        if all(value is None for value in raw_values):
+            continue
+
+        invalid_alias = False
+        alias_conflict_recorded = False
+        values_by_label: dict[str, float] = {}
+        for label, aliases in present.items():
+            numeric = [(key, _json_number(value)) for key, value in aliases]
+            if any(value is None for _, value in numeric):
+                invalid_alias = True
+                break
+            concrete = [(key, value) for key, value in numeric if value is not None]
+            reference = concrete[0][1]
+            if any(
+                not math.isclose(value, reference, rel_tol=1e-12, abs_tol=1e-15)
+                for _, value in concrete[1:]
+            ):
+                findings.append(
+                    LintFinding(
+                        code="inferential_statistic_inconsistent",
+                        location=f"{path}:{json_path}",
+                        message=(
+                            f"Conflicting aliases were reported for {label}: "
+                            + ", ".join(f"{key}={value:.8g}" for key, value in concrete)
+                            + "."
+                        ),
+                    )
+                )
+                invalid_alias = True
+                alias_conflict_recorded = True
+                break
+            values_by_label[label] = reference
+        if invalid_alias:
+            if not alias_conflict_recorded:
+                findings.append(
+                    LintFinding(
+                        code="inferential_statistic_inconsistent",
+                        location=f"{path}:{json_path}",
+                        message=(
+                            "A t statistic, degrees of freedom, and p-value must be "
+                            "finite JSON numbers from the same test object; display "
+                            "strings belong in separate fields."
+                        ),
+                    )
+                )
+            continue
+
+        statistic = values_by_label["t statistic"]
+        degrees_freedom = values_by_label["degrees of freedom"]
+        reported_p = values_by_label["p-value"]
+        if degrees_freedom <= 0 or not 0 <= reported_p <= 1:
+            findings.append(
+                LintFinding(
+                    code="inferential_statistic_inconsistent",
+                    location=f"{path}:{json_path}",
+                    message="Degrees of freedom and p-values must lie in valid ranges.",
+                )
+            )
+            continue
+        if student_t is None:
+            findings.append(
+                LintFinding(
+                    code="inferential_validator_unavailable",
+                    location=f"{path}:{json_path}",
+                    message=(
+                        "SciPy is required to validate a reported t statistic, "
+                        "degrees of freedom, and p-value; install the analysis "
+                        "dependencies instead of accepting this tuple unchecked."
+                    ),
+                )
+            )
+            continue
+        lower_tail = float(student_t.cdf(statistic, degrees_freedom))
+        upper_tail = float(student_t.sf(statistic, degrees_freedom))
+        two_sided = min(1.0, 2.0 * float(student_t.sf(abs(statistic), degrees_freedom)))
+        raw_alternative = node.get("alternative")
+        alternative = re.sub(
+            r"[\s_.]+", "-", str(raw_alternative or "").strip().casefold()
+        )
+        if alternative in {"less", "lower", "left", "left-tailed"}:
+            valid_probabilities = (lower_tail,)
+        elif alternative in {"greater", "upper", "right", "right-tailed"}:
+            valid_probabilities = (upper_tail,)
+        elif alternative in {"two-sided", "two-tailed"}:
+            valid_probabilities = (two_sided,)
+        elif not alternative:
+            valid_probabilities = (lower_tail, upper_tail, two_sided)
+        else:
+            findings.append(
+                LintFinding(
+                    code="inferential_statistic_inconsistent",
+                    location=f"{path}:{json_path}",
+                    message=(
+                        "The reported alternative hypothesis is not recognized; "
+                        "use less, greater, or two-sided so the p-value tail can "
+                        "be validated."
+                    ),
+                )
+            )
+            continue
+        matches_valid_tail = any(
+            math.isclose(
+                reported_p,
+                expected,
+                rel_tol=1e-6,
+                abs_tol=1e-300,
+            )
+            for expected in valid_probabilities
+        )
+        if not matches_valid_tail:
+            findings.append(
+                LintFinding(
+                    code="inferential_statistic_inconsistent",
+                    location=f"{path}:{json_path}",
+                    message=(
+                        "The reported t statistic, degrees of freedom, and p-value "
+                        "cannot represent either a one- or two-sided Student-t test: "
+                        f"t={statistic:.8g}, df={degrees_freedom:.8g}, "
+                        f"p={reported_p:.8g}; expected lower-tail {lower_tail:.8g}, "
+                        f"upper-tail {upper_tail:.8g}, or two-sided {two_sided:.8g}."
+                    ),
+                )
+            )
+    return findings
+
+
 def reconciliation_verdict(
     path: Path,
     computation: ComputationEvidence | None = None,
@@ -876,7 +1038,7 @@ def validate_report(
             ):
                 continue
             try:
-                json.loads(
+                generated_document = json.loads(
                     path.read_text(encoding="utf-8"),
                     parse_constant=_reject_nonfinite_json,
                 )
@@ -890,6 +1052,10 @@ def validate_report(
                             f"contain NaN or Infinity: {type(exc).__name__}."
                         ),
                     )
+                )
+            else:
+                findings.extend(
+                    _inferential_consistency_findings(path, generated_document)
                 )
     for language in required_languages:
         successful_outputs = [

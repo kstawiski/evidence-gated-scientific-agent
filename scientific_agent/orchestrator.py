@@ -497,6 +497,186 @@ def _without_noop_typography(review: VerificationReport) -> VerificationReport:
     )
 
 
+def _without_validation_conflicts(
+    review: VerificationReport,
+    validation: DeterministicValidation,
+) -> VerificationReport:
+    """Discard critic blockers that explicitly reverse a deterministic rule."""
+
+    precision_locations = {
+        " ".join(finding.location.casefold().split())
+        for finding in validation.findings
+        if finding.code == "table_excessive_precision"
+    }
+    if not precision_locations:
+        return review
+
+    def requests_more_precision(finding: Finding) -> bool:
+        location = " ".join(finding.location.casefold().split())
+        if location not in precision_locations:
+            return False
+        correction = finding.falsification_test_or_correction.casefold()
+        if re.search(
+            r"\b(?:do not|don't|must not|never|avoid|rather than|instead of|"
+            r"no|without|not|cannot|less|fewer|stop|refrain|remove|reduce|round)\b"
+            r"|\b\w+n['’]t\b",
+            correction,
+        ):
+            return False
+        return any(
+            re.search(pattern, correction.strip())
+            for pattern in (
+                r"^(?:please\s+)?(?:use|show|report|retain|preserve)\b.{0,160}"
+                r"(?:at least\s+(?:4|four)\s+decimal|more\s+decimal\s+places|"
+                r"['\"]\.4f['\"])",
+                r"^(?:please\s+)?update\b.{0,120}\bto\s+use\s+`?"
+                r"format\s*\([^)]*['\"]\.4f['\"]\)`?.{0,120}"
+                r"\b(?:ensure|preserve|show|report)\b.{0,60}"
+                r"\bat\s+least\s+(?:4|four)\s+decimal",
+                r"^(?:please\s+)?increase\w*\s+(?:the\s+)?precision\b",
+                r"^(?:please\s+)?format\s*\([^)]*['\"]\.4f['\"]",
+            )
+        )
+
+    blocking = [
+        finding
+        for finding in review.blocking_findings
+        if not requests_more_precision(finding)
+    ]
+    if len(blocking) == len(review.blocking_findings):
+        return review
+    unsupported = [*review.unsupported_claims]
+    unsupported.append(
+        "The critic requested increased reader-table precision while the "
+        "deterministic display validator found excessive precision; the "
+        "contradictory blocker was discarded."
+    )
+    verdict = review.verdict
+    if verdict == "fail" and not blocking:
+        verdict = "inconclusive"
+    return review.model_copy(
+        update={
+            "verdict": verdict,
+            "blocking_findings": blocking,
+            "unsupported_claims": list(dict.fromkeys(unsupported)),
+        }
+    )
+
+
+def _without_ocr_contradicted_typography(
+    review: VerificationReport,
+    display_inputs: list[dict],
+) -> VerificationReport:
+    """Reject a self-contradictory typo blocker corroborated by same-display OCR."""
+
+    figures = [
+        item
+        for item in display_inputs
+        if item.get("kind") == "figure" and isinstance(item.get("ocr"), dict)
+    ]
+    if not figures:
+        return review
+
+    def contradicted(finding: Finding) -> bool:
+        text = " ".join(
+            (finding.problem, finding.evidence, finding.why_it_matters)
+        ).casefold()
+        if not any(
+            token in text for token in ("typo", "spelling", "transcrib", "text label")
+        ):
+            return False
+        correction = finding.falsification_test_or_correction
+        match = re.search(
+            r"\bfrom\s+['\"]([^'\"]{1,120})['\"]\s+to\s+['\"]([^'\"]{1,120})['\"]",
+            correction,
+            flags=re.IGNORECASE,
+        )
+        if match is None:
+            match = re.search(
+                r"\breplace\s+['\"]([^'\"]{1,120})['\"]\s+with\s+['\"]([^'\"]{1,120})['\"]",
+                correction,
+                flags=re.IGNORECASE,
+            )
+        if match is None:
+            return False
+        alleged = " ".join(re.findall(r"[\w]+", match.group(1).casefold()))
+        corrected = " ".join(re.findall(r"[\w]+", match.group(2).casefold()))
+        if len(display_inputs) == 1 and len(figures) == 1:
+            scoped = figures[0]
+        else:
+            location = finding.location.casefold()
+            matching = [
+                item
+                for item in figures
+                if (
+                    (display_id := str(item.get("display_id") or "").casefold())
+                    and re.search(
+                        rf"(?<![\w-]){re.escape(display_id)}(?![\w-])", location
+                    )
+                )
+            ]
+            if len(matching) != 1:
+                return False
+            scoped = matching[0]
+        visible = " ".join(
+            re.findall(
+                r"[\w]+", str(scoped.get("ocr", {}).get("text") or "").casefold()
+            )
+        )
+        display_element = r"(?:text\s+)?(?:label|axis|title|legend|caption)"
+        critic_visually_reports_alleged_reading = bool(
+            alleged
+            and re.search(
+                rf"(?:direct\s+visual|raster)\s+"
+                rf"(?:evidence|inspection|review).{{0,160}}"
+                rf"(?:the\s+same|this|that\s+same)\s+{display_element}.{{0,160}}"
+                rf"\b{re.escape(alleged)}\b",
+                text,
+            )
+        )
+        critic_visually_reports_same_element_correction = bool(
+            corrected
+            and re.search(
+                rf"visual\s+(?:evidence|inspection).{{0,160}}"
+                rf"(?:the\s+same|this|that\s+same)\s+{display_element}.{{0,160}}"
+                rf"\b{re.escape(corrected)}\b",
+                text,
+            )
+        )
+        return bool(
+            alleged
+            and corrected
+            and alleged != corrected
+            and alleged not in visible
+            and corrected in visible
+            and critic_visually_reports_alleged_reading
+            and critic_visually_reports_same_element_correction
+        )
+
+    blocking = [
+        finding for finding in review.blocking_findings if not contradicted(finding)
+    ]
+    if len(blocking) == len(review.blocking_findings):
+        return review
+    unsupported = [*review.unsupported_claims]
+    unsupported.append(
+        "The critic gave two incompatible direct visual readings of the same "
+        "display element, and same-display controller OCR contained only the "
+        "proposed correction. The blocker was discarded as internally inconsistent "
+        "visual testimony; the raw response was preserved."
+    )
+    verdict = review.verdict
+    if verdict == "fail" and not blocking:
+        verdict = "inconclusive"
+    return review.model_copy(
+        update={
+            "verdict": verdict,
+            "blocking_findings": blocking,
+            "unsupported_claims": list(dict.fromkeys(unsupported)),
+        }
+    )
+
+
 def _bounded_unique_text(values: list[str], limit: int, label: str) -> list[str]:
     unique = list(dict.fromkeys(values))
     if len(unique) <= limit:
@@ -1839,6 +2019,19 @@ def _write_attempt_bundle(
     write_json(root / "gemma_review.json", review)
     write_json(root / "retrieval_evidence.json", retrieval)
     write_json(root / "computation_evidence.json", computation)
+    live_dir = run_dir / "live"
+    raw_review_paths = [
+        live_dir / "gemma_report_review_raw.json",
+        *sorted(live_dir.glob("gemma_display_batch_*_raw.json")),
+    ]
+    for source in raw_review_paths:
+        if not source.is_file():
+            continue
+        try:
+            payload = json.loads(source.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError):
+            continue
+        write_json(root / source.name, payload)
 
 
 async def _audit_plan(
@@ -2442,7 +2635,7 @@ async def _audit_report(
         "display_inputs": [],
         "visual_input_order": [],
     }
-    report_result = await request_structured(
+    raw_report_result = await request_structured(
         settings.gemma,
         system_prompt=REPORT_AUDITOR,
         payload=payload,
@@ -2452,7 +2645,9 @@ async def _audit_report(
         on_visible_text=on_visible_text,
         cancel_event=cancel_event,
     )
+    report_result = _without_validation_conflicts(raw_report_result, validation)
     if audit_outputs is not None:
+        audit_outputs["gemma_report_raw"] = raw_report_result
         audit_outputs["gemma_report"] = report_result
     _cancel_checkpoint(cancel_event)
     try:
@@ -2543,7 +2738,7 @@ async def _audit_report(
                 },
             }
             try:
-                model_result = await request_structured(
+                raw_model_result = await request_structured(
                     settings.gemma,
                     system_prompt=DISPLAY_AUDITOR,
                     payload=display_payload,
@@ -2554,8 +2749,14 @@ async def _audit_report(
                     on_visible_text=on_visible_text,
                     cancel_event=cancel_event,
                 )
+                model_result = _without_ocr_contradicted_typography(
+                    raw_model_result, batch_inputs
+                )
                 display_results.append(model_result)
                 if audit_outputs is not None:
+                    audit_outputs[f"gemma_display_batch_{batch_number:03d}_raw"] = (
+                        raw_model_result
+                    )
                     audit_outputs[f"gemma_display_batch_{batch_number:03d}"] = (
                         model_result
                     )
@@ -2605,6 +2806,11 @@ async def _audit_report_resilient(
     visible_stream_state = {"bytes": 0, "announced": False}
     if live_dir is not None:
         live_dir.mkdir(parents=True, mode=0o700, exist_ok=True)
+        for stale_path in (
+            live_dir / "gemma_report_review_raw.json",
+            *live_dir.glob("gemma_display_batch_*.json"),
+        ):
+            stale_path.unlink(missing_ok=True)
         visible_stream_path = live_dir / "gemma_visible_output.txt"
         visible_stream_path.write_text("", encoding="utf-8")
         visible_stream_path.chmod(0o600)
@@ -2659,6 +2865,9 @@ async def _audit_report_resilient(
             report_review = audit_outputs.get("gemma_report", result)
             report_review_path = live_dir / "gemma_report_review.json"
             write_json(report_review_path, report_review)
+            raw_report_review = audit_outputs.get("gemma_report_raw")
+            if raw_report_review is not None:
+                write_json(live_dir / "gemma_report_review_raw.json", raw_report_review)
             display_review = audit_outputs.get("gemma_display")
             if display_review is not None:
                 display_review_path = live_dir / "gemma_display_review.json"

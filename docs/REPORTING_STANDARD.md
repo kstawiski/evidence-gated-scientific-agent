@@ -165,6 +165,21 @@ declared values, recomputes the absolute difference against the declared toleran
 and derives the verdict. Invalid, unbound, or internally inconsistent comparison
 records fail closed.
 
+Generated inferential JSON is also checked internally: a reported t statistic,
+degrees of freedom, and numeric p-value must be compatible with either a valid
+one- or two-sided Student-t tail. This prevents a plausible point estimate from
+hiding an incorrect Welch degrees-of-freedom calculation or a p-value copied from
+a different test object.
+
+Raw critic responses remain available for audit, but they do not outrank the
+controller. A request to increase table precision is discarded only when it refers
+to the same table where the deterministic validator found excessive precision.
+OCR alone never overrules direct visual review. A typo blocker is discarded only
+when Gemma gives two incompatible direct readings of the same exact display element
+and OCR from that display contains the proposed correction but not the alleged
+typo. Metadata-versus-raster disagreement and genuinely conflicting visual evidence
+remain blocking or inconclusive for targeted review.
+
 Correctable typos, labels, clutter, overlaps, false captions, inconsistent
 numbers, and excessive display precision remain blocking. An inherent study
 limitation may become nonblocking only when it cannot be resolved with the

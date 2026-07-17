@@ -1260,7 +1260,7 @@ def _figure_source_semantic_findings(
     artifact_path: Path,
     computation: ComputationEvidence | None,
 ) -> list[tuple[str, str]]:
-    """Reject Python scatter plots that perturb a quantitative y coordinate."""
+    """Reject high-confidence Python plotting-source semantic defects."""
 
     if computation is None:
         return []
@@ -1287,36 +1287,108 @@ def _figure_source_semantic_findings(
             tree = ast.parse(source_bytes.decode("utf-8"))
         except (OSError, UnicodeDecodeError, SyntaxError):
             continue
+        effect_x_axes: set[str] = set()
         for node in ast.walk(tree):
             if not (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
-                and node.func.attr == "scatter"
+                and node.func.attr == "set_xlabel"
+                and isinstance(node.func.value, ast.Name)
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
             ):
                 continue
-            y_expression: ast.AST | None = node.args[1] if len(node.args) > 1 else None
-            if y_expression is None:
-                y_expression = next(
-                    (keyword.value for keyword in node.keywords if keyword.arg == "y"),
-                    None,
+            label = node.args[0].value.casefold()
+            if any(
+                term in label
+                for term in ("mean difference", "effect estimate", "contrast")
+            ):
+                effect_x_axes.add(node.func.value.id)
+
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or not isinstance(
+                node.func, ast.Attribute
+            ):
+                continue
+            if node.func.attr == "scatter":
+                y_expression: ast.AST | None = (
+                    node.args[1] if len(node.args) > 1 else None
                 )
-            if y_expression is None or not isinstance(
-                y_expression, (ast.BinOp, ast.AugAssign)
+                if y_expression is None:
+                    y_expression = next(
+                        (
+                            keyword.value
+                            for keyword in node.keywords
+                            if keyword.arg == "y"
+                        ),
+                        None,
+                    )
+                if isinstance(y_expression, (ast.BinOp, ast.AugAssign)):
+                    identifiers = {
+                        child.id.casefold()
+                        for child in ast.walk(y_expression)
+                        if isinstance(child, ast.Name)
+                    }
+                    if any("jitter" in identifier for identifier in identifiers):
+                        return [
+                            (
+                                "figure_numeric_axis_jitter",
+                                "The plotting source adds jitter to the quantitative "
+                                "y-axis values in a scatter plot, so displayed raw "
+                                "observations no longer equal the source data. Apply "
+                                "jitter only to the categorical position axis and "
+                                "regenerate the figure.",
+                            )
+                        ]
+
+            if not (
+                node.func.attr in {"plot", "errorbar"}
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id in effect_x_axes
+                and len(node.args) >= 2
             ):
                 continue
-            identifiers = {
-                child.id.casefold()
-                for child in ast.walk(y_expression)
-                if isinstance(child, ast.Name)
-            }
-            if any("jitter" in identifier for identifier in identifiers):
+
+            def is_zero_position(expression: ast.AST) -> bool:
+                if (
+                    isinstance(expression, (ast.List, ast.Tuple))
+                    and len(expression.elts) == 1
+                ):
+                    expression = expression.elts[0]
+                return (
+                    isinstance(expression, ast.Constant)
+                    and isinstance(expression.value, (int, float))
+                    and not isinstance(expression.value, bool)
+                    and float(expression.value) == 0.0
+                )
+
+            def contains_effect_estimate(expression: ast.AST) -> bool:
+                return any(
+                    any(
+                        term in child.id.casefold()
+                        for term in (
+                            "mean_diff",
+                            "effect_estimate",
+                            "contrast_estimate",
+                            "hedges_g",
+                        )
+                    )
+                    for child in ast.walk(expression)
+                    if isinstance(child, ast.Name)
+                )
+
+            if is_zero_position(node.args[0]) and contains_effect_estimate(
+                node.args[1]
+            ):
                 return [
                     (
-                        "figure_numeric_axis_jitter",
-                        "The plotting source adds jitter to the quantitative y-axis "
-                        "values in a scatter plot, so displayed raw observations no "
-                        "longer equal the source data. Apply jitter only to the "
-                        "categorical position axis and regenerate the figure.",
+                        "figure_effect_axis_transposed",
+                        "The plotting source labels the x-axis as an effect estimate "
+                        "but places the estimate on the y coordinate and zero on x. "
+                        "Place the estimate and its interval on the labeled x scale, "
+                        "use a constant categorical y position, and regenerate the "
+                        "figure.",
                     )
                 ]
     return []

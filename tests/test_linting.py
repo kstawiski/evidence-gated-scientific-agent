@@ -2639,6 +2639,84 @@ def test_figure_allows_jitter_on_categorical_scatter_axis(tmp_path):
     }
 
 
+def test_figure_rejects_effect_estimate_transposed_off_labeled_x_axis(tmp_path):
+    figure = tmp_path / "output" / "figures" / "effect.png"
+    figure.parent.mkdir(parents=True)
+    Image.new("RGB", (800, 600), color="white").save(figure, dpi=(300, 300))
+    source = tmp_path / "analysis.py"
+    source.write_text(
+        "ax.set_xlabel('Mean Difference with 95% CI')\n"
+        "ax.plot([0], [mean_diff])\n"
+        "ax.errorbar([0], [mean_diff], xerr=[[0.9], [0.9]])\n",
+        encoding="utf-8",
+    )
+    computation = _display_computation(tmp_path, figure)
+    source_artifact = ArtifactRef(
+        path=str(source),
+        sha256=sha256_file(source),
+        description="python analysis source",
+    )
+    computation.records[0].artifacts.append(source_artifact)
+    report = article_report(
+        results="Figure 1 shows the effect estimate.",
+        displays=[
+            ReportDisplay(
+                display_id="effect-figure",
+                kind="figure",
+                title="Effect",
+                caption="Mean difference with a 95% confidence interval.",
+                artifact_path=str(figure),
+                alt_text="Effect estimate and confidence interval.",
+            )
+        ],
+    )
+
+    validation = validate_report(report, computation=computation)
+
+    assert "figure_effect_axis_transposed" in {
+        finding.code for finding in validation.findings
+    }
+
+
+def test_figure_allows_effect_estimate_on_labeled_x_axis(tmp_path):
+    figure = tmp_path / "output" / "figures" / "effect.png"
+    figure.parent.mkdir(parents=True)
+    Image.new("RGB", (800, 600), color="white").save(figure, dpi=(300, 300))
+    source = tmp_path / "analysis.py"
+    source.write_text(
+        "ax.set_xlabel('Mean Difference with 95% CI')\n"
+        "ax.plot([mean_diff], [0])\n"
+        "ax.errorbar([mean_diff], [0], xerr=[[0.9], [0.9]])\n",
+        encoding="utf-8",
+    )
+    computation = _display_computation(tmp_path, figure)
+    source_artifact = ArtifactRef(
+        path=str(source),
+        sha256=sha256_file(source),
+        description="python analysis source",
+    )
+    computation.records[0].artifacts.append(source_artifact)
+    report = article_report(
+        results="Figure 1 shows the effect estimate.",
+        displays=[
+            ReportDisplay(
+                display_id="effect-figure",
+                kind="figure",
+                title="Effect",
+                caption="Mean difference with a 95% confidence interval.",
+                artifact_path=str(figure),
+                alt_text="Effect estimate and confidence interval.",
+            )
+        ],
+    )
+
+    validation = validate_report(report, computation=computation)
+
+    assert "figure_effect_axis_transposed" not in {
+        finding.code for finding in validation.findings
+    }
+
+
 def test_unavailable_figure_ocr_does_not_invalidate_truthful_caption(
     tmp_path, monkeypatch
 ):

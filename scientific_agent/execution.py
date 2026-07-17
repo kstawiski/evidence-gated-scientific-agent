@@ -39,14 +39,162 @@ def _python_static_violations(code: str) -> list[str]:
     except SyntaxError:
         return []
 
-    def is_literal_zero(expression: ast.AST | None) -> bool:
+    assignment_candidates: dict[str, list[ast.AST]] = {}
+    errorbar_container_names: set[str] = set()
+    for candidate in ast.walk(tree):
+        if not (
+            isinstance(candidate, ast.Assign)
+            and len(candidate.targets) == 1
+            and isinstance(candidate.targets[0], ast.Name)
+        ):
+            continue
+        name = candidate.targets[0].id
+        assignment_candidates.setdefault(name, []).append(candidate.value)
+        if (
+            isinstance(candidate.value, ast.Call)
+            and isinstance(candidate.value.func, ast.Attribute)
+            and candidate.value.func.attr == "errorbar"
+        ):
+            errorbar_container_names.add(name)
+    single_assignments = {
+        name: values[0]
+        for name, values in assignment_candidates.items()
+        if len(values) == 1
+    }
+
+    def numeric_literal(expression: ast.AST | None) -> float | None:
         if isinstance(expression, (ast.List, ast.Tuple)) and len(expression.elts) == 1:
             expression = expression.elts[0]
-        return (
+        if (
             isinstance(expression, ast.Constant)
             and isinstance(expression.value, (int, float))
             and not isinstance(expression.value, bool)
-            and float(expression.value) == 0.0
+        ):
+            return float(expression.value)
+        if (
+            isinstance(expression, ast.UnaryOp)
+            and isinstance(expression.op, ast.USub)
+            and isinstance(expression.operand, ast.Constant)
+            and isinstance(expression.operand.value, (int, float))
+            and not isinstance(expression.operand.value, bool)
+        ):
+            return -float(expression.operand.value)
+        return None
+
+    def is_literal_zero(expression: ast.AST | None) -> bool:
+        return numeric_literal(expression) == 0.0
+
+    def could_be_visible_label(expression: ast.AST | None) -> bool:
+        if expression is None:
+            return False
+        if isinstance(expression, ast.Constant):
+            return bool(
+                isinstance(expression.value, str)
+                and expression.value.strip()
+                and not expression.value.lstrip().startswith("_")
+            )
+        # A computed label cannot be proven empty or Matplotlib-hidden statically.
+        return True
+
+    def bound_proves_at_most_zero(
+        expression: ast.AST,
+        before_line: int | None = None,
+        seen_names: frozenset[str] = frozenset(),
+    ) -> bool:
+        literal = numeric_literal(expression)
+        if literal is not None:
+            return literal <= 0.0
+        if isinstance(expression, ast.Name) and expression.id not in seen_names:
+            assignments = [
+                candidate
+                for candidate in assignment_candidates.get(expression.id, ())
+                if before_line is None
+                or getattr(candidate, "lineno", before_line) < before_line
+            ]
+            if assignments:
+                latest = max(assignments, key=lambda item: getattr(item, "lineno", -1))
+                return bound_proves_at_most_zero(
+                    latest,
+                    getattr(latest, "lineno", before_line),
+                    seen_names | {expression.id},
+                )
+        return bool(
+            isinstance(expression, ast.Call)
+            and isinstance(expression.func, ast.Name)
+            and expression.func.id == "min"
+            and any(
+                bound_proves_at_most_zero(item, before_line, seen_names)
+                for item in expression.args
+            )
+        )
+
+    def bound_proves_at_least_zero(
+        expression: ast.AST,
+        before_line: int | None = None,
+        seen_names: frozenset[str] = frozenset(),
+    ) -> bool:
+        literal = numeric_literal(expression)
+        if literal is not None:
+            return literal >= 0.0
+        if isinstance(expression, ast.Name) and expression.id not in seen_names:
+            assignments = [
+                candidate
+                for candidate in assignment_candidates.get(expression.id, ())
+                if before_line is None
+                or getattr(candidate, "lineno", before_line) < before_line
+            ]
+            if assignments:
+                latest = max(assignments, key=lambda item: getattr(item, "lineno", -1))
+                return bound_proves_at_least_zero(
+                    latest,
+                    getattr(latest, "lineno", before_line),
+                    seen_names | {expression.id},
+                )
+        return bool(
+            isinstance(expression, ast.Call)
+            and isinstance(expression.func, ast.Name)
+            and expression.func.id == "max"
+            and any(
+                bound_proves_at_least_zero(item, before_line, seen_names)
+                for item in expression.args
+            )
+        )
+
+    def is_errorbar_caplines_expression(expression: ast.AST) -> bool:
+        return bool(
+            isinstance(expression, ast.Subscript)
+            and isinstance(expression.value, ast.Name)
+            and expression.value.id in errorbar_container_names
+            and numeric_literal(expression.slice) == 1.0
+        )
+
+    capline_tuple_names = {
+        name
+        for name, expression in single_assignments.items()
+        if is_errorbar_caplines_expression(expression)
+    }
+
+    def x_limits_prove_zero_visible(call: ast.Call) -> bool:
+        lower: ast.AST | None = None
+        upper: ast.AST | None = None
+        if len(call.args) >= 2:
+            lower, upper = call.args[:2]
+        elif (
+            len(call.args) == 1
+            and isinstance(call.args[0], (ast.List, ast.Tuple))
+            and len(call.args[0].elts) == 2
+        ):
+            lower, upper = call.args[0].elts
+        for item in call.keywords:
+            if item.arg in {"left", "xmin"}:
+                lower = item.value
+            elif item.arg in {"right", "xmax"}:
+                upper = item.value
+        return bool(
+            lower is not None
+            and upper is not None
+            and bound_proves_at_most_zero(lower, getattr(call, "lineno", None))
+            and bound_proves_at_least_zero(upper, getattr(call, "lineno", None))
         )
 
     violations: set[str] = set()
@@ -77,14 +225,14 @@ def _python_static_violations(code: str) -> list[str]:
             (item.value for item in candidate.keywords if item.arg == "label"),
             None,
         )
-        if (
-            candidate.func.attr
-            in {"bar", "errorbar", "fill_between", "hlines", "plot", "scatter"}
-            and isinstance(label, ast.Constant)
-            and isinstance(label.value, str)
-            and label.value.strip()
-            and not label.value.lstrip().startswith("_")
-        ):
+        if candidate.func.attr in {
+            "bar",
+            "errorbar",
+            "fill_between",
+            "hlines",
+            "plot",
+            "scatter",
+        } and could_be_visible_label(label):
             labeled_artist_axes.add(axis_key)
         if candidate.func.attr == "axvline":
             x_expression = (
@@ -145,22 +293,33 @@ def _python_static_violations(code: str) -> list[str]:
                     "Matplotlib legend() has no labeled artists on this axis; omit "
                     "the empty legend or add an honest label to a plotted artist"
                 )
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "get_segments":
+            receiver = node.func.value
+            if (
+                isinstance(receiver, ast.Name) and receiver.id in capline_tuple_names
+            ) or is_errorbar_caplines_expression(receiver):
+                violations.add(
+                    "Matplotlib ErrorbarContainer caplines are a tuple of Line2D "
+                    "artists and do not support get_segments(); inspect each "
+                    "capline with get_xdata()/get_ydata() or inspect barlinecols"
+                )
+        if (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr in {"get_segments", "get_xdata", "get_ydata"}
+            and isinstance(node.func.value, ast.Name)
+            and node.func.value.id in errorbar_container_names
+        ):
+            violations.add(
+                "Matplotlib ErrorbarContainer does not expose line coordinate "
+                "methods directly; inspect container[0] with get_xdata()/get_ydata(), "
+                "individual container[1] caplines, or container[2] barlinecols"
+            )
         if isinstance(node.func, ast.Attribute) and node.func.attr == "set_xlim":
             axis_key = ast.dump(node.func.value, include_attributes=False)
-            bound_expressions = list(node.args) + [
-                item.value
-                for item in node.keywords
-                if item.arg in {"left", "right", "xmin", "xmax"}
-            ]
-            explicitly_includes_zero = any(
-                any(is_literal_zero(item) for item in ast.walk(expression))
-                for expression in bound_expressions
-            )
             if (
-                bound_expressions
-                and axis_key in effect_x_axes
+                axis_key in effect_x_axes
                 and axis_key in null_reference_axes
-                and not explicitly_includes_zero
+                and not x_limits_prove_zero_visible(node)
             ):
                 violations.add(
                     "Matplotlib effect-axis limits may clip the intended zero/null "

@@ -467,6 +467,11 @@ coordinates with `get_xdata()` and `get_ydata()`, not `get_xy()`.
 `Axes.hlines()` returns one `LineCollection`, not a subscriptable list; retain that
 object directly and inspect `get_segments()` if a display-fidelity assertion needs
 the interval endpoints.
+`Axes.errorbar()` returns an `ErrorbarContainer`: item 0 is the main `Line2D`, item 1
+is a tuple of cap `Line2D` artists, and item 2 contains the bar `LineCollection`
+objects. Never call line-coordinate methods on the container itself or
+`get_segments()` on the caplines tuple; use item 0, each capline's x/y data, or
+barlinecols as appropriate.
 When a later analysis needs an earlier call's artifact, read it from
 /prior/<execution-id>/output/<filename>. During a repair, outputs from an earlier
 attempt are read-only at /history/attempt-N/<execution-id>/output/<filename>;
@@ -631,6 +636,10 @@ When the study design is unspecified, do not introduce intervention language eve
 as generic background framing; describe a measurement interval or a between-group
 change instead. When the outcome domain or units are unspecified, discuss unknown
 scientific or practical relevance and do not introduce clinical-importance language.
+Group means do not establish a uniform or consistent individual response. Describe
+them explicitly as group means; reserve words such as `uniform`, `every`, and `all
+participants` for a successful artifact that verifies the corresponding
+individual-level values.
 Statements that no causal inference is being made are reporting constraints or
 limitations, not supported scientific ClaimRecords; keep them in narrative or
 limitations unless a study-design artifact directly supports a separate claim.

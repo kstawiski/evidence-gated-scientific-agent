@@ -180,6 +180,8 @@ def test_reporter_forbids_browser_snapshots_from_impersonating_acquired_articles
 def test_reporter_avoids_unsupported_design_and_clinical_framing():
     assert "do not introduce intervention language" in REPORTER
     assert "do not introduce clinical-importance language" in REPORTER
+    assert "Group means do not establish a uniform" in REPORTER
+    assert "individual-level values" in REPORTER
 
 
 def test_simple_reporter_does_not_suppress_material_limitations_for_brevity():

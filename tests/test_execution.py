@@ -102,6 +102,87 @@ effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
         )
         == []
     )
+    assert (
+        _python_static_violations(
+            """
+effect_ax.axvline(x=0)
+effect_ax.set_xlim(-1.5, 7.5)
+effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
+"""
+        )
+        == []
+    )
+    assert (
+        _python_static_violations(
+            """
+ZERO_INCLUSIVE_LOW = -2.0
+ZERO_INCLUSIVE_HIGH = 8.0
+effect_ax.axvline(x=0)
+effect_ax.set_xlim(ZERO_INCLUSIVE_LOW, ZERO_INCLUSIVE_HIGH)
+effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
+"""
+        )
+        == []
+    )
+    assert (
+        _python_static_violations(
+            """
+effect_ax.set_xlim(min(mean_difference - 3, -1), max(mean_difference + 3, 1))
+effect_ax.axvline(x=0)
+effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
+"""
+        )
+        == []
+    )
+    assert (
+        _python_static_violations(
+            """
+xlim_left = min(0, ci_lower - margin)
+xlim_right = max(0, ci_upper + margin)
+effect_ax.set_xlim(xlim_left, xlim_right)
+effect_ax.axvline(x=0)
+effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
+"""
+        )
+        == []
+    )
+    assert (
+        _python_static_violations(
+            """
+xlim_left = ci_lower - margin
+xlim_right = ci_upper + margin
+xlim_left = min(xlim_left, 0.0)
+xlim_right = max(xlim_right, 0.0)
+effect_ax.set_xlim(xlim_left, xlim_right)
+effect_ax.axvline(x=0)
+effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
+"""
+        )
+        == []
+    )
+    assert any(
+        "clip the intended zero/null reference" in item
+        for item in _python_static_violations(
+            """
+xlim_left = min(ci_lower - margin, 0.0)
+xlim_right = max(ci_upper + margin, 0.0)
+xlim_left = ci_lower
+effect_ax.set_xlim(xlim_left, xlim_right)
+effect_ax.axvline(x=0)
+effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
+"""
+        )
+    )
+    assert any(
+        "clip the intended zero/null reference" in item
+        for item in _python_static_violations(
+            """
+effect_ax.set_xlim(ci_lower, max(0, ci_upper + 1))
+effect_ax.axvline(x=0)
+effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
+"""
+        )
+    )
 
 
 def test_python_static_preflight_rejects_empty_legend():
@@ -118,6 +199,65 @@ effect_ax.legend(loc='lower right')
             """
 effect_ax.plot(mean_difference, 0, 'o', label='Mean difference')
 effect_ax.legend(loc='lower right')
+"""
+        )
+        == []
+    )
+    assert (
+        _python_static_violations(
+            """
+effect_ax.errorbar(mean_difference, 0, xerr=ci, label=f"{group} (n={n})")
+effect_ax.legend(loc='lower right')
+"""
+        )
+        == []
+    )
+    assert any(
+        "legend() has no labeled artists" in item
+        for item in _python_static_violations(
+            """
+effect_ax.plot(mean_difference, 0, 'o', label='_nolegend_')
+effect_ax.legend(loc='lower right')
+"""
+        )
+    )
+
+
+def test_python_static_preflight_rejects_get_segments_on_errorbar_caplines():
+    violations = _python_static_violations(
+        """
+container = effect_ax.errorbar([estimate], [0], xerr=[[lower], [upper]])
+caps = container[1]
+segments = caps.get_segments()
+"""
+    )
+
+    assert any("caplines are a tuple" in item for item in violations)
+    assert (
+        _python_static_violations(
+            """
+container = effect_ax.errorbar([estimate], [0], xerr=[[lower], [upper]])
+segments = container[2][0].get_segments()
+"""
+        )
+        == []
+    )
+
+
+def test_python_static_preflight_rejects_line_methods_on_errorbar_container():
+    violations = _python_static_violations(
+        """
+container = effect_ax.errorbar([estimate], [0], xerr=[[lower], [upper]])
+estimate_x = container.get_xdata()[0]
+"""
+    )
+
+    assert any("does not expose line coordinate methods" in item for item in violations)
+    assert (
+        _python_static_violations(
+            """
+container = effect_ax.errorbar([estimate], [0], xerr=[[lower], [upper]])
+estimate_x = container[0].get_xdata()[0]
 """
         )
         == []

@@ -1560,11 +1560,22 @@ def validate_report(
                     )
                 )
     authoritative_json = _authoritative_json_outputs(records)
+    authoritative_figures: dict[str, str] = {}
+    for artifact in computation.artifacts if computation else []:
+        path = Path(artifact.path)
+        key = logical_report_output_key(path)
+        if (
+            key is not None
+            and key.startswith("figures/")
+            and path.suffix.casefold() in FIGURE_MEDIA_TYPES
+        ):
+            authoritative_figures[key] = os.path.normpath(str(path))
     for record in records:
         if record.status != "succeeded":
             continue
         if any(
-            _is_report_output(Path(artifact.path), "figures")
+            (key := logical_report_output_key(Path(artifact.path))) is not None
+            and authoritative_figures.get(key) == os.path.normpath(artifact.path)
             for artifact in record.artifacts
         ):
             try:

@@ -2311,6 +2311,96 @@ def test_same_logical_display_key_supersedes_historical_version(tmp_path):
     )
 
 
+def test_corrected_figure_supersedes_historical_render_warning(tmp_path):
+    old_figure = (
+        tmp_path
+        / "computations"
+        / "attempt-1"
+        / "exec-001"
+        / "output"
+        / "figures"
+        / "effect.png"
+    )
+    new_figure = (
+        tmp_path
+        / "computations"
+        / "attempt-2"
+        / "exec-001"
+        / "output"
+        / "figures"
+        / "effect.png"
+    )
+    old_figure.parent.mkdir(parents=True)
+    new_figure.parent.mkdir(parents=True)
+    Image.new("RGB", (800, 600), color="white").save(old_figure, dpi=(300, 300))
+    Image.new("RGB", (800, 600), color="white").save(new_figure, dpi=(300, 300))
+    old_stderr = tmp_path / "old-stderr.txt"
+    new_stderr = tmp_path / "new-stderr.txt"
+    old_stderr.write_text(
+        "UserWarning: This figure includes Axes that are not compatible with "
+        "tight_layout, so results might be incorrect.\n",
+        encoding="utf-8",
+    )
+    new_stderr.write_text("", encoding="utf-8")
+    artifacts = [
+        ArtifactRef(
+            path=str(path),
+            sha256=sha256_file(path),
+            description="sandbox-generated analysis artifact",
+        )
+        for path in (old_figure, new_figure)
+    ]
+    computation = ComputationEvidence(
+        successful_calls=2,
+        records=[
+            ComputationRecord(
+                execution_id="exec-old",
+                language="python",
+                code_sha256="a" * 64,
+                started_at="2026-07-15T00:00:00Z",
+                duration_seconds=1,
+                exit_code=0,
+                status="succeeded",
+                stdout_path=str(tmp_path / "old-stdout.txt"),
+                stderr_path=str(old_stderr),
+                artifacts=[artifacts[0]],
+            ),
+            ComputationRecord(
+                execution_id="exec-new",
+                language="python",
+                code_sha256="b" * 64,
+                started_at="2026-07-15T00:01:00Z",
+                duration_seconds=1,
+                exit_code=0,
+                status="succeeded",
+                stdout_path=str(tmp_path / "new-stdout.txt"),
+                stderr_path=str(new_stderr),
+                artifacts=[artifacts[1]],
+            ),
+        ],
+        artifacts=artifacts,
+    )
+    report = article_report(
+        results="Figure 1 shows the corrected effect display.",
+        displays=[
+            ReportDisplay(
+                display_id="corrected-figure",
+                kind="figure",
+                title="Corrected effect",
+                caption="Corrected effect display.",
+                artifact_path=str(new_figure),
+                alt_text="Corrected effect display.",
+            )
+        ],
+    )
+
+    validation = validate_report(report, computation=computation)
+
+    assert "figure_render_warning" not in {
+        finding.code for finding in validation.findings
+    }
+
+
 def test_latest_presentation_attempt_still_requires_all_its_outputs_registered(
     tmp_path,
 ):

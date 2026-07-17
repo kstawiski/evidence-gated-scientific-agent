@@ -273,12 +273,20 @@ def _known_effect_matches_reference(value: dict) -> bool:
 
     expected = [
         (
-            ("study_design.n_treatment", "sample_sizes.n_treatment"),
+            (
+                "study_design.n_treatment",
+                "sample_sizes.n_treatment",
+                "groups.treatment.n",
+            ),
             ("n_treatment", "treatment_n"),
             20.0,
         ),
         (
-            ("study_design.n_control", "sample_sizes.n_control"),
+            (
+                "study_design.n_control",
+                "sample_sizes.n_control",
+                "groups.control.n",
+            ),
             ("n_control", "control_n"),
             20.0,
         ),
@@ -288,6 +296,7 @@ def _known_effect_matches_reference(value: dict) -> bool:
                 "group_summaries.treatment.change_mean",
                 "group_descriptives.treatment.mean_change",
                 "descriptive_statistics.treatment.mean_change",
+                "groups.treatment.mean_change",
             ),
             ("treatment_mean_change", "mean_change_treatment"),
             5.0,
@@ -298,6 +307,7 @@ def _known_effect_matches_reference(value: dict) -> bool:
                 "group_summaries.control.change_mean",
                 "group_descriptives.control.mean_change",
                 "descriptive_statistics.control.mean_change",
+                "groups.control.mean_change",
             ),
             ("control_mean_change", "mean_change_control"),
             0.0,
@@ -323,6 +333,7 @@ def _known_effect_matches_reference(value: dict) -> bool:
         (
             (
                 "primary.ci_95_lower",
+                "primary.ci_lower_95",
                 "primary.ci_95_percent.lower",
                 "primary.confidence_interval_95.0",
             ),
@@ -332,6 +343,7 @@ def _known_effect_matches_reference(value: dict) -> bool:
         (
             (
                 "primary.ci_95_upper",
+                "primary.ci_upper_95",
                 "primary.ci_95_percent.upper",
                 "primary.confidence_interval_95.1",
             ),

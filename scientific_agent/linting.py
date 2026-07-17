@@ -1458,7 +1458,13 @@ def _figure_source_semantic_findings(
             label = node.args[0].value.casefold()
             if any(
                 term in label
-                for term in ("mean difference", "effect estimate", "contrast")
+                for term in (
+                    "mean difference",
+                    "difference in mean",
+                    "difference in change",
+                    "effect estimate",
+                    "contrast",
+                )
             ):
                 effect_x_axes.add(node.func.value.id)
 
@@ -1534,8 +1540,27 @@ def _figure_source_semantic_findings(
                     if isinstance(child, ast.Name)
                 )
 
-            if is_zero_position(node.args[0]) and contains_effect_estimate(
-                node.args[1]
+            xerr_expression = next(
+                (
+                    keyword.value
+                    for keyword in node.keywords
+                    if keyword.arg == "xerr"
+                ),
+                None,
+            )
+            y_names = {
+                child.id
+                for child in ast.walk(node.args[1])
+                if isinstance(child, ast.Name)
+            }
+            xerr_names = {
+                child.id
+                for child in ast.walk(xerr_expression)
+                if isinstance(child, ast.Name)
+            } if xerr_expression is not None else set()
+            transposed_interval = bool(y_names & xerr_names)
+            if is_zero_position(node.args[0]) and (
+                contains_effect_estimate(node.args[1]) or transposed_interval
             ):
                 return [
                     (

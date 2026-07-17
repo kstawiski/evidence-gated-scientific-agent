@@ -2310,6 +2310,7 @@ async def test_gemma_multimodal_display_audit_uses_raster_and_failure_blocks(
     assert calls[0][1].get("image_paths", ()) == ()
     assert calls[1][0] is settings.gemma
     assert calls[1][1]["image_paths"] == (image,)
+    assert calls[1][1]["temperature"] == 0.4
     assert "sole visual critic" in calls[1][1]["system_prompt"]
     blinded_payload = json.dumps(calls[1][1]["payload"]).casefold()
     assert "qwen" not in blinded_payload

@@ -40,6 +40,19 @@ def test_python_static_preflight_rejects_invalid_errorbar_arguments():
     )
 
 
+def test_python_static_preflight_rejects_transposed_x_interval_by_dataflow():
+    violations = _python_static_violations(
+        "ax.errorbar([0], [md], xerr=[[md - ci_lo], [ci_hi - md]])"
+    )
+    assert any("effect interval is transposed" in item for item in violations)
+    assert (
+        _python_static_violations(
+            "ax.errorbar([md], [0], xerr=[[md - ci_lo], [ci_hi - md]])"
+        )
+        == []
+    )
+
+
 def test_python_static_preflight_rejects_secondary_scientific_axes():
     for code in (
         "effect_ax = raw_ax.twinx()",

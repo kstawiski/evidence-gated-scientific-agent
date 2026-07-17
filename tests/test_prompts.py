@@ -216,6 +216,10 @@ def test_display_auditor_requires_explicit_per_figure_layout_clearance():
     assert "visual-clearance:<display_id>:annotation-data" in DISPLAY_AUDITOR
     assert "primary Qwen agent never receives raster images" in DISPLAY_AUDITOR
     assert "A bare pass" in DISPLAY_AUDITOR
+    assert "do not\ninvent `findings`, `findings_list`" in DISPLAY_AUDITOR
+    assert "must\ncontain at least one complete `blocking_findings` object" in (
+        DISPLAY_AUDITOR
+    )
 
 
 def test_report_contract_does_not_register_extracted_source_images_as_displays():

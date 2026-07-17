@@ -60,6 +60,33 @@ def _python_static_violations(code: str) -> list[str]:
             violations.add(
                 "Matplotlib errorbar rejects linewidths=; use linewidth= or elinewidth="
             )
+        if len(node.args) >= 2 and "xerr" in keywords:
+            x_expression = node.args[0]
+            if (
+                isinstance(x_expression, (ast.List, ast.Tuple))
+                and len(x_expression.elts) == 1
+            ):
+                x_expression = x_expression.elts[0]
+            x_is_literal_zero = (
+                isinstance(x_expression, ast.Constant)
+                and isinstance(x_expression.value, (int, float))
+                and not isinstance(x_expression.value, bool)
+                and float(x_expression.value) == 0.0
+            )
+            y_names = {
+                item.id for item in ast.walk(node.args[1]) if isinstance(item, ast.Name)
+            }
+            xerr_names = {
+                item.id
+                for item in ast.walk(keywords["xerr"])
+                if isinstance(item, ast.Name)
+            }
+            if x_is_literal_zero and y_names & xerr_names:
+                violations.add(
+                    "Matplotlib effect interval is transposed: xerr is derived from "
+                    "the value plotted on y while x is fixed at zero; plot the "
+                    "estimate on x and use a constant categorical y position"
+                )
         scalar_x = bool(node.args and isinstance(node.args[0], ast.Constant))
         if not scalar_x:
             continue

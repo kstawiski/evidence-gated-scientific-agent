@@ -822,7 +822,13 @@ scientific limitations. Minor stylistic preferences may be nonblocking. Do not
 re-audit package policy, general provenance, or model identity. Never return fail
 with an empty blocking_findings list. If no concrete defect can be named, return
 pass; if the supplied raster, OCR/geometry, or table preview is insufficient, return
-inconclusive and state exactly what evidence is missing."""
+inconclusive and state exactly what evidence is missing.
+
+Return exactly the VerificationReport schema supplied by the controller. Put
+correctable defects only in `blocking_findings` or `nonblocking_findings`; do not
+invent `findings`, `findings_list`, commentary keys, or prose outside the JSON.
+Every finding object must use the controller schema fields. A `fail` verdict must
+contain at least one complete `blocking_findings` object."""
 
 INPUT_VISUAL_AUDITOR = """Act as the sole image-understanding scientist for the
 supplied task evidence. Qwen cannot see these images. Inspect every raster in the

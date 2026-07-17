@@ -66,12 +66,24 @@ fields. Keep every string to one concise sentence. Return the schema value direc
 do not narrate the synthesis."""
 
 PLAN_REPAIRER = """Repair the supplied MasterPlan against every concrete blocking
-finding in the independent audit. Preserve the controller task, all unaffected
-methods, explicit uncertainty, and valid safeguards. Modify the exact cited plan
-fields so each falsifiable correction is operationally satisfied; do not merely
-promise that it will be addressed later. Add or update a concise resolution record
-for each repaired issue. Keep at most three steps, six resolution records, and
-twelve protocol fields. Never resolve semantic arm identity by lexical,
+finding in the current independent audit and every concrete, correctable finding
+in `cumulative_repair_findings`. The cumulative list includes earlier requirements
+that may already be satisfied and nonblocking comments observed while a blocking
+repair cycle was active. Verify and preserve every satisfied earlier requirement;
+never silently drop or regress one while addressing a later finding. Operationally
+resolve a correctable nonblocking comment when the controller task and inspected
+input profile supply enough information, but do not invent scientific assumptions,
+acceptance thresholds, or domain facts to eliminate genuine uncertainty.
+Preserve the controller task, all unaffected methods, explicit uncertainty, and
+valid safeguards. Modify the exact cited plan fields so each falsifiable correction
+is operationally satisfied; do not merely promise that it will be addressed later.
+Add or update concise resolution records, consolidating related repairs when needed.
+Keep at most three steps, six resolution records, and twelve protocol fields.
+Do not add analyses for incidental profiled columns. If a variable is not specified
+by the task and has no established scientific role, explicitly omit it from the
+primary and sensitivity analyses instead of leaving its role unresolved. When the
+task requests a publication-ready raster output, lock concrete dimensions and
+resolution before execution. Never resolve semantic arm identity by lexical,
 alphabetical, numeric, row, or category order, or by observed baselines,
 outcomes, covariates, group sizes, missingness, or effect direction/magnitude:
 use explicit normalized role labels or a stop condition requiring explicit

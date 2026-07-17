@@ -71,6 +71,7 @@ repository does not embed them.
 | v0.4.1 planted effect (pre category gate) | **CANCELLED / FAILED MERIT GATE** | Run `26b27ec4-8c6e-4a06-beb5-f381b79fd43c` corrected the effect panel but overlapped both raw-data groups at the same categorical position and emitted length-one R scalar arrays. The operator cancelled it during repair 1. This motivated unique-category validation and scalar R JSON requirements. |
 | v0.4.1 planted effect (pre critic normalization) | **FAILED MERIT GATE** | Run `7511eb4c-659f-4d84-9980-9fdc767cc578` reconciled the correct statistics, passed deterministic validation, linked a local PubMed article, and auto-published it to knowledge. It was still rejected because the figure ambiguously labeled a raw mean difference as `d`, while Gemma returned valid objections in an incomplete schema that failed closed without becoming repair actions. This motivated raw-effect label checks and conservative preservation of explicit failed-review objections. |
 | v0.4.1 planted effect (pre monotonic critic gate) | **TERMINAL SUPPORTED / FAILED MERIT GATE** | Run `6d3098ca-d2c4-4318-b403-d4900bea40d0` recovered the exact effect, corrected table precision, used the required Results structure, and rescored 18/18 after the evaluator learned its exact Welch schema. It remains rejected: Gemma first detected hidden point overplotting, then a format-repair call erased the fail with a bare pass; the article also understated AI involvement and overstated protocol timing and robustness. This motivated monotonic fail preservation and deterministic prose-overclaim gates. |
+| v0.4.1 planted effect (pre plan-convergence gate) | **REQUIRES MORE EVIDENCE / FAILED MERIT GATE** | Run `4d6f55e3-f7b1-4b53-9a86-4b2e9c572c15` correctly failed closed before computation, but four repairs did not converge because each round received only the latest audit. Earlier Hedges-formula, semantic-arm, site-role, and raster-specification requirements were not preserved together. This motivated cumulative repair findings and explicit monotonic preservation across rounds. |
 
 The PubMed gate's scored JSON and full provenance bundle are retained with the
 deployment evaluation artifacts. The local paper copies are hash verified and
@@ -105,6 +106,8 @@ The later computation-valid but critic-incomplete run is retained as
 [`results/v0.4.1-known-effect-pre-critic-normalization.json`](results/v0.4.1-known-effect-pre-critic-normalization.json).
 The mechanically passing but scientifically rejected critic-regression run is retained as
 [`results/v0.4.1-known-effect-pre-monotonic-critic-gate.json`](results/v0.4.1-known-effect-pre-monotonic-critic-gate.json).
+The fail-closed but non-convergent planning run is retained as
+[`results/v0.4.1-known-effect-pre-plan-convergence.json`](results/v0.4.1-known-effect-pre-plan-convergence.json).
 
 The A2A evidence is retained as
 [`results/v0.4.0-a2a-live.json`](results/v0.4.0-a2a-live.json). The server uses

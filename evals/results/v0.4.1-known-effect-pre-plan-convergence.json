@@ -1,0 +1,29 @@
+{
+  "case": "known-effect",
+  "release_candidate": "v0.4.1",
+  "deployment_commit": "7543ebdca767c8532f9b64ddfa3ad226e76b0ebb",
+  "deployment_image_digest": "sha256:47a28b52d4eb3cd86abfbf2ed813b9c6a9044d65111172e2cc7c6bcf68a0feef",
+  "workspace_id": "c17d65d5-af05-4819-9129-23389498fea9",
+  "run_id": "4d6f55e3-f7b1-4b53-9a86-4b2e9c572c15",
+  "started_at": "2026-07-17T15:56:33.030901+00:00",
+  "finished_at": "2026-07-17T16:20:22.157832+00:00",
+  "terminal_status": "requires_more_evidence",
+  "terminal_phase": "complete",
+  "merit_gate": "failed",
+  "productive_behavior": [
+    "The controller profiled the immutable input before planning and exposed only bounded schema metadata and complete candidate role labels.",
+    "Gemma caught an incorrect Hedges J denominator in the first plan, and deterministic lint continued to reject unsafe semantic arm mapping.",
+    "The workflow failed closed before computation when four bounded plan repairs did not produce an evidence-ready protocol."
+  ],
+  "release_blockers": [
+    "Each repair request contained only the latest audit, so earlier corrected requirements were not durable across later rounds.",
+    "A concrete nonblocking request to lock the site variable's role and raster dimensions was not carried into later repairs while another blocking repair kept the loop active.",
+    "The final plan again left the site role unresolved and failed deterministic semantic-arm mapping lint despite intermediate plans addressing those issues."
+  ],
+  "implemented_repairs": [
+    "The controller now accumulates distinct blocking and nonblocking findings across an already-active bounded plan-repair cycle.",
+    "Every later repair receives the cumulative finding set and records it in plan repair history for auditability.",
+    "The repair contract requires preservation of satisfied historical requirements, resolution of operationally correctable comments, explicit omission of incidental variables without an established role, and concrete publication-ready raster specifications."
+  ],
+  "disposition": "Rejected as a release acceptance run even though it failed closed correctly; retained as the regression fixture for monotonic plan-repair convergence."
+}

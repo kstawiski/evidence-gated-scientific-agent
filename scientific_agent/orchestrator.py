@@ -2504,15 +2504,50 @@ async def _audit_plan(
     return await audit_master_plan(settings, master, on_visible_text)
 
 
+def _merge_plan_repair_findings(
+    existing: tuple[Finding, ...], audit: VerificationReport
+) -> tuple[Finding, ...]:
+    """Retain distinct repair findings across bounded plan-repair rounds."""
+
+    merged: list[Finding] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for finding in (
+        *existing,
+        *audit.blocking_findings,
+        *audit.nonblocking_findings,
+    ):
+        key = (
+            finding.finding_id,
+            finding.location,
+            finding.problem,
+            finding.falsification_test_or_correction,
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(finding)
+    return tuple(merged)
+
+
 async def _repair_plan(
     settings: Settings,
     planning: PlanningResult,
     on_visible_text: Callable[[str, str], None] | None = None,
+    *,
+    repair_findings: tuple[Finding, ...] = (),
 ) -> PlanningResult:
+    cumulative_findings = _merge_plan_repair_findings(repair_findings, planning.audit)
     bundle = {
         "master_plan": planning.master_plan.model_dump(mode="json"),
         "audit": planning.audit.model_dump(mode="json"),
-        "instruction": "Correct only concrete blocking findings and preserve uncertainty.",
+        "cumulative_repair_findings": [
+            finding.model_dump(mode="json") for finding in cumulative_findings
+        ],
+        "instruction": (
+            "Correct every current blocking finding and every concrete, "
+            "correctable cumulative finding. Preserve every previously satisfied "
+            "repair requirement and genuine uncertainty."
+        ),
     }
     master = await request_structured(
         settings.qwen,
@@ -4098,12 +4133,16 @@ async def run_scientific_task(
             planning = await run_typed(workflow, planning_input, PlanningResult)
         _cancel_checkpoint(cancel_event)
         plan_repair_history = []
+        plan_repair_findings: tuple[Finding, ...] = ()
         while (
             planning.status == "requires_revision"
             and len(plan_repair_history) < settings.max_repair_rounds
         ):
             round_number = len(plan_repair_history) + 1
             previous = planning
+            plan_repair_findings = _merge_plan_repair_findings(
+                plan_repair_findings, planning.audit
+            )
             report_progress(
                 "plan-review",
                 f"Repairing concrete plan findings (round {round_number})",
@@ -4113,11 +4152,18 @@ async def run_scientific_task(
                 {"round": round_number, "reason": planning.audit.verdict},
             )
             planning = await _repair_plan(
-                settings, planning, record_planning_visible_text
+                settings,
+                planning,
+                record_planning_visible_text,
+                repair_findings=plan_repair_findings,
             )
             plan_repair_history.append(
                 {
                     "round": round_number,
+                    "cumulative_repair_findings": [
+                        finding.model_dump(mode="json")
+                        for finding in plan_repair_findings
+                    ],
                     "rejected_planning": previous.model_dump(mode="json"),
                     "repaired_status": planning.status,
                     "repaired_audit": planning.audit.model_dump(mode="json"),

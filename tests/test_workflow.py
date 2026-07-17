@@ -1130,6 +1130,7 @@ async def test_plan_repair_preserves_controller_task_and_uses_dedicated_prompt(
 
     async def fake_request(_endpoint, **kwargs):
         seen["system_prompt"] = kwargs["system_prompt"]
+        seen["payload"] = kwargs["payload"]
         return revised_master
 
     async def fake_audit(_settings, _master, _visible=None):
@@ -1151,6 +1152,16 @@ async def test_plan_repair_preserves_controller_task_and_uses_dedicated_prompt(
                     falsification_test_or_correction="Specify the operational rule.",
                 )
             ],
+            nonblocking_findings=[
+                Finding(
+                    finding_id="plan-output",
+                    location="plan.expected_artifacts",
+                    problem="The raster dimensions are not fixed.",
+                    why_it_matters="Rendering would not be reproducible.",
+                    evidence="No dimensions appear in the plan.",
+                    falsification_test_or_correction="Specify dimensions and DPI.",
+                )
+            ],
         ),
         plan_lints=[],
         status="requires_revision",
@@ -1161,6 +1172,60 @@ async def test_plan_repair_preserves_controller_task_and_uses_dedicated_prompt(
     assert repaired.master_plan.task == controller_task
     assert repaired.status == "supported"
     assert "every concrete blocking" in seen["system_prompt"]
+    assert "never silently drop or regress" in seen["system_prompt"]
+    assert [
+        item["finding_id"] for item in seen["payload"]["cumulative_repair_findings"]
+    ] == ["plan-1", "plan-output"]
+
+
+def test_plan_repair_findings_accumulate_without_losing_same_criterion():
+    formula = Finding(
+        finding_id="plan-audit-reproducibility_and_unresolved_ambiguity",
+        location="plan.steps[0].validators[0]",
+        problem="The Hedges correction formula is wrong.",
+        why_it_matters="A correct result would fail validation.",
+        evidence="The denominator is 4*(N-9).",
+        falsification_test_or_correction="Use the task-specified denominator.",
+    )
+    site = Finding(
+        finding_id="plan-audit-reproducibility_and_unresolved_ambiguity",
+        location="plan.unresolved_questions",
+        problem="The role of site remains unresolved.",
+        why_it_matters="The executable protocol remains ambiguous.",
+        evidence="The plan asks whether site should be included.",
+        falsification_test_or_correction="Explicitly include or omit site.",
+    )
+    arm_mapping = Finding(
+        finding_id="deterministic-arbitrary_semantic_arm_mapping",
+        location="plan.steps[0].validators[1]",
+        problem="Semantic arm mapping is not explicit.",
+        why_it_matters="The contrast could be reversed.",
+        evidence="The mapping relies on category order.",
+        falsification_test_or_correction="Use explicit normalized role labels.",
+    )
+
+    first = orchestrator_module._merge_plan_repair_findings(
+        (), VerificationReport(verdict="fail", blocking_findings=[formula])
+    )
+    second = orchestrator_module._merge_plan_repair_findings(
+        first,
+        VerificationReport(
+            verdict="fail",
+            blocking_findings=[arm_mapping],
+            nonblocking_findings=[site],
+        ),
+    )
+    deduplicated = orchestrator_module._merge_plan_repair_findings(
+        second,
+        VerificationReport(verdict="fail", blocking_findings=[formula]),
+    )
+
+    assert [finding.problem for finding in second] == [
+        formula.problem,
+        arm_mapping.problem,
+        site.problem,
+    ]
+    assert deduplicated == second
 
 
 @pytest.mark.asyncio

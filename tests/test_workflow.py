@@ -2443,7 +2443,7 @@ async def test_display_audit_failure_preserves_completed_report_review(
     )
 
     assert review.verdict == "inconclusive"
-    assert calls == 2
+    assert calls == 3
     assert (
         json.loads((tmp_path / "live" / "gemma_report_review.json").read_text())[
             "verdict"
@@ -2464,6 +2464,60 @@ async def test_display_audit_failure_preserves_completed_report_review(
     assert display_audit["review_mode"] == "multimodal_unavailable"
     assert display_audit["batches_attempted"] == 1
     assert display_audit["batches_succeeded"] == 0
+
+
+@pytest.mark.anyio
+async def test_display_audit_retries_one_fresh_call_after_unusable_response(
+    tmp_path, monkeypatch
+):
+    planning, report = _display_audit_fixture()
+    image = tmp_path / "effect.png"
+    image.write_bytes(b"test image bytes")
+    display_inputs = [
+        {
+            "display_id": "effect-figure",
+            "kind": "figure",
+            "sha256": "a" * 64,
+            "media_type": "image/png",
+            "width": 800,
+            "height": 600,
+            "ocr": {"available": True, "text": "Treatment effect 5.00", "words": []},
+        }
+    ]
+    monkeypatch.setattr(
+        "scientific_agent.orchestrator.prepare_display_audit",
+        lambda *_args: ([image], display_inputs),
+    )
+    calls = 0
+
+    async def flaky_request(*_args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return VerificationReport(verdict="pass")
+        if calls == 2:
+            raise RuntimeError("schema-invalid display review")
+        return _pass_with_requested_display_clearances(kwargs)
+
+    monkeypatch.setattr(
+        "scientific_agent.orchestrator.request_structured", flaky_request
+    )
+    review = await _audit_report_resilient(
+        Settings(),
+        planning,
+        report,
+        DeterministicValidation(passed=True),
+        RetrievalEvidence(),
+        ComputationEvidence(),
+        EventLedger(tmp_path / "events.jsonl"),
+        live_dir=tmp_path / "live",
+    )
+
+    assert calls == 3
+    assert review.verdict == "pass"
+    display_audit = json.loads((tmp_path / "gemma_display_audit.json").read_text())
+    assert display_audit["batches_attempted"] == 1
+    assert display_audit["batches_succeeded"] == 1
 
 
 @pytest.mark.anyio

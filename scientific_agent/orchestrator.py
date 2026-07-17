@@ -3162,18 +3162,32 @@ async def _audit_report(
                     "total": len(image_batches),
                 },
             }
-            try:
-                raw_model_result = await request_structured(
-                    settings.gemma,
-                    system_prompt=DISPLAY_AUDITOR,
-                    payload=display_payload,
-                    output_type=VerificationReport,
-                    temperature=settings.gemma.temperature,
-                    timeout=120 if simple_mode else 240,
-                    image_paths=tuple(batch_images),
-                    on_visible_text=on_visible_text,
-                    cancel_event=cancel_event,
-                )
+            raw_model_result: VerificationReport | None = None
+            display_error: Exception | None = None
+            for request_attempt in range(2):
+                try:
+                    raw_model_result = await request_structured(
+                        settings.gemma,
+                        system_prompt=DISPLAY_AUDITOR,
+                        payload=display_payload,
+                        output_type=VerificationReport,
+                        temperature=settings.gemma.temperature,
+                        timeout=120 if simple_mode else 240,
+                        image_paths=tuple(batch_images),
+                        on_visible_text=on_visible_text,
+                        cancel_event=cancel_event,
+                    )
+                    break
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    display_error = exc
+                    if request_attempt == 0 and on_visible_text is not None:
+                        on_visible_text(
+                            "\n[Evidence Bench is starting one fresh bounded Gemma "
+                            "display-audit call after an unusable response.]\n"
+                        )
+            if raw_model_result is not None:
                 model_result = _enforce_display_clearance_refs(
                     _without_ocr_contradicted_typography(
                         raw_model_result, batch_inputs
@@ -3192,16 +3206,15 @@ async def _audit_report(
                     audit_metadata["display_batches_succeeded"] = (
                         int(cast(int, audit_metadata["display_batches_succeeded"])) + 1
                     )
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
+            else:
+                error_type = type(display_error).__name__
                 display_results.append(
                     VerificationReport(
                         verdict="inconclusive",
                         unsupported_claims=[
                             "Independent Gemma display review batch "
                             f"{batch_number}/{len(image_batches)} unavailable "
-                            f"({type(exc).__name__}); article review is preserved "
+                            f"({error_type}); article review is preserved "
                             "but no display approval is inferred."
                         ],
                     )

@@ -302,6 +302,11 @@ nonzero p-value in scientific notation or as an inequality (for example,
 table and figure values to conventional scientific display precision (normally
 3-4 significant figures) while preserving full precision in machine-readable
 JSON.
+Never reconstruct, hand-copy, or hard-code subject-level observations for a
+figure. The plotting script must read raw points from the immutable workspace
+input or an exact successful generated data artifact, derive the plotted values
+in code, and assert that their counts and summary statistics agree with the
+machine-readable results before saving the figure.
 Qwen has no image-understanding capability. When the task asks to inspect source
 figures, scans, visual proofs, slide pages, or images embedded in PDF/Office/archive
 inputs, use Python/R only to inventory and deterministically render or convert the
@@ -643,6 +648,10 @@ metadata together.
 For figures, compare the actual chart type, x/y variables, axis labels and units,
 groups, colors/symbols, legends, annotations, sample sizes, estimates, and
 uncertainty encodings with the title, caption, alt text, and article. Explicitly
+compare any raw-point, strip, or rug distribution with the reported group count,
+range, and dispersion. A visibly zero-spread group alongside a nonzero reported
+SD, or points inconsistent with the supplied table/result summary, is a blocking
+data-fidelity defect even when the mean marker is correct. Explicitly
 verify every caption claim about mark orientation and geometry (horizontal versus
 vertical bars, lines, intervals, panels, or brackets) against the pixels; a short
 perpendicular cap is not the same mark as the interval or error-bar stem.

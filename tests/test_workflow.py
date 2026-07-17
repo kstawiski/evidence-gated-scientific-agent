@@ -25,6 +25,7 @@ from scientific_agent.orchestrator import (
     _needs_repair,
     _merge_retrieval_evidence,
     _without_ocr_contradicted_typography,
+    _without_inline_citation_policy_conflicts,
     _without_validation_conflicts,
     _prepare_task_spec,
     _register_computation_path_evidence,
@@ -1516,6 +1517,130 @@ def test_critic_cannot_reverse_deterministic_table_precision_rule():
     assert filtered.verdict == "inconclusive"
     assert filtered.blocking_findings == []
     assert any("contradictory blocker" in item for item in filtered.unsupported_claims)
+
+
+def _report_with_literature_and_computation_sources() -> ScientificReport:
+    return ScientificReport(
+        title="Effect report",
+        executive_summary="The effect was estimated.",
+        introduction="A published method motivated the analysis.",
+        methods=["The effect was computed from the supplied data."],
+        results="The estimated effect was 5.0.",
+        discussion="The estimate is interpreted within the supplied data.",
+        conclusions="The supplied data support an effect estimate.",
+        claims=[
+            ClaimRecord(
+                claim_id="computed-effect",
+                text="The estimated effect was 5.0.",
+                claim_type="computed",
+                evidence_refs=["src-python-results"],
+                status="supported",
+            )
+        ],
+        sources=[
+            SourceRecord(
+                source_id="src-python-results",
+                title="Python result",
+                artifact_path="/run/output/results.json",
+                source_type="dataset",
+                retrieved_at="2026-07-16T00:00:00Z",
+                supporting_passage="Machine-readable computation output.",
+            ),
+            SourceRecord(
+                source_id="src-nakagawa",
+                title="Published effect-size method",
+                url="https://pubmed.ncbi.nlm.nih.gov/17944619/",
+                pmid="17944619",
+                source_type="primary_study",
+                retrieved_at="2026-07-16T00:00:00Z",
+                supporting_passage="The source describes an effect-size method.",
+            ),
+        ],
+    )
+
+
+def test_critic_cannot_require_inline_citation_to_computation_artifact():
+    review = VerificationReport(
+        verdict="fail",
+        blocking_findings=[
+            Finding(
+                finding_id="missing-computation-citation",
+                location="Results",
+                problem="The numerical result lacks an InlineCitation.",
+                why_it_matters="The number should remain traceable.",
+                evidence="The result is supported by src-python-results.",
+                falsification_test_or_correction=(
+                    "Add an InlineCitation to the computation artifact "
+                    "src-python-results."
+                ),
+            )
+        ],
+    )
+
+    filtered = _without_inline_citation_policy_conflicts(
+        review, _report_with_literature_and_computation_sources()
+    )
+
+    assert filtered.verdict == "inconclusive"
+    assert filtered.blocking_findings == []
+    assert any(
+        "reserved for URL-backed" in item for item in filtered.unsupported_claims
+    )
+
+
+def test_misattributed_literature_citation_keeps_blocker_with_valid_correction():
+    review = VerificationReport(
+        verdict="fail",
+        blocking_findings=[
+            Finding(
+                finding_id="misattributed-literature",
+                location="Results",
+                problem=(
+                    "The computed estimate is misattributed to src-nakagawa, "
+                    "which does not support this dataset-specific value."
+                ),
+                why_it_matters="The citation implies the paper produced the result.",
+                evidence="The value was generated in src-python-results.",
+                falsification_test_or_correction=(
+                    "Replace the InlineCitation source with src-python-results."
+                ),
+            )
+        ],
+    )
+
+    filtered = _without_inline_citation_policy_conflicts(
+        review, _report_with_literature_and_computation_sources()
+    )
+
+    assert filtered.verdict == "fail"
+    assert len(filtered.blocking_findings) == 1
+    correction = filtered.blocking_findings[0].falsification_test_or_correction
+    assert correction.startswith("Remove the literature InlineCitation")
+    assert "ClaimRecord.evidence_refs" in correction
+
+
+def test_legitimate_missing_literature_inline_citation_remains_blocking():
+    review = VerificationReport(
+        verdict="fail",
+        blocking_findings=[
+            Finding(
+                finding_id="missing-literature-citation",
+                location="Introduction",
+                problem="The methodological statement lacks an InlineCitation.",
+                why_it_matters="The statement relies on external literature.",
+                evidence="src-nakagawa directly supports the statement.",
+                falsification_test_or_correction=(
+                    "Add an InlineCitation to src-nakagawa on that statement."
+                ),
+            )
+        ],
+    )
+
+    filtered = _without_inline_citation_policy_conflicts(
+        review, _report_with_literature_and_computation_sources()
+    )
+
+    assert filtered == review
 
 
 def test_live_update_instruction_cannot_reverse_table_precision_rule():

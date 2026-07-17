@@ -636,6 +636,111 @@ def _without_validation_conflicts(
     )
 
 
+def _without_inline_citation_policy_conflicts(
+    review: VerificationReport,
+    report: ScientificReport,
+) -> VerificationReport:
+    """Reconcile critic findings with the article-citation provenance contract.
+
+    URL-backed knowledge and literature sources may appear as article-style inline
+    citations. Local computation artifacts may support ClaimRecords, but citing
+    them as though they were papers is deterministically invalid. Preserve a
+    critic's valid observation that a literature citation is misplaced on a
+    computed result, while replacing its invalid proposed correction.
+    """
+
+    computation_source_ids = {
+        source.source_id.casefold()
+        for source in report.sources
+        if source.url is None and source.artifact_path is not None
+    }
+    literature_source_ids = {
+        source.source_id.casefold()
+        for source in report.sources
+        if source.url is not None
+    }
+    if not computation_source_ids:
+        return review
+
+    changed = False
+    blocking: list[Finding] = []
+    for finding in review.blocking_findings:
+        combined = " ".join(
+            (
+                finding.problem,
+                finding.why_it_matters,
+                finding.evidence,
+                finding.falsification_test_or_correction,
+            )
+        ).casefold()
+        correction = finding.falsification_test_or_correction.casefold()
+        discusses_inline_citation = (
+            "inlinecitation" in combined or "inline citation" in combined
+        )
+        targets_computation = any(
+            source_id in correction for source_id in computation_source_ids
+        ) or any(
+            phrase in correction
+            for phrase in (
+                "computation artifact",
+                "computational artifact",
+                "analysis artifact",
+                "results artifact",
+            )
+        )
+        if not (discusses_inline_citation and targets_computation):
+            blocking.append(finding)
+            continue
+
+        misplaced_literature = any(
+            source_id in combined for source_id in literature_source_ids
+        ) and any(
+            token in combined
+            for token in (
+                "misattribut",
+                "incorrectly attribut",
+                "wrong source",
+                "does not support",
+                "not support",
+            )
+        )
+        if misplaced_literature:
+            blocking.append(
+                finding.model_copy(
+                    update={
+                        "falsification_test_or_correction": (
+                            "Remove the literature InlineCitation from the "
+                            "computed result. Keep computation provenance in the "
+                            "matching ClaimRecord.evidence_refs; if the literature "
+                            "supports a distinct methodological statement, anchor "
+                            "it only to that statement."
+                        )
+                    }
+                )
+            )
+        changed = True
+
+    if not changed:
+        return review
+    unsupported = [*review.unsupported_claims]
+    unsupported.append(
+        "The critic requested an article-style InlineCitation to a local "
+        "computation artifact. That request was discarded or normalized because "
+        "computed results use ClaimRecord.evidence_refs; InlineCitations are "
+        "reserved for URL-backed knowledge and literature sources."
+    )
+    verdict = review.verdict
+    if verdict == "fail" and not blocking:
+        verdict = "inconclusive"
+    return review.model_copy(
+        update={
+            "verdict": verdict,
+            "blocking_findings": blocking,
+            "unsupported_claims": list(dict.fromkeys(unsupported)),
+        }
+    )
+
+
 def _without_ocr_contradicted_typography(
     review: VerificationReport,
     display_inputs: list[dict],
@@ -3071,6 +3176,7 @@ async def _audit_report(
         cancel_event=cancel_event,
     )
     report_result = _without_validation_conflicts(raw_report_result, validation)
+    report_result = _without_inline_citation_policy_conflicts(report_result, report)
     if audit_outputs is not None:
         audit_outputs["gemma_report_raw"] = raw_report_result
         audit_outputs["gemma_report"] = report_result

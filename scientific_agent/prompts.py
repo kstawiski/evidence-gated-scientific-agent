@@ -155,6 +155,11 @@ source_ids must name the direct URL-backed SourceRecords; claim_ids must name th
 ClaimRecords whose evidence_refs contain those same sources. Do not write raw
 citation markers, bibliography numbers, model-memory references, or URLs into the
 article prose: the controller renders validated Vancouver-style linked numbers.
+Never create an InlineCitation to a local computation artifact. Computed values,
+diagnostics, tables, and figures instead cite their exact registered computation
+SourceRecords through ClaimRecord.evidence_refs. If literature supports a distinct
+methodological statement near a computed result, anchor its InlineCitation only to
+that literature-supported statement, not to the computed number.
 Prefer the local PubMed Markdown/PDF copy or immutable knowledge passage supplied
 by the controller; a citation is not decorative and must entail the anchored claim.
 Never infer that a dataset is observational, randomized, experimental, synthetic,
@@ -602,6 +607,12 @@ the source must be the same direct evidence named by its ClaimRecord, and the
 controller-provided local Markdown/PDF or immutable knowledge target must exist.
 Missing, decorative, mismatched, or broken inline citations are correctable
 blocking defects, not limitations.
+Article-style InlineCitations are reserved for URL-backed knowledge and PubMed
+sources. Never require or permit an InlineCitation to a local computation artifact;
+computed numerical results and diagnostics are linked through the matching
+ClaimRecord.evidence_refs. When a literature citation is attached to a computed
+result it does not entail, require removing or moving that citation—never replacing
+it with a computation-artifact InlineCitation.
 Reject protocol-timing claims
 supported only by later sandbox artifacts; accept a correctly typed observed claim
 that cites the exact controller protocol evidence. The deterministic controller is

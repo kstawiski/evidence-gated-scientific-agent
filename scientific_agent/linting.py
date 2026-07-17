@@ -1212,6 +1212,7 @@ def validate_report(
     require_pubmed_literature: bool = False,
     require_inline_citations: bool = False,
     required_output_extensions: tuple[str, ...] = (),
+    required_display_kinds: tuple[str, ...] = (),
     controller_artifacts: tuple[ArtifactRef, ...] = (),
     controller_dates: tuple[str, ...] = (),
 ) -> DeterministicValidation:
@@ -1261,6 +1262,20 @@ def validate_report(
         for artifact in (computation.artifacts if computation else [])
         if artifact.description == "sandbox-generated analysis artifact"
     ]
+    present_display_kinds = {display.kind for display in report.displays}
+    for required_kind in required_display_kinds:
+        if required_kind not in present_display_kinds:
+            findings.append(
+                LintFinding(
+                    code="required_report_display_missing",
+                    location="displays",
+                    message=(
+                        f"The locked plan requires a reader-facing {required_kind}, "
+                        "but the report does not register one. Generate the exact "
+                        "artifact and embed it with a caption and evidence links."
+                    ),
+                )
+            )
     for required_suffix in required_output_extensions:
         candidates = [
             path

@@ -3497,6 +3497,23 @@ def _requires_pubmed_literature(task: TaskSpec) -> bool:
     )
 
 
+def _required_report_display_kinds(master: MasterPlan) -> tuple[str, ...]:
+    """Derive explicit figure/table obligations from the locked plan."""
+
+    declared = [
+        *master.task.deliverables,
+        *master.plan.expected_artifacts,
+        *(output for step in master.plan.steps for output in step.outputs),
+    ]
+    text = " ".join(declared).casefold()
+    required: list[str] = []
+    if "/output/figures/" in text or re.search(r"\b(figure|plot|chart)s?\b", text):
+        required.append("figure")
+    if "/output/tables/" in text or re.search(r"\btables?\b", text):
+        required.append("table")
+    return tuple(required)
+
+
 def _requires_cross_language_reconciliation(task: TaskSpec) -> bool:
     languages = set(task.required_computation_languages)
     if not {"python", "r"}.issubset(languages):
@@ -4124,6 +4141,7 @@ async def run_scientific_task(
         for item in requested_outputs
         if item in REQUESTED_OUTPUT_EXTENSIONS
     )
+    required_display_kinds = _required_report_display_kinds(planning.master_plan)
     require_inline_citations = bool(
         retrieval.knowledge_passages
         or retrieval.knowledge_visuals
@@ -4138,6 +4156,7 @@ async def run_scientific_task(
         require_pubmed_literature=require_pubmed_literature,
         require_inline_citations=require_inline_citations,
         required_output_extensions=required_output_extensions,
+        required_display_kinds=required_display_kinds,
         controller_artifacts=controller_artifacts,
         controller_dates=controller_dates,
     )
@@ -4280,6 +4299,7 @@ async def run_scientific_task(
             require_pubmed_literature=require_pubmed_literature,
             require_inline_citations=require_inline_citations,
             required_output_extensions=required_output_extensions,
+            required_display_kinds=required_display_kinds,
             controller_artifacts=controller_artifacts,
             controller_dates=controller_dates,
         )

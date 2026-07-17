@@ -116,6 +116,21 @@ def test_plan_linter_accepts_complete_read_only_plan():
     assert lint_plan(task(), good_plan()).passed
 
 
+def test_locked_reader_displays_cannot_disappear_from_report():
+    validation = validate_report(
+        article_report(), required_display_kinds=("figure", "table")
+    )
+
+    missing = [
+        finding.message
+        for finding in validation.findings
+        if finding.code == "required_report_display_missing"
+    ]
+    assert len(missing) == 2
+    assert any("reader-facing figure" in message for message in missing)
+    assert any("reader-facing table" in message for message in missing)
+
+
 def test_controller_method_lock_satisfies_confirmatory_lint_without_magic_words():
     confirmatory = task().model_copy(update={"scientific_risk": "confirmatory"})
 

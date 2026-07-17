@@ -2567,6 +2567,78 @@ def test_figure_caption_cannot_claim_absent_r_squared_annotation(tmp_path, monke
     }
 
 
+def test_figure_rejects_jitter_on_quantitative_scatter_axis(tmp_path):
+    figure = tmp_path / "output" / "figures" / "effect.png"
+    figure.parent.mkdir(parents=True)
+    Image.new("RGB", (800, 600), color="white").save(figure, dpi=(300, 300))
+    source = tmp_path / "analysis.py"
+    source.write_text(
+        "ax.scatter([1] * len(values), values + jitter)\n", encoding="utf-8"
+    )
+    computation = _display_computation(tmp_path, figure)
+    source_artifact = ArtifactRef(
+        path=str(source),
+        sha256=sha256_file(source),
+        description="python analysis source",
+    )
+    computation.records[0].artifacts.append(source_artifact)
+    computation.artifacts.append(source_artifact)
+    report = article_report(
+        results="Figure 1 shows the source observations.",
+        displays=[
+            ReportDisplay(
+                display_id="effect-figure",
+                kind="figure",
+                title="Effect",
+                caption="Raw outcome values by group.",
+                artifact_path=str(figure),
+                alt_text="Raw observations separated by group.",
+            )
+        ],
+    )
+
+    validation = validate_report(report, computation=computation)
+
+    assert "figure_numeric_axis_jitter" in {
+        finding.code for finding in validation.findings
+    }
+
+
+def test_figure_allows_jitter_on_categorical_scatter_axis(tmp_path):
+    figure = tmp_path / "output" / "figures" / "effect.png"
+    figure.parent.mkdir(parents=True)
+    Image.new("RGB", (800, 600), color="white").save(figure, dpi=(300, 300))
+    source = tmp_path / "analysis.py"
+    source.write_text("ax.scatter(group_position + jitter, values)\n", encoding="utf-8")
+    computation = _display_computation(tmp_path, figure)
+    source_artifact = ArtifactRef(
+        path=str(source),
+        sha256=sha256_file(source),
+        description="python analysis source",
+    )
+    computation.records[0].artifacts.append(source_artifact)
+    computation.artifacts.append(source_artifact)
+    report = article_report(
+        results="Figure 1 shows the source observations.",
+        displays=[
+            ReportDisplay(
+                display_id="effect-figure",
+                kind="figure",
+                title="Effect",
+                caption="Raw outcome values by group.",
+                artifact_path=str(figure),
+                alt_text="Raw observations separated by group.",
+            )
+        ],
+    )
+
+    validation = validate_report(report, computation=computation)
+
+    assert "figure_numeric_axis_jitter" not in {
+        finding.code for finding in validation.findings
+    }
+
+
 def test_unavailable_figure_ocr_does_not_invalidate_truthful_caption(
     tmp_path, monkeypatch
 ):

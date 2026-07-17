@@ -328,6 +328,10 @@ machine-readable results before saving the figure. Plot estimands directly at
 the machine-result variable—not at a placeholder coordinate plus a text label—
 and assert that the created artist's point and interval endpoints equal the
 intended estimate and bounds before saving.
+For strip/scatter plots, jitter only the categorical position coordinate; never
+add jitter, noise, or displacement to the quantitative outcome coordinate. Assert
+from the created artist offsets that every plotted quantitative coordinate equals
+an immutable source observation before saving.
 For a raw two-group plot plus a between-group contrast, show the contrast point
 and its confidence interval exactly once on a distinct effect-estimate axis or
 panel. Group-centered error bars, if shown, must be computed from each group's own
@@ -379,6 +383,10 @@ Conceptual schematics must distinguish observation from hypothesis and must not 
 used as scientific evidence by themselves.
 Machine-readable JSON must be strict JSON: encode missing or non-finite values as
 null, never NaN or Infinity.
+Do not import or install a Python/R package solely to calculate artifact hashes or
+provenance. The controller hashes every successful output; analysis scripts should
+write the scientific artifact and exit without `openssl`, `digest`, or an analogous
+hashing dependency unless hashing is itself the requested analysis.
 Before writing inferential JSON, verify that every reported t statistic, degrees of
 freedom, and p-value comes from the same test object and is arithmetically
 consistent; do not hand-edit Welch-Satterthwaite degrees of freedom. For figures,

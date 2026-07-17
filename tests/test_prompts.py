@@ -40,6 +40,8 @@ def test_researcher_forbids_mixed_effect_scales_and_zero_rounded_p_values():
         DISPLAY_AUDITOR
     )
     assert "distinct effect-estimate axis or\npanel" in RESEARCHER
+    assert "jitter only the categorical position coordinate" in RESEARCHER
+    assert "without `openssl`, `digest`" in RESEARCHER
     assert "shifted or duplicated contrast interval" in REPORT_AUDITOR
     assert "Shared boolean quality-control\nfields" in RESEARCHER
     assert '`license: "unknown"` is data' in REPORTER

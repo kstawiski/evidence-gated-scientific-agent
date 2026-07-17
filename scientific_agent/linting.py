@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import ast
 import json
 import hashlib
 import math
@@ -1252,6 +1253,72 @@ def _figure_caption_semantic_findings(
                 "raster; correct the caption or add the promised annotation.",
             )
         ]
+    return []
+
+
+def _figure_source_semantic_findings(
+    artifact_path: Path,
+    computation: ComputationEvidence | None,
+) -> list[tuple[str, str]]:
+    """Reject Python scatter plots that perturb a quantitative y coordinate."""
+
+    if computation is None:
+        return []
+    normalized_figure = os.path.normpath(str(artifact_path))
+    source_paths: list[Path] = []
+    for record in computation.records:
+        if record.status != "succeeded" or not any(
+            os.path.normpath(artifact.path) == normalized_figure
+            for artifact in record.artifacts
+        ):
+            continue
+        source_paths.extend(
+            Path(artifact.path)
+            for artifact in record.artifacts
+            if artifact.description == "python analysis source"
+            and Path(artifact.path).suffix.lower() == ".py"
+        )
+
+    for source_path in source_paths:
+        try:
+            source_bytes = source_path.read_bytes()
+            if len(source_bytes) > 512 * 1024:
+                continue
+            tree = ast.parse(source_bytes.decode("utf-8"))
+        except (OSError, UnicodeDecodeError, SyntaxError):
+            continue
+        for node in ast.walk(tree):
+            if not (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Attribute)
+                and node.func.attr == "scatter"
+            ):
+                continue
+            y_expression: ast.AST | None = node.args[1] if len(node.args) > 1 else None
+            if y_expression is None:
+                y_expression = next(
+                    (keyword.value for keyword in node.keywords if keyword.arg == "y"),
+                    None,
+                )
+            if y_expression is None or not isinstance(
+                y_expression, (ast.BinOp, ast.AugAssign)
+            ):
+                continue
+            identifiers = {
+                child.id.casefold()
+                for child in ast.walk(y_expression)
+                if isinstance(child, ast.Name)
+            }
+            if any("jitter" in identifier for identifier in identifiers):
+                return [
+                    (
+                        "figure_numeric_axis_jitter",
+                        "The plotting source adds jitter to the quantitative y-axis "
+                        "values in a scatter plot, so displayed raw observations no "
+                        "longer equal the source data. Apply jitter only to the "
+                        "categorical position axis and regenerate the figure.",
+                    )
+                ]
     return []
 
 
@@ -2650,6 +2717,12 @@ def validate_report(
                     )
                 for code, message in _figure_caption_semantic_findings(
                     display.caption, display.alt_text, figure_ocr
+                ):
+                    findings.append(
+                        LintFinding(code=code, location=location, message=message)
+                    )
+                for code, message in _figure_source_semantic_findings(
+                    artifact_path, computation
                 ):
                     findings.append(
                         LintFinding(code=code, location=location, message=message)

@@ -232,15 +232,29 @@ def _known_effect_matches_reference(value: dict) -> bool:
         return _metric(value, *aliases)
 
     expected = [
-        (("study_design.n_treatment",), ("n_treatment", "treatment_n"), 20.0),
-        (("study_design.n_control",), ("n_control", "control_n"), 20.0),
         (
-            ("group_summaries.treatment.mean_change",),
+            ("study_design.n_treatment", "sample_sizes.n_treatment"),
+            ("n_treatment", "treatment_n"),
+            20.0,
+        ),
+        (
+            ("study_design.n_control", "sample_sizes.n_control"),
+            ("n_control", "control_n"),
+            20.0,
+        ),
+        (
+            (
+                "group_summaries.treatment.mean_change",
+                "group_descriptives.treatment.mean_change",
+            ),
             ("treatment_mean_change", "mean_change_treatment"),
             5.0,
         ),
         (
-            ("group_summaries.control.mean_change",),
+            (
+                "group_summaries.control.mean_change",
+                "group_descriptives.control.mean_change",
+            ),
             ("control_mean_change", "mean_change_control"),
             0.0,
         ),

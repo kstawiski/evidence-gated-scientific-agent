@@ -313,6 +313,7 @@ def reconciliation_verdict(
                 ] = Path(artifact.path)
 
     observed_passes: list[bool] = []
+    bound_documents: dict[str, dict[str, object]] = {}
     for comparison in comparisons:
         if (
             not isinstance(comparison, dict)
@@ -351,6 +352,11 @@ def reconciliation_verdict(
                 declared, observed, rel_tol=1e-12, abs_tol=1e-12
             ):
                 return None
+            if document is not None:
+                previous = bound_documents.get(side)
+                if previous is not None and previous != document:
+                    return None
+                bound_documents[side] = document
             sources[side] = observed
 
         tolerance = _json_number(comparison.get("tolerance"))
@@ -376,6 +382,36 @@ def reconciliation_verdict(
         if declared_pass is not observed_pass:
             return None
         observed_passes.append(observed_pass)
+
+    # A shared boolean diagnostic with the same JSON path has the same declared
+    # meaning in both language artifacts.  Do not certify numerical agreement
+    # while those machine-readable quality-control conclusions contradict one
+    # another.  This intentionally ignores language-specific fields and numeric
+    # diagnostics, which may use different implementations or tolerances.
+    def diagnostic_booleans(document: dict[str, object]) -> dict[str, bool]:
+        found: dict[str, bool] = {}
+
+        def visit(value: object, path: str) -> None:
+            if isinstance(value, bool):
+                found[path] = value
+            elif isinstance(value, dict):
+                for key, child in value.items():
+                    visit(child, f"{path}.{key}" if path else str(key))
+
+        for section in ("diagnostics", "data_quality", "validation"):
+            value = document.get(section)
+            if isinstance(value, dict):
+                visit(value, section)
+        return found
+
+    if set(bound_documents) == {"python", "r"}:
+        python_diagnostics = diagnostic_booleans(bound_documents["python"])
+        r_diagnostics = diagnostic_booleans(bound_documents["r"])
+        if any(
+            python_diagnostics[path] is not r_diagnostics[path]
+            for path in python_diagnostics.keys() & r_diagnostics.keys()
+        ):
+            observed_passes.append(False)
 
     observed_verdict = all(observed_passes)
     return verdict if verdict is observed_verdict else None

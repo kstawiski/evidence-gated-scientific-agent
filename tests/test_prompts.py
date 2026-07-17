@@ -36,6 +36,9 @@ def test_researcher_forbids_mixed_effect_scales_and_zero_rounded_p_values():
     assert "cross-check every reported test statistic" in REPORT_AUDITOR
     assert "horizontal versus\nvertical bars" in DISPLAY_AUDITOR
     assert "zero-spread group alongside a nonzero reported\nSD" in DISPLAY_AUDITOR
+    assert "Shared boolean quality-control\nfields" in RESEARCHER
+    assert '`license: "unknown"` is data' in REPORTER
+    assert "preserve literal `license:" in REPAIRER
 
 
 def test_planners_do_not_invent_input_names_or_qwen_visual_audits():

@@ -1448,6 +1448,60 @@ def test_reconciliation_rejects_model_authored_forged_pass(tmp_path):
     }
 
 
+def test_reconciliation_rejects_conflicting_shared_boolean_diagnostic(tmp_path):
+    python_path = tmp_path / "python.json"
+    r_path = tmp_path / "r.json"
+    python_path.write_text(
+        '{"primary":{"point_estimate":5.0},"diagnostics":{"missing_values":false}}\n',
+        encoding="utf-8",
+    )
+    r_path.write_text(
+        '{"primary":{"point_estimate":5.0},"diagnostics":{"missing_values":true}}\n',
+        encoding="utf-8",
+    )
+    payload = reconciliation_document(
+        python_path, r_path, python_value=5.0, r_value=5.0
+    )
+    reconciliation_path = tmp_path / "cross_language_reconciliation.json"
+    reconciliation_path.write_text(json.dumps(payload), encoding="utf-8")
+    artifacts = [
+        ArtifactRef(
+            path=str(path),
+            sha256=sha256_file(path),
+            description="sandbox-generated analysis artifact",
+        )
+        for path in (python_path, r_path, reconciliation_path)
+    ]
+    records = [
+        ComputationRecord(
+            execution_id=f"exec-{index}",
+            language=language,
+            code_sha256=str(index) * 64,
+            started_at="2026-07-13T15:00:00Z",
+            duration_seconds=0.1,
+            exit_code=0,
+            status="succeeded",
+            stdout_path=str(tmp_path / f"stdout-{index}.txt"),
+            stderr_path=str(tmp_path / f"stderr-{index}.txt"),
+            artifacts=record_artifacts,
+        )
+        for index, (language, record_artifacts) in enumerate(
+            (("python", [artifacts[0], artifacts[2]]), ("r", [artifacts[1]])),
+            start=1,
+        )
+    ]
+
+    validation = validate_report(
+        article_report(),
+        computation=ComputationEvidence(records=records, artifacts=artifacts),
+        require_reconciliation=True,
+    )
+
+    assert "reconciliation_artifact_invalid" in {
+        finding.code for finding in validation.findings
+    }
+
+
 def test_cross_language_claim_must_cite_reconciliation_artifact(tmp_path):
     python_path = tmp_path / "python_estimate.json"
     python_path.write_text('{"primary":{"point_estimate":5.0}}\n', encoding="utf-8")

@@ -446,7 +446,10 @@ artifact paths and failed checks in the research packet. Use this exact shape:
 "passed": true}]}. When the language artifacts intentionally share a result
 schema, compute every group-specific summary from that group's observations and
 check every shared numeric field used in the report; never copy a pooled or
-whole-cohort diagnostic into a group-specific field."""
+whole-cohort diagnostic into a group-specific field. Shared boolean quality-control
+fields with the same JSON path must also agree across languages; if they conflict,
+fix the implementation or report the reconciliation as failed rather than hiding
+the contradiction."""
 
 REPORTER = (
     """You are the primary scientific report writer. Use only the supplied
@@ -469,7 +472,9 @@ full_text_status into the
 SourceRecord without modification. Keep its canonical PubMed URL in url; the local
 files supplement rather than replace canonical metadata. If a paper is retracted,
 state that prominently and do not use it as ordinary supporting evidence. Do not
-describe abstract_only as full text or invent a missing local PDF path.
+describe abstract_only as full text or invent a missing local PDF path. The literal
+controller value `license: "unknown"` is data, not a missing value: copy it as
+`"unknown"`, never normalize it to null or omit the recorded terms warning.
 For a generic browser or MCP result recorded as web_page, documentation, dataset,
 or other, leave pmid, pmcid, citekey, rights_status, terms_warning,
 local_pdf_path, local_markdown_path, and full_text_status null. Its URL, title,
@@ -801,7 +806,9 @@ rights_status, terms_warning, local_pdf_path, local_markdown_path, and
 full_text_status null. A Chrome snapshot hash belongs only to RetrievalEvidence;
 it is not a local article path or an acquisition status. Never downgrade a
 DOI-bearing scholarly article to web_page to bypass acquisition. Acquire it, or
-remove or narrow every dependent claim."""
+remove or narrow every dependent claim. For an acquired PubMed record, copy every
+controller field exactly; in particular, preserve literal `license: "unknown"`
+instead of changing it to null, and preserve the exact terms warning."""
     + SCIENTIFIC_REPORT_CONTRACT
 )
 

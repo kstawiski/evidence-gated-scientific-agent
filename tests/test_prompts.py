@@ -57,6 +57,8 @@ def test_planning_prompts_forbid_order_based_semantic_arm_assignment():
         normalized = " ".join(prompt.split())
         assert "observed baseline" in normalized
         assert "effect direction" in normalized
+        assert "Shapiro-Wilk" in normalized
+        assert "sensitivity analysis" in normalized
 
 
 def test_input_visual_auditor_requires_exact_schema_and_artifact_paths():

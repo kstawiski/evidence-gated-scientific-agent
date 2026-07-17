@@ -172,6 +172,33 @@ def test_plan_linter_rejects_observed_baseline_arm_assignment():
     assert not report.passed
 
 
+def test_plan_linter_rejects_unrequested_normality_based_primary_stop():
+    confirmatory = task().model_copy(
+        update={
+            "objective": (
+                "Run a prespecified Welch t-test and inspect the data for outliers."
+            ),
+            "scientific_risk": "confirmatory",
+        }
+    )
+    plan = good_plan()
+    plan.steps[0].stop_conditions = [
+        "Halt execution if the Shapiro-Wilk p-value is below 0.05 or any value "
+        "exceeds three standard deviations from the mean."
+    ]
+
+    report = lint_plan(confirmatory, plan, controller_method_lock=True)
+
+    finding = next(
+        item
+        for item in report.findings
+        if item.code == "data_dependent_primary_analysis_stop"
+    )
+    assert finding.blocking
+    assert "predefine a sensitivity analysis" in finding.message
+    assert not report.passed
+
+
 def test_plan_linter_rejects_invented_input_filename_and_accepts_manifest_name():
     planned = good_plan()
     planned.required_data = ["invented_dataset.csv", "uploaded dataset"]

@@ -398,6 +398,20 @@ _ARBITRARY_SEMANTIC_ARM_MAPPING = re.compile(
     r"group size|sample size|missing\w*|effect\w*|response)\b",
     re.IGNORECASE,
 )
+_ASSUMPTION_DIAGNOSTIC = re.compile(
+    r"\b(?:shapiro(?:-wilk)?|normality(?:\s+test)?|outliers?|"
+    r"standard deviations?)\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_DIAGNOSTIC_ACTION = re.compile(
+    r"\b(?:stop|halt|abort|terminate|exclude|drop|omit|remove)\w*\b"
+    r".{0,120}\b(?:shapiro(?:-wilk)?|normality(?:\s+test)?|outliers?|"
+    r"standard deviations?)\b"
+    r"|\b(?:shapiro(?:-wilk)?|normality(?:\s+test)?|outliers?|"
+    r"standard deviations?)\b.{0,120}"
+    r"\b(?:stop|halt|abort|terminate|exclude|drop|omit|remove)\w*\b",
+    re.IGNORECASE,
+)
 _PROTOCOL_TIMING = re.compile(
     r"\b(?:lock(?:ed|ing)?|prespecif(?:ied|ication))\b.{0,100}"
     r"\b(?:before|prior to)\b.{0,100}\b(?:inspect(?:ion|ing)?|outcome|result)",
@@ -665,6 +679,10 @@ def lint_plan(
         term in acquisition_text
         for term in ("acquire", "download", "fetch", "import", "retrieve")
     )
+    task_text = " ".join([task.objective, *task.constraints])
+    task_authorizes_diagnostic_action = bool(
+        _EXPLICIT_DIAGNOSTIC_ACTION.search(task_text)
+    )
     declared_inputs = [
         *(
             ("required_data", index, item)
@@ -715,6 +733,27 @@ def lint_plan(
                     message="Every step must declare a stopping condition.",
                 )
             )
+        if (
+            task.scientific_risk in {"confirmatory", "decision_critical"}
+            and not task_authorizes_diagnostic_action
+        ):
+            for stop_index, stop_condition in enumerate(step.stop_conditions):
+                if _ASSUMPTION_DIAGNOSTIC.search(stop_condition):
+                    findings.append(
+                        LintFinding(
+                            code="data_dependent_primary_analysis_stop",
+                            location=f"{location}.stop_conditions[{stop_index}]",
+                            message=(
+                                "A normality or outlier diagnostic cannot "
+                                "automatically halt, exclude observations from, "
+                                "or replace a locked primary analysis unless the "
+                                "user-supplied protocol explicitly authorizes that "
+                                "decision rule. Keep the primary analysis, report "
+                                "the diagnostic, and predefine a sensitivity "
+                                "analysis instead."
+                            ),
+                        )
+                    )
         if step.security_risk == "irreversible":
             findings.append(
                 LintFinding(

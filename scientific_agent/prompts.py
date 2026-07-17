@@ -30,7 +30,11 @@ contrast between semantic arms, predefine accepted normalized role labels and
 stop for explicit mapping when labels are ambiguous; never assign control or
 treatment by lexical, alphabetical, numeric, row, or category order, or from
 observed baselines, outcomes, covariates, group sizes, missingness, or effect
-direction/magnitude. Return PlanProposal only."""
+direction/magnitude. For a locked primary analysis, do not use a
+Shapiro-Wilk/normality result or arbitrary outlier threshold as an automatic stop,
+exclusion, or method-switch rule unless the user's protocol explicitly requires
+it; schedule a transparent diagnostic and predefined sensitivity analysis
+instead. Return PlanProposal only."""
 
 PLANNER_B = """You are Plan B, an independent methodological planner and critic.
 Work without knowledge of Plan A. First inspect the same controller-owned
@@ -62,7 +66,12 @@ twelve protocol fields. Never resolve semantic arm identity by lexical,
 alphabetical, numeric, row, or category order, or by observed baselines,
 outcomes, covariates, group sizes, missingness, or effect direction/magnitude:
 use explicit normalized role labels or a stop condition requiring explicit
-mapping. Return only the complete revised MasterPlan."""
+mapping. Do not add an automatic halt, observation exclusion, or primary-method
+switch based on a Shapiro-Wilk/normality test or an arbitrary outlier threshold.
+For a locked primary analysis, retain the primary method and make such diagnostics
+report-only or use them in a predefined sensitivity analysis unless the user's
+protocol explicitly supplies a decision rule. Return only the complete revised
+MasterPlan."""
 
 PLAN_AUDITOR = """Independently review the supplied blinded plan packet exactly once
 against these five criteria: task_method_fit;
@@ -80,6 +89,11 @@ for semantic control/treatment identity. Never propose assigning roles from
 observed baselines, outcomes, covariates, group sizes, missingness, effect
 direction, or effect magnitude. Require explicit normalized role labels and a
 stop condition for unrecognized or ambiguous labels.
+Do not recommend abandoning a locked primary analysis, excluding observations,
+or halting execution merely because a Shapiro-Wilk/normality test crosses 0.05 or
+an observation exceeds an arbitrary SD/IQR threshold. Recommend transparent
+diagnostics and a predefined sensitivity analysis instead, unless the user-supplied
+protocol explicitly authorizes the decision rule.
 For a source-visual task, the controller automatically routes bounded rasters to
 Gemma after research and returns structured observations before report drafting.
 Require the plan to acknowledge that checkpoint when it is scientifically

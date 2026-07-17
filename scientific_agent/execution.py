@@ -53,6 +53,26 @@ def _python_static_violations(code: str) -> list[str]:
                 "place the contrast or differently scaled estimand in a separate "
                 "labeled panel"
             )
+        if (
+            isinstance(node.func, ast.Attribute)
+            and node.func.attr == "set_xticks"
+            and node.args
+            and isinstance(node.args[0], (ast.List, ast.Tuple))
+        ):
+            tick_values = [
+                item.value
+                for item in node.args[0].elts
+                if isinstance(item, ast.Constant)
+                and isinstance(item.value, (int, float))
+                and not isinstance(item.value, bool)
+            ]
+            if len(tick_values) == len(node.args[0].elts) and len(
+                set(tick_values)
+            ) < len(tick_values):
+                violations.add(
+                    "Scientific categorical axes require unique tick positions; "
+                    "duplicate x ticks overlap groups and make the display misleading"
+                )
         if not isinstance(node.func, ast.Attribute) or node.func.attr != "errorbar":
             continue
         keywords = {item.arg: item.value for item in node.keywords if item.arg}

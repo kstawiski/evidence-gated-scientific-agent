@@ -2976,6 +2976,47 @@ def test_figure_rejects_live_transposed_interval_with_short_variable_name(tmp_pa
     }
 
 
+def test_figure_rejects_duplicate_category_tick_positions(tmp_path):
+    figure = tmp_path / "output" / "figures" / "groups.png"
+    figure.parent.mkdir(parents=True)
+    Image.new("RGB", (800, 600), color="white").save(figure, dpi=(300, 300))
+    source = tmp_path / "analysis.py"
+    source.write_text(
+        "ax.scatter(control_x, control_y)\n"
+        "ax.scatter(treatment_x, treatment_y)\n"
+        "ax.set_xticks([0, 0])\n"
+        "ax.set_xticklabels(['Control', 'Treatment'])\n",
+        encoding="utf-8",
+    )
+    computation = _display_computation(tmp_path, figure)
+    computation.records[0].artifacts.append(
+        ArtifactRef(
+            path=str(source),
+            sha256=sha256_file(source),
+            description="python analysis source",
+        )
+    )
+    report = article_report(
+        results="Figure 1 shows both groups.",
+        displays=[
+            ReportDisplay(
+                display_id="group-figure",
+                kind="figure",
+                title="Groups",
+                caption="Control and treatment observations by group.",
+                artifact_path=str(figure),
+                alt_text="Two groups on separate categorical positions.",
+            )
+        ],
+    )
+
+    validation = validate_report(report, computation=computation)
+
+    assert "figure_duplicate_category_positions" in {
+        finding.code for finding in validation.findings
+    }
+
+
 def test_unavailable_figure_ocr_does_not_invalidate_truthful_caption(
     tmp_path, monkeypatch
 ):

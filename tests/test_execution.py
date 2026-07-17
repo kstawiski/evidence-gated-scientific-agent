@@ -67,6 +67,12 @@ def test_python_static_preflight_rejects_secondary_scientific_axes():
     assert _python_static_violations("fig, axes = plt.subplots(1, 2)") == []
 
 
+def test_python_static_preflight_rejects_duplicate_category_ticks():
+    violations = _python_static_violations("ax.set_xticks([0, 0])")
+    assert any("unique tick positions" in item for item in violations)
+    assert _python_static_violations("ax.set_xticks([0, 1])") == []
+
+
 def test_prior_reference_preflight_requires_current_successful_execution():
     code = "open('/prior/exec-002/output/results.json').read()"
 

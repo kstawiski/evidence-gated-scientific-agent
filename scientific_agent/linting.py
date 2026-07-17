@@ -1473,6 +1473,30 @@ def _figure_source_semantic_findings(
                 node.func, ast.Attribute
             ):
                 continue
+            if (
+                node.func.attr == "set_xticks"
+                and node.args
+                and isinstance(node.args[0], (ast.List, ast.Tuple))
+            ):
+                tick_values = [
+                    item.value
+                    for item in node.args[0].elts
+                    if isinstance(item, ast.Constant)
+                    and isinstance(item.value, (int, float))
+                    and not isinstance(item.value, bool)
+                ]
+                if len(tick_values) == len(node.args[0].elts) and len(
+                    set(tick_values)
+                ) < len(tick_values):
+                    return [
+                        (
+                            "figure_duplicate_category_positions",
+                            "The plotting source assigns duplicate x-axis tick "
+                            "positions to distinct categories, so groups overlap. "
+                            "Use one unique categorical position per group and "
+                            "regenerate the figure.",
+                        )
+                    ]
             if node.func.attr == "scatter":
                 y_expression: ast.AST | None = (
                     node.args[1] if len(node.args) > 1 else None

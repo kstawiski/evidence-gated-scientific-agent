@@ -153,6 +153,25 @@ def test_plan_linter_rejects_order_based_semantic_arm_assignment():
     assert not report.passed
 
 
+def test_plan_linter_rejects_observed_baseline_arm_assignment():
+    plan = good_plan()
+    plan.steps[0].methods = [
+        "If labels are unclear, assign the group with the higher mean baseline "
+        "to control and the other group to treatment."
+    ]
+
+    report = lint_plan(task(), plan)
+
+    finding = next(
+        item
+        for item in report.findings
+        if item.code == "arbitrary_semantic_arm_mapping"
+    )
+    assert finding.blocking
+    assert "observed baselines, outcomes, covariates" in finding.message
+    assert not report.passed
+
+
 def test_plan_linter_rejects_invented_input_filename_and_accepts_manifest_name():
     planned = good_plan()
     planned.required_data = ["invented_dataset.csv", "uploaded dataset"]

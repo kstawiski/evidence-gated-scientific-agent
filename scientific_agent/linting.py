@@ -385,7 +385,17 @@ _ARBITRARY_SEMANTIC_ARM_MAPPING = re.compile(
     r"\b(?:lexicograph\w*|alphabet\w*|numeric\w*|row|categor\w*)\b"
     r".{0,120}\b(?:control|treatment|intervention|comparison|reference)\b"
     r"|\b(?:control|treatment|intervention|comparison|reference)\b"
-    r".{0,120}\b(?:lexicograph\w*|alphabet\w*|numeric\w*|row|categor\w*)\b",
+    r".{0,120}\b(?:lexicograph\w*|alphabet\w*|numeric\w*|row|categor\w*)\b"
+    r"|\b(?:assign|map|designat|classif|infer)\w*\b.{0,120}"
+    r"\b(?:based on|according to|using|higher|lower|larger|smaller|"
+    r"maximum|minimum)\b.{0,80}\b(?:baseline|outcome|covariate|"
+    r"group size|sample size|missing\w*|effect\w*|response)\b.{0,120}"
+    r"\b(?:control|treatment|intervention|comparison|reference)\b"
+    r"|\b(?:control|treatment|intervention|comparison|reference)\b"
+    r".{0,80}\b(?:assign|map|designat|classif|infer)\w*\b.{0,120}"
+    r"\b(?:based on|according to|using|higher|lower|larger|smaller|"
+    r"maximum|minimum)\b.{0,80}\b(?:baseline|outcome|covariate|"
+    r"group size|sample size|missing\w*|effect\w*|response)\b",
     re.IGNORECASE,
 )
 _PROTOCOL_TIMING = re.compile(
@@ -722,9 +732,10 @@ def lint_plan(
                     message=(
                         "Semantic control/treatment identity cannot be inferred "
                         "from lexical, alphabetical, numeric, row, or category "
-                        "order. Predefine accepted normalized role labels and stop "
-                        "for explicit mapping when labels are unrecognized or "
-                        "ambiguous."
+                        "order, or from observed baselines, outcomes, covariates, "
+                        "group sizes, missingness, or effect direction/magnitude. "
+                        "Predefine accepted normalized role labels and stop for "
+                        "explicit mapping when labels are unrecognized or ambiguous."
                     ),
                 )
             )

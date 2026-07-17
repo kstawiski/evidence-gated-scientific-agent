@@ -53,6 +53,10 @@ def test_planning_prompts_forbid_order_based_semantic_arm_assignment():
     assert "never assign control or" in SIMPLE_PLANNER
     assert "Never propose lexical" in PLAN_AUDITOR
     assert "Never resolve semantic arm identity" in PLAN_REPAIRER
+    for prompt in (SIMPLE_PLANNER, PLAN_AUDITOR, PLAN_REPAIRER):
+        normalized = " ".join(prompt.split())
+        assert "observed baseline" in normalized
+        assert "effect direction" in normalized
 
 
 def test_input_visual_auditor_requires_exact_schema_and_artifact_paths():

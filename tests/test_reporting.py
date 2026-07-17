@@ -526,6 +526,69 @@ def test_reader_table_does_not_match_unrelated_numeric_field(tmp_path: Path):
     assert "table_machine_result_contradiction" not in codes
 
 
+def test_reader_wide_table_does_not_treat_group_header_as_metric(tmp_path: Path):
+    report, computation = _fixture(tmp_path)
+    table = Path(report.displays[1].artifact_path)
+    table.write_text(
+        (
+            "Metric,Treatment,Control,Difference\n"
+            "N,20,20,\n"
+            "Baseline mean,19.5,19.5,\n"
+            "Change mean,5.000,0.000,5.000\n"
+            "Welch t statistic,,,10.9\n"
+        ),
+        encoding="utf-8",
+    )
+    computation.artifacts[1] = computation.artifacts[1].model_copy(
+        update={"sha256": sha256_file(table)}
+    )
+    _add_machine_result(
+        computation,
+        tmp_path / "computations" / "exec-001" / "output" / "analysis.json",
+        (
+            '{"group_counts": {"treatment": 20, "control": 20}, '
+            '"site_counts": {"treatment": 10, "control": 10}, '
+            '"welch_t_statistic": 10.897247358851683}\n'
+        ),
+    )
+
+    codes = {
+        item.code for item in validate_report(report, computation=computation).findings
+    }
+
+    assert "table_machine_result_contradiction" not in codes
+
+
+def test_reader_wide_table_checks_explicit_group_metric_identity(tmp_path: Path):
+    report, computation = _fixture(tmp_path)
+    table = Path(report.displays[1].artifact_path)
+    table.write_text(
+        "Metric,Treatment,Control\nBaseline mean,18.5,19.5\n",
+        encoding="utf-8",
+    )
+    computation.artifacts[1] = computation.artifacts[1].model_copy(
+        update={"sha256": sha256_file(table)}
+    )
+    _add_machine_result(
+        computation,
+        tmp_path / "computations" / "exec-001" / "output" / "analysis.json",
+        (
+            '{"groups": {"treatment": {"baseline_mean": 19.5}, '
+            '"control": {"baseline_mean": 19.5}}}\n'
+        ),
+    )
+
+    validation = validate_report(report, computation=computation)
+
+    finding = next(
+        item
+        for item in validation.findings
+        if item.code == "table_machine_result_contradiction"
+    )
+    assert "Baseline mean / Treatment=18.5" in finding.message
+    assert "19.5" in finding.message
+
+
 def test_latest_machine_result_supersedes_same_logical_repair_output(tmp_path: Path):
     report, computation = _fixture(tmp_path)
     table = Path(report.displays[1].artifact_path)

@@ -489,6 +489,23 @@ _PRECISE_LITERATURE_NUMBER = re.compile(
 _TABLE_KEY_COLUMNS = {"measure", "metric", "outcome", "parameter", "statistic"}
 _TABLE_VALUE_COLUMNS = {"estimate", "result", "value"}
 _GENERIC_NUMERIC_COLUMNS = _TABLE_VALUE_COLUMNS | {"statistic"}
+_GENERIC_WIDE_ESTIMATE_COLUMNS = _TABLE_VALUE_COLUMNS | {"difference", "overall"}
+_GROUP_HEADER_TOKENS = {
+    "case",
+    "cases",
+    "comparator",
+    "comparators",
+    "control",
+    "controls",
+    "exposed",
+    "intervention",
+    "interventions",
+    "placebo",
+    "placebos",
+    "treatment",
+    "treatments",
+    "unexposed",
+}
 _EQUATION_OPERANDS = re.compile(
     r"(?P<left>[^\s,;:=()]+)\s*(?<![<>])=(?!=)\s*"
     r"(?P<right>[^\s,;:=().]+)",
@@ -941,37 +958,60 @@ def _table_json_numeric_mismatches(
         for index, column in enumerate(normalized_columns)
         if column in _TABLE_KEY_COLUMNS
     ]
-    value_indexes = [
-        index
-        for index, column in enumerate(normalized_columns)
-        if column in _TABLE_VALUE_COLUMNS
-    ]
-    if len(key_indexes) == 1 and len(value_indexes) == 1:
-        key_index, value_index = key_indexes[0], value_indexes[0]
-        if key_index != value_index:
-            for row_number, row in enumerate(rows, start=1):
-                if max(key_index, value_index) >= len(row):
+    if len(key_indexes) == 1:
+        key_index = key_indexes[0]
+        for row_number, row in enumerate(rows, start=1):
+            if key_index >= len(row):
+                continue
+            row_key = _numeric_key(str(row[key_index]))
+            if not row_key:
+                continue
+            for column_index, column_key in enumerate(normalized_columns):
+                if column_index == key_index or column_index >= len(row):
                     continue
-                key = _numeric_key(str(row[key_index]))
-                cell = str(row[value_index]).strip()
-                candidates = machine_numbers.get(key, [])
-                if (
-                    candidates
-                    and _NUMERIC_CELL.fullmatch(cell)
-                    and not any(
-                        _numeric_cell_agrees(cell, value) for value in candidates
-                    )
+                cell = str(row[column_index]).strip()
+                if not _NUMERIC_CELL.fullmatch(cell):
+                    continue
+                if column_key in _GENERIC_WIDE_ESTIMATE_COLUMNS:
+                    candidates = machine_numbers.get(row_key, [])
+                else:
+                    # A group-labelled column is not itself a metric. Require an
+                    # explicit compound JSON identity (for example,
+                    # groups.treatment.baseline_mean) before comparing the cell.
+                    # This prevents a Treatment column from being compared with
+                    # unrelated JSON values stored under a bare `treatment` key.
+                    compound_keys = {
+                        f"{column_key}_{row_key}",
+                        f"{row_key}_{column_key}",
+                    }
+                    candidates = [
+                        value
+                        for machine_key, values in machine_numbers.items()
+                        if any(
+                            machine_key == compound
+                            or machine_key.endswith(f"_{compound}")
+                            for compound in compound_keys
+                        )
+                        for value in values
+                    ]
+                if candidates and not any(
+                    _numeric_cell_agrees(cell, value) for value in candidates
                 ):
                     values = ", ".join(str(value) for value in candidates[:3])
-                    examples.append(
-                        f"row {row_number}, {row[key_index]}={cell}; JSON: {values}"
+                    cell_label = (
+                        f"{row[key_index]}={cell}"
+                        if column_key in _TABLE_VALUE_COLUMNS
+                        else f"{row[key_index]} / {columns[column_index]}={cell}"
                     )
+                    examples.append(f"row {row_number}, {cell_label}; JSON: {values}")
                     if len(examples) >= example_limit:
                         return examples
-            return examples
+        return examples
 
     for column_index, key in enumerate(normalized_columns):
-        if key in _GENERIC_NUMERIC_COLUMNS:
+        if key in _GENERIC_NUMERIC_COLUMNS or (
+            set(key.split("_")) & _GROUP_HEADER_TOKENS
+        ):
             continue
         candidates = machine_numbers.get(key, [])
         if not candidates:
@@ -1000,26 +1040,10 @@ def _ambiguous_group_table_rows(
 
     columns = [str(column).strip() for column in preview.get("columns", [])]
     normalized = [_numeric_key(column) for column in columns]
-    group_header_tokens = {
-        "control",
-        "controls",
-        "treatment",
-        "treatments",
-        "placebo",
-        "placebos",
-        "intervention",
-        "interventions",
-        "comparator",
-        "comparators",
-        "exposed",
-        "unexposed",
-        "case",
-        "cases",
-    }
     group_indexes = {
         index
         for index, header in enumerate(normalized[1:], start=1)
-        if set(header.split("_")) & group_header_tokens
+        if set(header.split("_")) & _GROUP_HEADER_TOKENS
     }
     if len(group_indexes) < 2:
         return []

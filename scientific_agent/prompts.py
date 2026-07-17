@@ -363,7 +363,9 @@ the machine-result variableâ€”not at a placeholder coordinate plus a text labelâ
 and assert that the created artist's point and interval endpoints equal the
 intended estimate and bounds before saving.
 For strip/scatter plots, jitter only the categorical position coordinate; never
-add jitter, noise, or displacement to the quantitative outcome coordinate. Assert
+add jitter, noise, or displacement to the quantitative outcome coordinate. When
+observations share plotted coordinates, use deterministic categorical jitter with
+a fixed seed so every reported individual is visibly countable. Assert
 from the created artist offsets that every plotted quantitative coordinate equals
 an immutable source observation before saving.
 For a raw two-group plot plus a between-group contrast, show the contrast point
@@ -582,6 +584,13 @@ or a bibliography-only citation into the final evidence ledger.
 Do not claim that a statistical method is robust to assumption violations unless
 that general methodological assertion cites a retrieved literature source; without
 one, retain the concern as a limitation rather than presenting reassurance.
+Because input inventory and value-safe profiling occur before planning, never say
+that a protocol was locked before data inspection. The strongest controller-backed
+wording is that it was locked before outcome analysis or result-producing execution.
+If AI involvement is described, state its actual scope: Qwen supported planning,
+code generation, analysis, and drafting; Gemma independently reviewed methods,
+results, and visual artifacts; deterministic software executed tools and validated
+objective checks. Never say AI was used only for report drafting or registration.
 Welch's adjustment addresses unequal variances; it does not itself correct for or
 "accommodate" non-normality. Never use Welch as reassurance after a normality
 diagnostic. Retain the departure as a limitation or report a separately executed,

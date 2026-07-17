@@ -67,6 +67,10 @@ repository does not embed them.
 | Manuscript-package stress run (pre-fix) | **FAILED MERIT GATE** | Run `18b7b94f-6d3a-4c0c-941c-cc6b96ce0aeb` correctly stopped at `requires_human_decision`, but consumed all four repairs. It recovered bounded Python failures and improved scientific scope/PubMed anchoring; however, the critic invented manuscript-plus-supplement word-count arithmetic, treated permitted placeholders as blockers, and later lost article review to invalid TIFF display preparation. This retained failure directly motivated task-scope critic constraints, controller TIFF/PDF/archive rendering, Gemma-only source-image review, and preservation of article audits when display preparation fails. |
 | Fresh planted-effect run (pre visual-clearance fix) | **FAILED MERIT GATE** | Run `4d143e16-3616-4f7b-8b38-7a9c1ea4f3fe` recovered and reconciled the exact Python/R statistics, but incorrectly labeled the prespecified task exploratory and accepted a visibly overlapping figure after a bare Gemma pass. The run is rejected despite its terminal `supported` status. It directly motivated controller-enforced task risk/method locks, exact per-display Gemma clearance attestations, and evaluator support for the valid nested result shapes. |
 | Fresh planted-effect run (pre narrative-number fix) | **FAILED MERIT GATE** | Run `3d186baf-7a30-437a-900a-9fbc03e89b66` repaired the computation, passed deterministic and Gemma artifact/display review, and rescored 18/18 after provenance-aware evaluator selection. Manual review still rejected it because Results retained an obsolete `df≈564.06` from the superseded Python execution while both corrected implementations reported `df=38`. This motivated deterministic report-to-artifact degrees-of-freedom checking and explicit critic instructions to use the latest successful machine result. |
+| v0.4.1 planted effect (pre transposition gate) | **FAILED MERIT GATE** | Run `1aaa0ccf-2f0d-4355-a4aa-20e6e9c060ae` recovered and reconciled the correct effect, but the effect estimate was plotted on the wrong coordinate while the axis claimed to show the mean difference. The repetitive critic response failed closed. This motivated static and post-execution estimand/interval dataflow checks. |
+| v0.4.1 planted effect (pre category gate) | **CANCELLED / FAILED MERIT GATE** | Run `26b27ec4-8c6e-4a06-beb5-f381b79fd43c` corrected the effect panel but overlapped both raw-data groups at the same categorical position and emitted length-one R scalar arrays. The operator cancelled it during repair 1. This motivated unique-category validation and scalar R JSON requirements. |
+| v0.4.1 planted effect (pre critic normalization) | **FAILED MERIT GATE** | Run `7511eb4c-659f-4d84-9980-9fdc767cc578` reconciled the correct statistics, passed deterministic validation, linked a local PubMed article, and auto-published it to knowledge. It was still rejected because the figure ambiguously labeled a raw mean difference as `d`, while Gemma returned valid objections in an incomplete schema that failed closed without becoming repair actions. This motivated raw-effect label checks and conservative preservation of explicit failed-review objections. |
+| v0.4.1 planted effect (pre monotonic critic gate) | **TERMINAL SUPPORTED / FAILED MERIT GATE** | Run `6d3098ca-d2c4-4318-b403-d4900bea40d0` recovered the exact effect, corrected table precision, used the required Results structure, and rescored 18/18 after the evaluator learned its exact Welch schema. It remains rejected: Gemma first detected hidden point overplotting, then a format-repair call erased the fail with a bare pass; the article also understated AI involvement and overstated protocol timing and robustness. This motivated monotonic fail preservation and deterministic prose-overclaim gates. |
 
 The PubMed gate's scored JSON and full provenance bundle are retained with the
 deployment evaluation artifacts. The local paper copies are hash verified and
@@ -92,6 +96,15 @@ The rejected fresh planted-effect run and its implemented repairs are summarized
 [`results/v0.4.0-known-effect-fresh-pre-visual-gate.json`](results/v0.4.0-known-effect-fresh-pre-visual-gate.json).
 The later artifact-passing but narrative-invalid planted-effect run is summarized in
 [`results/v0.4.0-known-effect-pre-narrative-gate.json`](results/v0.4.0-known-effect-pre-narrative-gate.json).
+The two rejected v0.4.1 runs that directly exercised effect-axis and categorical-axis
+failure modes are retained as
+[`results/v0.4.1-known-effect-pre-transposition-gate.json`](results/v0.4.1-known-effect-pre-transposition-gate.json)
+and
+[`results/v0.4.1-known-effect-pre-category-gate.json`](results/v0.4.1-known-effect-pre-category-gate.json).
+The later computation-valid but critic-incomplete run is retained as
+[`results/v0.4.1-known-effect-pre-critic-normalization.json`](results/v0.4.1-known-effect-pre-critic-normalization.json).
+The mechanically passing but scientifically rejected critic-regression run is retained as
+[`results/v0.4.1-known-effect-pre-monotonic-critic-gate.json`](results/v0.4.1-known-effect-pre-monotonic-critic-gate.json).
 
 The A2A evidence is retained as
 [`results/v0.4.0-a2a-live.json`](results/v0.4.0-a2a-live.json). The server uses

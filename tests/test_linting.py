@@ -1206,6 +1206,64 @@ def test_report_validator_accepts_controller_protocol_timing_evidence(tmp_path):
     assert validation.passed
 
 
+def test_report_validator_rejects_protocol_ai_and_robustness_overclaims(tmp_path):
+    protocol = tmp_path / "protocol.json"
+    protocol.write_text(
+        '{"locked_at":"2026-07-13T14:00:00Z","status":"supported"}\n',
+        encoding="utf-8",
+    )
+    artifact = ArtifactRef(
+        path=str(protocol),
+        sha256="abc",
+        description="controller protocol lock written before research execution",
+    )
+    report = article_report(
+        title="Overstated workflow report",
+        executive_summary="A descriptive comparison.",
+        methods=[
+            "The protocol was locked prior to data inspection.",
+            "AI was used only for report drafting and artifact registration.",
+        ],
+        claims=[
+            ClaimRecord(
+                claim_id="c1",
+                text="The protocol was locked prior to data inspection.",
+                claim_type="observed",
+                evidence_refs=["s1"],
+                status=EvidenceStatus.SUPPORTED,
+            )
+        ],
+        sources=[
+            SourceRecord(
+                source_id="s1",
+                title="Controller protocol",
+                artifact_path=str(protocol),
+                source_type="documentation",
+                retrieved_at="2026-07-13T14:00:00Z",
+                supporting_passage="The controller locked the protocol before research.",
+            )
+        ],
+        narrative="The input inventory preceded planning.",
+    )
+    report.discussion = (
+        "The balanced design mitigates Type I error inflation after non-normality."
+    )
+    report.conclusions = "The statistical result is robust and verified."
+
+    validation = validate_report(
+        report,
+        controller_artifacts=(artifact,),
+        controller_dates=("2026-07-13",),
+    )
+
+    assert {finding.code for finding in validation.findings} >= {
+        "protocol_timing_overstates_input_blinding",
+        "ai_role_understated",
+        "balanced_design_assumption_reassurance",
+        "unqualified_result_robustness",
+    }
+
+
 def test_report_validator_rejects_sandbox_plan_as_protocol_timing_evidence(tmp_path):
     plan = tmp_path / "locked_analysis_plan.json"
     plan.write_text('{"status":"locked"}\n', encoding="utf-8")

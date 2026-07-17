@@ -1,0 +1,38 @@
+{
+  "case": "known-effect",
+  "release_candidate": "v0.4.1",
+  "deployment_commit": "726436e0bd73776459b69a80230a36a79eee6317",
+  "deployment_image_digest": null,
+  "deployment_image_digest_note": "The exact digest was observed during deployment but was not retained in the evaluator result; it is intentionally not reconstructed from a truncated operator note.",
+  "workspace_id": "41007c6d-9f79-4a1a-a325-7aec75fd5466",
+  "run_id": "1aaa0ccf-2f0d-4355-a4aa-20e6e9c060ae",
+  "started_at": "2026-07-17T12:03:58.539466+00:00",
+  "terminal_status": "inconclusive",
+  "merit_gate": "failed",
+  "rescored_evaluator": {
+    "score": 16,
+    "total": 18,
+    "passed": false
+  },
+  "productive_behavior": [
+    "Python and R independently recovered the planted 5.0-unit treatment-minus-control change contrast and reconciled the numerical results.",
+    "Deterministic validation rejected unsupported literature metadata, excessive table precision, and other repairable report defects.",
+    "The critic stream repetition safeguard stopped a malformed repetitive Gemma response and preserved an inconclusive result rather than approving it."
+  ],
+  "release_blockers": [
+    "The right panel labeled its horizontal axis as mean difference while placing the estimate on the vertical coordinate at x=0 and encoding the interval as horizontal error around the placeholder coordinate.",
+    "Gemma began a failing display verdict but produced no schema-valid falsifiable findings after one bounded repair."
+  ],
+  "rejected_figure": {
+    "path": "computations/attempt-0/exec-002/output/figures/contrast_plot.png",
+    "sha256": "5ec75246ecffd9ada292901d6207fa63fd523f3614ef054c67f37f9eac027c8c",
+    "width": 2893,
+    "height": 1393
+  },
+  "implemented_repairs": [
+    "Static and post-execution dataflow checks reject an effect interval whose x-error derives from the value plotted on y while x is fixed at zero.",
+    "The display auditor has an exact VerificationReport contract and uses a lower critique temperature for schema reliability.",
+    "The deployed evaluator recognizes the valid nested result shapes used by this run."
+  ],
+  "disposition": "Preserved as a failed scientific-quality fixture; numerical agreement did not override a misleading rendered estimand."
+}

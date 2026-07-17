@@ -511,6 +511,29 @@ _PROTOCOL_TIMING = re.compile(
     r"\b(?:before|prior to)\b.{0,100}\b(?:inspect(?:ion|ing)?|outcome|result)",
     re.IGNORECASE,
 )
+_PROTOCOL_BEFORE_DATA_INSPECTION = re.compile(
+    r"\b(?:lock(?:ed|ing)?|prespecif(?:ied|ication))\b.{0,120}"
+    r"\b(?:before|prior to)\b.{0,40}\bdata inspection\b",
+    re.IGNORECASE,
+)
+_AI_ROLE_UNDERSTATEMENT = re.compile(
+    r"\bAI\b.{0,100}\b(?:only|solely)\b.{0,120}"
+    r"\b(?:draft(?:ing|ed)?|writ(?:ing|ten)|artifact registration)\b",
+    re.IGNORECASE,
+)
+_BALANCED_DESIGN_REASSURANCE = re.compile(
+    r"\bbalanced\b.{0,80}\b(?:design|groups?|sample sizes?)\b.{0,140}"
+    r"\b(?:mitigat(?:e[sd]?|ing)|protect(?:s|ed|ing)?|robust)\b.{0,100}"
+    r"\b(?:type\s*i\s*error|non[- ]?normal(?:ity)?|normality|assumption)\b|"
+    r"\bbalanced\b.{0,80}\b(?:mitigat(?:e[sd]?|ing)|protect(?:s|ed|ing)?)\b"
+    r".{0,100}\btype\s*i\s*error\b",
+    re.IGNORECASE,
+)
+_UNQUALIFIED_RESULT_ROBUSTNESS = re.compile(
+    r"\b(?:analysis|contrast|estimate|finding|result)s?\b.{0,80}"
+    r"\b(?:is|are|was|were)\s+(?:statistically\s+)?robust\b",
+    re.IGNORECASE,
+)
 _METHODOLOGICAL_GENERALIZATION = re.compile(
     r"\b(?:robust to|valid despite|known to|generally reliable|assumption violation)",
     re.IGNORECASE,
@@ -2076,6 +2099,56 @@ def validate_report(
                     "A claim that the protocol was locked before outcome inspection "
                     "must cite the controller-generated protocol artifact; a later "
                     "sandbox analysis plan cannot establish timing."
+                ),
+            )
+        )
+    if _PROTOCOL_BEFORE_DATA_INSPECTION.search(report_text):
+        findings.append(
+            LintFinding(
+                code="protocol_timing_overstates_input_blinding",
+                location="report",
+                message=(
+                    "Evidence Bench profiles inputs before planning and protocol lock. "
+                    "Do not claim the protocol preceded data inspection; state only "
+                    "the controller-supported timing, such as before outcome analysis "
+                    "or result-producing execution."
+                ),
+            )
+        )
+    if _AI_ROLE_UNDERSTATEMENT.search(report_text):
+        findings.append(
+            LintFinding(
+                code="ai_role_understated",
+                location="methods",
+                message=(
+                    "Do not say AI was used only for drafting or artifact registration. "
+                    "Qwen also supported planning, code generation, and analysis, while "
+                    "Gemma performed independent review and deterministic software "
+                    "executed and validated the work."
+                ),
+            )
+        )
+    if _BALANCED_DESIGN_REASSURANCE.search(report_text):
+        findings.append(
+            LintFinding(
+                code="balanced_design_assumption_reassurance",
+                location="report",
+                message=(
+                    "Balance alone does not establish protection from non-normality or "
+                    "Type I error inflation. Remove the reassurance, retain the observed "
+                    "diagnostic as a limitation, or cite and apply a directly relevant "
+                    "methodological robustness analysis."
+                ),
+            )
+        )
+    if _UNQUALIFIED_RESULT_ROBUSTNESS.search(report_text):
+        findings.append(
+            LintFinding(
+                code="unqualified_result_robustness",
+                location="report",
+                message=(
+                    "Do not summarize a result as robust. State the exact observed "
+                    "reproducibility or sensitivity evidence and its scope instead."
                 ),
             )
         )

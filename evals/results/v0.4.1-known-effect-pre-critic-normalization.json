@@ -1,0 +1,29 @@
+{
+  "case": "known-effect",
+  "release_candidate": "v0.4.1",
+  "deployment_commit": "9451334bb49a544cc458d9ae0974a013092a2d4b",
+  "deployment_image_digest": "sha256:d1255d2061b2ca9f944005b01d70f24bfeb4710082163ee8112cad88cc9c1082",
+  "workspace_id": "7c18b006-b85d-4bbd-965b-925a09735e69",
+  "run_id": "7511eb4c-659f-4d84-9980-9fdc767cc578",
+  "started_at": "2026-07-17T13:38:36.719921+00:00",
+  "finished_at": "2026-07-17T14:31:00.199895+00:00",
+  "terminal_status": "inconclusive",
+  "evaluator_score": "16/18",
+  "merit_gate": "failed",
+  "productive_behavior": [
+    "Python and R independently recovered and reconciled the prespecified effect with deterministic validation passing.",
+    "The report linked its methodological PubMed citation to the instance-local Markdown article copy.",
+    "The downloaded article was automatically published as a searchable knowledge generation with Qwen text indexing."
+  ],
+  "release_blockers": [
+    "The effect panel used the ambiguous label 'd = 5.00' for a raw mean difference, although d conventionally denotes a standardized effect.",
+    "Gemma twice returned verdict=fail with concrete unsupported-claim strings but omitted the required structured blocker objects; the response failed closed and the objections were not converted into a repair action.",
+    "The final report therefore lacked approved independent review despite correct computation and deterministic validation."
+  ],
+  "implemented_repairs": [
+    "Static and OCR display checks reject a bare d label when the plotted estimand is a raw mean difference.",
+    "After the one bounded schema-repair attempt, an otherwise parseable failed VerificationReport preserves each explicit unsupported claim as a generic actionable blocker instead of losing the critic's objection.",
+    "Schema salvage never upgrades a fail verdict, never fabricates approval, and remains covered by streaming-client regression tests."
+  ],
+  "disposition": "Preserved as a rejected scientific-quality fixture; correct numerical work is insufficient when the display is semantically ambiguous and the independent audit is not validly adjudicated."
+}

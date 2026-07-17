@@ -59,6 +59,24 @@ The `ScientificReport.narrative` field is a legacy pre-v0.4 free-text field
 retained only so older reports still load; new reports use the typed article
 sections above instead.
 
+### Results paragraph architecture
+
+Each substantive analysis paragraph follows **why → what → local meaning**:
+
+1. **Why:** briefly restate the scientific question addressed by that analysis.
+2. **What:** report the observed data, denominators, estimate, uncertainty,
+   statistical test, and matching figure or table.
+3. **Local meaning:** answer what the result means for that specific question,
+   without expanding into mechanism, broad clinical or biological implications,
+   generalizability, recommendations, competing explanations, or extended
+   limitations.
+
+Those broader interpretations belong in Discussion. A bounded simple analysis may
+use one concise Results paragraph, but the three functions must remain identifiable.
+The report writer is instructed to use this structure, and the independent critic
+treats a missing component or Discussion-style drift as a correctable editorial
+finding in the ordinary bounded repair and re-audit loop.
+
 ## Inline scientific citations
 
 Literature and knowledge evidence is cited in the article body with linked

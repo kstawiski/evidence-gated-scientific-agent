@@ -1,0 +1,33 @@
+{
+  "case": "known-effect",
+  "release_candidate": "v0.4.1",
+  "deployment_commit": "264959c5995eba1550171bb54a6d4908d35bf747",
+  "deployment_image_digest": null,
+  "deployment_image_digest_note": "The evaluator did not retain the deployment digest; no digest is inferred retrospectively.",
+  "workspace_id": "0a179fa2-6eb1-4ebb-a629-52ab28b998a3",
+  "run_id": "26b27ec4-8c6e-4a06-beb5-f381b79fd43c",
+  "started_at": "2026-07-17T12:54:49.533977+00:00",
+  "terminal_status": "cancelled",
+  "merit_gate": "failed",
+  "productive_behavior": [
+    "The independent plan audit identified a missing trim percentage and the bounded plan repair explicitly locked it at 10% before analysis.",
+    "Python and R completed and the corrected effect panel placed the estimate and confidence interval on the labeled horizontal scale.",
+    "Live cancellation stopped the run during the first repair after manual inspection found that further article generation was not scientifically worthwhile."
+  ],
+  "release_blockers": [
+    "The raw-group panel assigned both categories to x=0, so control and treatment observations overlapped despite separate labels.",
+    "The R JSON encoded inferential scalars as length-one arrays, preventing valid typed reconciliation binding.",
+    "Literature acquisition and reader-facing table precision still required repair when the run was cancelled."
+  ],
+  "rejected_figure": {
+    "path": "computations/attempt-0/exec-004/output/figures/primary_contrast.png",
+    "sha256": "9a51c0087f996add9baa3678af25ac15b14c8294059386c7305bc8833ac59310",
+    "bytes": 202291
+  },
+  "implemented_repairs": [
+    "Static and post-execution checks reject duplicate categorical tick positions.",
+    "The R prompt requires jsonlite auto_unbox and native JSON scalars for inferential results.",
+    "Cancellation remains a durable terminal state and partial work is never presented as an accepted report."
+  ],
+  "disposition": "Preserved as a cancelled scientific-quality fixture and evidence that operator control can stop a visibly invalid run before wasting all repair rounds."
+}

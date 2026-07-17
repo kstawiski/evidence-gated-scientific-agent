@@ -1,0 +1,33 @@
+{
+  "case": "known-effect",
+  "release_candidate": "v0.4.1",
+  "deployment_commit": "3069ab3da741aad15e62a18da4579b045ff599ab",
+  "deployment_image_digest": "sha256:626172fc2fb44908e87e8d2b900ce96d575cd99af4df5d842b254309b65124f5",
+  "workspace_id": "313d9416-dd24-4c66-954c-2f6c0d1292c1",
+  "run_id": "6d3098ca-d2c4-4318-b403-d4900bea40d0",
+  "started_at": "2026-07-17T14:44:34.068557+00:00",
+  "finished_at": "2026-07-17T15:41:22.872994+00:00",
+  "terminal_status": "supported",
+  "evaluator_score_before_shape_fix": "16/18",
+  "evaluator_score_after_shape_fix": "18/18",
+  "merit_gate": "failed",
+  "productive_behavior": [
+    "The input was inventoried before planning, and Python and R independently recovered and reconciled the exact planted effect.",
+    "Deterministic validation forced correction of reader-facing precision, rejected unsupported protocol timing, and required registration of the latest table artifact.",
+    "The final Results section used why, what, and local-meaning paragraphs and linked the PubMed methodology source to its instance-local Markdown copy."
+  ],
+  "release_blockers": [
+    "Gemma's initial visual audit correctly found that overlapping raw points hid several of the 20 subjects in each group, but its schema-repair call returned a bare pass and erased the valid objection.",
+    "The accepted report overstated protocol timing as preceding data inspection even though input profiling precedes protocol lock.",
+    "The Methods understated AI involvement as report drafting and artifact registration only, although Qwen planned and coded and Gemma reviewed.",
+    "The Discussion and Conclusions used unsupported balance and robustness reassurance after a rejected normality diagnostic."
+  ],
+  "implemented_repairs": [
+    "A schema-repair response can no longer change an explicit initial critic fail into pass; labelled objections in malformed failed reviews are preserved as fail-closed blockers.",
+    "The report prompt and deterministic linter prohibit pre-data-inspection protocol claims and understated AI-role disclosures.",
+    "The deterministic linter rejects unsupported balanced-design reassurance and unqualified claims that a result is robust.",
+    "Figure instructions require fixed-seed categorical jitter when shared coordinates would hide individual observations.",
+    "The deployed evaluator recognizes the exact v0.4.1 top-level Welch result schema without conflicting with baseline diagnostic aliases."
+  ],
+  "disposition": "Rejected despite terminal supported and a corrected 18/18 mechanical score; the public merit gate includes manual scientific and visual review, not only controller status."
+}

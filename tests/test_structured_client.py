@@ -79,6 +79,61 @@ async def test_schema_incomplete_critic_fail_is_preserved_as_blockers_after_repa
     assert "no approval was inferred" in "".join(visible)
 
 
+@pytest.mark.asyncio
+async def test_schema_repair_cannot_erase_malformed_explicit_critic_fail():
+    calls = 0
+    visible: list[str] = []
+    malformed_fail = """{
+      "verdict": "fail",
+      "blocking_findings" ,
+      "location" , "Panel A",
+      "evidence" , "Only 15 of 20 reported subjects are visibly recoverable because points overlap.",
+      "why_it_matters" , "The raw-data display does not transparently represent every reported individual.",
+      "correction" , "Jitter only the categorical coordinate so all observations are countable."
+    ]}"""
+    repaired_pass = json.dumps(
+        {
+            "verdict": "pass",
+            "blocking_findings": [],
+            "nonblocking_findings": [],
+            "protocol_deviations": [],
+            "unsupported_claims": [],
+            "proposed_falsification_tests": [],
+            "evidence_refs": ["display-reviewed:figure-1"],
+        }
+    )
+
+    def handler(request: httpx.Request):
+        nonlocal calls
+        calls += 1
+        body = json.loads(request.content)
+        if calls == 2:
+            repair = json.loads(body["messages"][1]["content"])
+            assert "never change fail to pass" in repair["repair_instruction"]
+        content = malformed_fail if calls == 1 else repaired_pass
+        event = {"choices": [{"delta": {"content": content}, "finish_reason": "stop"}]}
+        return httpx.Response(
+            200, text=f"data: {json.dumps(event)}\n\ndata: [DONE]\n\n"
+        )
+
+    result = await request_structured(
+        _endpoint(),
+        system_prompt="Audit the display.",
+        payload={"display": "example"},
+        output_type=VerificationReport,
+        temperature=0.4,
+        timeout=2,
+        repair_attempts=1,
+        on_visible_text=visible.append,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert calls == 2
+    assert result.verdict == "fail"
+    assert any("15 of 20" in item.problem for item in result.blocking_findings)
+    assert "cannot erase" in "".join(visible)
+
+
 def test_stream_repetition_detector_targets_sentence_loops_not_json_structure():
     repeated_sentence = (
         "The reported treatment effect requires independent external validation."

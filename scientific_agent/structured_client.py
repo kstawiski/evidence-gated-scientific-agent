@@ -78,19 +78,49 @@ def _salvage_schema_incomplete_verification_report(
     if output_type.__name__ != "VerificationReport":
         return None
     try:
-        value = json.loads(content)
+        parsed = json.loads(content)
     except (TypeError, ValueError):
+        parsed = None
+    if isinstance(parsed, dict) and parsed.get("verdict") == "fail":
+        if parsed.get("blocking_findings"):
+            return None
+        unsupported = parsed.get("unsupported_claims")
+        objections = (
+            [
+                item.strip()
+                for item in unsupported
+                if isinstance(item, str) and item.strip()
+            ]
+            if isinstance(unsupported, list)
+            else []
+        )
+        value = parsed
+    elif re.search(r'["\']verdict["\']\s*[:;,]\s*["\']fail["\']', content):
+        # A small critic may preserve the substance but corrupt object punctuation.
+        # Extract only explicitly labelled objection text from an explicit fail.
+        labelled: list[str] = []
+        for label in (
+            "problem",
+            "evidence",
+            "why_it_matters",
+            "correction",
+            "falsification_test_or_correction",
+        ):
+            match = re.search(
+                rf'["\']{label}["\']\s*[:;,]\s*["\'](?P<text>[^"\']{{8,2000}})["\']',
+                content,
+                re.IGNORECASE,
+            )
+            if match:
+                labelled.append(match.group("text").strip())
+        objections = list(dict.fromkeys(labelled))
+        value = {
+            "verdict": "fail",
+            "unsupported_claims": objections,
+            "evidence_refs": [],
+        }
+    else:
         return None
-    if not isinstance(value, dict) or value.get("verdict") != "fail":
-        return None
-    if value.get("blocking_findings"):
-        return None
-    unsupported = value.get("unsupported_claims")
-    if not isinstance(unsupported, list):
-        return None
-    objections = [
-        item.strip() for item in unsupported if isinstance(item, str) and item.strip()
-    ]
     if not objections:
         return None
 
@@ -470,6 +500,7 @@ async def request_structured(
             f"{json.dumps(schema, ensure_ascii=False, separators=(',', ':'))}"
         )
 
+    fail_closed_candidate: T | None = None
     async with httpx.AsyncClient(
         timeout=effective_timeout, transport=transport
     ) as client:
@@ -761,16 +792,36 @@ async def request_structured(
                 content = strip_reasoning_envelope(content)
             last_content = content
             try:
-                return output_type.model_validate_json(content)
+                parsed_output = output_type.model_validate_json(content)
             except ValidationError as exc:
                 last_error = str(exc)[:4000]
             except ValueError as exc:
                 last_error = str(exc)[:4000]
+            else:
+                if (
+                    fail_closed_candidate is not None
+                    and getattr(parsed_output, "verdict", None) != "fail"
+                ):
+                    if on_visible_text is not None:
+                        try:
+                            on_visible_text(
+                                "\n[Evidence Bench kept the initial critic fail: "
+                                "schema repair may correct format but cannot erase "
+                                "a substantive objection or infer approval.]\n"
+                            )
+                        except Exception:
+                            pass
+                    return fail_closed_candidate
+                return parsed_output
+
+            current_salvage = _salvage_schema_incomplete_verification_report(
+                content, output_type
+            )
+            if current_salvage is not None:
+                fail_closed_candidate = fail_closed_candidate or current_salvage
 
             if attempt >= repair_attempts:
-                salvaged = _salvage_schema_incomplete_verification_report(
-                    content, output_type
-                )
+                salvaged = current_salvage or fail_closed_candidate
                 if salvaged is not None:
                     if on_visible_text is not None:
                         try:
@@ -809,7 +860,10 @@ async def request_structured(
                         "invalid_previous_output": last_content[-8000:],
                         "repair_instruction": (
                             f"Return one complete value matching {schema_name}. "
-                            "Correct the schema violation shown below; emit JSON only.\n"
+                            "This is format repair only: preserve the preceding "
+                            "verdict and every substantive objection; never change "
+                            "fail to pass. Correct the schema violation shown below; "
+                            "emit JSON only.\n"
                             f"VALIDATION ERROR:\n{last_error}"
                         ),
                     }

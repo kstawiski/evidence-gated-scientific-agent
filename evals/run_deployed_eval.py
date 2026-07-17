@@ -277,6 +277,7 @@ def _known_effect_matches_reference(value: dict) -> bool:
                 "study_design.n_treatment",
                 "sample_sizes.n_treatment",
                 "groups.treatment.n",
+                "group_summaries.treatment.n",
             ),
             ("n_treatment", "treatment_n"),
             20.0,
@@ -286,6 +287,7 @@ def _known_effect_matches_reference(value: dict) -> bool:
                 "study_design.n_control",
                 "sample_sizes.n_control",
                 "groups.control.n",
+                "group_summaries.control.n",
             ),
             ("n_control", "control_n"),
             20.0,
@@ -318,7 +320,11 @@ def _known_effect_matches_reference(value: dict) -> bool:
             5.0,
         ),
         (
-            ("primary.welch_t_statistic", "primary.welch_t_test.t_statistic"),
+            (
+                "primary.welch_t_statistic",
+                "primary.welch_t_test.t_statistic",
+                "welch_t_test.t_statistic",
+            ),
             ("welch_t_statistic", "t_statistic"),
             10.897247358851683,
         ),
@@ -326,6 +332,7 @@ def _known_effect_matches_reference(value: dict) -> bool:
             (
                 "primary.degrees_of_freedom",
                 "primary.welch_t_test.degrees_of_freedom",
+                "welch_t_test.degrees_of_freedom",
             ),
             ("degrees_of_freedom", "welch_df", "df_welch"),
             38.0,
@@ -385,7 +392,12 @@ def _known_effect_matches_reference(value: dict) -> bool:
         return False
     return math.isclose(
         metric(
-            ("primary.p_value", "primary.welch_t_test.p_value_two_sided"),
+            (
+                "primary.p_value",
+                "primary.welch_t_test.p_value_two_sided",
+                "welch_t_test.p_value",
+                "welch_t_test.p_value_two_sided",
+            ),
             ("p_value", "p_value_two_sided"),
         ),
         2.971749478841818e-13,

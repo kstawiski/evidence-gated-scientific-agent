@@ -387,7 +387,9 @@ deterministically from an auditable count table, never improvised as AI imagery.
 Conceptual schematics must distinguish observation from hypothesis and must not be
 used as scientific evidence by themselves.
 Machine-readable JSON must be strict JSON: encode missing or non-finite values as
-null, never NaN or Infinity.
+null, never NaN or Infinity. Every object key must be a string; convert pandas
+MultiIndex or group-by tuple keys into named nested objects or explicit string
+labels before calling `json.dump`.
 Do not import or install a Python/R package solely to calculate artifact hashes or
 provenance. The controller hashes every successful output; analysis scripts should
 write the scientific artifact and exit without `openssl`, `digest`, or an analogous
@@ -398,6 +400,9 @@ consistent; do not hand-edit Welch-Satterthwaite degrees of freedom. For figures
 avoid version-fragile Matplotlib calls: label boxplots with `tick_labels` (or set
 ticks after plotting), and pass singleton asymmetric error bars as shape `(2, 1)`,
 for example `xerr=[[estimate-low], [high-estimate]]`.
+`Axes.errorbar()` accepts `linewidth` or `elinewidth`, never the scatter-style
+`linewidths` keyword. `Axes.plot()` returns `Line2D` objects; inspect their
+coordinates with `get_xdata()` and `get_ydata()`, not `get_xy()`.
 `Axes.hlines()` returns one `LineCollection`, not a subscriptable list; retain that
 object directly and inspect `get_segments()` if a display-fidelity assertion needs
 the interval endpoints.

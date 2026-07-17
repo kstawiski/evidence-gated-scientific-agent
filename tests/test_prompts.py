@@ -36,6 +36,11 @@ def test_researcher_forbids_mixed_effect_scales_and_zero_rounded_p_values():
 
 
 def test_researcher_documents_matplotlib_hlines_return_type():
+    assert "Every object key must be a string" in RESEARCHER
+    assert "MultiIndex or group-by tuple keys" in RESEARCHER
+    assert "`Axes.errorbar()` accepts `linewidth` or `elinewidth`" in RESEARCHER
+    assert "never the scatter-style\n`linewidths` keyword" in RESEARCHER
+    assert "`get_xdata()` and `get_ydata()`, not `get_xy()`" in RESEARCHER
     assert "`Axes.hlines()` returns one `LineCollection`" in RESEARCHER
     assert "inspect `get_segments()`" in RESEARCHER
     assert "cross-check every reported test statistic" in REPORT_AUDITOR

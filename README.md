@@ -523,6 +523,10 @@ Research model/tool budgets are cumulative across repair rounds. Exhausting a
 budget stops further evidence gathering, but an existing report repair continues
 in existing-evidence-only mode and remains subject to deterministic validation
 and Gemma review. It never becomes a generic success or bypasses the gate.
+Simple-mode PubMed retrieval is additionally capped at three search attempts and
+three acquisition attempts for the whole run, including repairs; full literature
+review mode uses the broader configured global research budget. A limit response
+requires reuse of acquired records or an explicit evidence gap, not another query.
 
 The base Python runtime exposes NumPy, pandas, SciPy, statsmodels, scikit-learn,
 and matplotlib. The base R runtime exposes ggplot2, dplyr, survival, data.table,

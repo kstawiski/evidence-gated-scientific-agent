@@ -552,6 +552,29 @@ def test_tool_order_gate_allows_broader_zero_hit_search_and_lifts_after_code():
     assert gate.before_tool("search_pubmed", successful) is None
 
 
+def test_simple_tool_order_gate_caps_post_computation_pubmed_attempts():
+    gate = ScientificToolOrderGate(
+        frozenset(),
+        max_pubmed_search_attempts=3,
+        max_pubmed_acquisition_attempts=2,
+    )
+    for _ in range(3):
+        gate.record_result("search_pubmed", {"articles": []})
+    for _ in range(2):
+        gate.record_result(
+            "acquire_pubmed_article",
+            {"source_record": {"local_markdown_path": "/references/paper.md"}},
+        )
+
+    denied_search = gate.before_tool("search_pubmed", ComputationEvidence())
+    denied_acquisition = gate.before_tool(
+        "acquire_pubmed_article", ComputationEvidence()
+    )
+
+    assert denied_search["error"] == "RETRIEVAL_ATTEMPT_LIMIT_REACHED"
+    assert denied_acquisition["error"] == "RETRIEVAL_ATTEMPT_LIMIT_REACHED"
+
+
 def test_tool_order_gate_requires_passing_cross_language_reconciliation(tmp_path):
     gate = ScientificToolOrderGate(
         frozenset({"python", "r"}), require_reconciliation=True

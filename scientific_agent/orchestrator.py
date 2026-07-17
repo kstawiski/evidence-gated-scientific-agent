@@ -300,6 +300,8 @@ class ScientificToolOrderGate:
 
     required_languages: frozenset[str]
     require_reconciliation: bool = False
+    max_pubmed_search_attempts: int | None = None
+    max_pubmed_acquisition_attempts: int | None = None
     pubmed_search_attempts: int = 0
     pubmed_search_successes: int = 0
     pubmed_acquisition_attempts: int = 0
@@ -358,6 +360,20 @@ class ScientificToolOrderGate:
         current: ComputationEvidence,
         existing: ComputationEvidence | None = None,
     ) -> dict | None:
+        if (
+            tool_name == "search_pubmed"
+            and self.max_pubmed_search_attempts is not None
+            and self.pubmed_search_attempts >= self.max_pubmed_search_attempts
+        ):
+            return self._retrieval_limit(tool_name, self.max_pubmed_search_attempts)
+        if (
+            tool_name == "acquire_pubmed_article"
+            and self.max_pubmed_acquisition_attempts is not None
+            and self.pubmed_acquisition_attempts >= self.max_pubmed_acquisition_attempts
+        ):
+            return self._retrieval_limit(
+                tool_name, self.max_pubmed_acquisition_attempts
+            )
         missing, reconciliation = self.missing_requirements(current, existing)
         if not missing and not reconciliation:
             return None
@@ -373,6 +389,18 @@ class ScientificToolOrderGate:
         if tool_name == "acquire_pubmed_article" and acquisition_limit_reached:
             return self._deferred(tool_name, missing, reconciliation)
         return None
+
+    @staticmethod
+    def _retrieval_limit(tool_name: str, limit: int) -> dict:
+        return {
+            "status": "policy_denied",
+            "error": "RETRIEVAL_ATTEMPT_LIMIT_REACHED",
+            "reason": (
+                f"{tool_name} reached the simple-run limit of {limit} attempts. "
+                "Use the retrieved records or report that the available search "
+                "did not establish the claim; do not issue another query."
+            ),
+        }
 
     @staticmethod
     def _deferred(tool_name: str, missing: list[str], reconciliation: bool) -> dict:
@@ -2544,6 +2572,8 @@ async def _produce_report(
             enable_code
             and _requires_cross_language_reconciliation(planning.master_plan.task)
         ),
+        max_pubmed_search_attempts=3 if simple_mode else None,
+        max_pubmed_acquisition_attempts=3 if simple_mode else None,
     )
 
     def before_research_tool(tool, args: dict, tool_context):

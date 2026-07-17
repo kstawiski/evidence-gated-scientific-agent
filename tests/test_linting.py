@@ -257,6 +257,33 @@ def test_plan_linter_rejects_wrong_hedges_j_parentheses():
     }
 
 
+def test_plan_linter_rejects_unsupported_design_classification():
+    plan = good_plan()
+    plan.assumptions = [
+        "No causal inference is claimed; the analysis is strictly observational."
+    ]
+
+    rejected = lint_plan(task(), plan)
+    explicitly_observational = task().model_copy(
+        update={"objective": "Analyze this observational cohort study."}
+    )
+    accepted = lint_plan(explicitly_observational, plan)
+    plan.assumptions = [
+        "Allocation and sampling design are unspecified; do not infer observational status."
+    ]
+    unspecified = lint_plan(task(), plan)
+
+    assert "unsupported_plan_design_classification" in {
+        finding.code for finding in rejected.findings
+    }
+    assert "unsupported_plan_design_classification" not in {
+        finding.code for finding in accepted.findings
+    }
+    assert "unsupported_plan_design_classification" not in {
+        finding.code for finding in unspecified.findings
+    }
+
+
 def test_plan_linter_rejects_unrequested_normality_based_primary_stop():
     confirmatory = task().model_copy(
         update={

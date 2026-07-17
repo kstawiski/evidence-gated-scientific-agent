@@ -472,6 +472,31 @@ _SEMANTIC_ROLE_NAMES = {
 _INVALID_HEDGES_J_PARENTHESES = re.compile(
     r"(?:1\s*-\s*)?3\s*/\s*\(\s*4\s*\*\s*\(\s*(?:n|N)\s*-\s*9\s*\)\s*\)",
 )
+_DESIGN_CLASSIFICATION_ASSERTION = re.compile(
+    r"\b(?:is|was|are|were|assum(?:e[sd]?|ing)(?:\s+to\s+be)?|"
+    r"classif(?:y|ies|ied|ying)(?:\s+as)?|treat(?:s|ed|ing)?\s+as)\s+"
+    r"(?:strictly\s+)?(?:an?\s+)?"
+    r"(?P<design>observational|randomi[sz]ed|experimental|synthetic|representative)\b",
+    re.IGNORECASE,
+)
+_TASK_DESIGN_CLASSIFICATION = {
+    "observational": re.compile(
+        r"\bobservational\s+(?:cohort|data|dataset|design|study)\b", re.IGNORECASE
+    ),
+    "randomized": re.compile(
+        r"\brandomi[sz]ed\s+(?:allocation|controlled\s+trial|design|study|trial)\b",
+        re.IGNORECASE,
+    ),
+    "experimental": re.compile(
+        r"\bexperimental\s+(?:data|dataset|design|study)\b", re.IGNORECASE
+    ),
+    "synthetic": re.compile(
+        r"\bsynthetic\s+(?:data|dataset|fixture|study)\b", re.IGNORECASE
+    ),
+    "representative": re.compile(
+        r"\brepresentative\s+(?:cohort|population|sample)\b", re.IGNORECASE
+    ),
+}
 _EXPLICIT_DIAGNOSTIC_ACTION = re.compile(
     r"\b(?:stop|halt|abort|terminate|exclude|drop|omit|remove)\w*\b"
     r".{0,120}\b(?:shapiro(?:-wilk)?|normality(?:\s+test)?|outliers?|"
@@ -802,6 +827,30 @@ def lint_plan(
                     "where N is the total sample size; 1 - 3/(4*(N - 9)) is a "
                     "different and invalid formula. Preserve the task-specified "
                     "parentheses exactly."
+                ),
+            )
+        )
+    task_design_text = " ".join([task.objective, *task.constraints])
+    asserted_designs = {
+        (
+            "randomized"
+            if match.group("design").casefold() in {"randomised", "randomized"}
+            else match.group("design").casefold()
+        )
+        for match in _DESIGN_CLASSIFICATION_ASSERTION.finditer(plan_text)
+    }
+    for design in sorted(asserted_designs):
+        if _TASK_DESIGN_CLASSIFICATION[design].search(task_design_text):
+            continue
+        findings.append(
+            LintFinding(
+                code="unsupported_plan_design_classification",
+                location="plan",
+                message=(
+                    f"The plan classifies the input as {design}, but the user task "
+                    "and controller profile do not establish that design. State that "
+                    "allocation/sampling design is unspecified and constrain causal "
+                    "and generalizability claims instead."
                 ),
             )
         )

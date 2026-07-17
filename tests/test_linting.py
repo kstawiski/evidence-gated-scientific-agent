@@ -1299,6 +1299,39 @@ def test_report_validator_rejects_unqualified_robust_association():
     }
 
 
+def test_report_validator_rejects_balance_sensitivity_and_uniformity_overclaims():
+    report = article_report(
+        discussion=(
+            "The treatment condition showed a uniform increase of 5.0 units "
+            "compared with the control group mean. Normality diagnostics were not "
+            "executed, though the balanced design and lack of outliers reduce "
+            "sensitivity to such departures."
+        )
+    )
+
+    validation = validate_report(report)
+
+    assert {finding.code for finding in validation.findings} >= {
+        "balanced_design_assumption_reassurance",
+        "group_mean_uniformity_overclaim",
+    }
+
+
+def test_report_validator_accepts_group_mean_language_without_uniformity_claim():
+    report = article_report(
+        discussion=(
+            "The treatment group had a mean increase of 5.0 units; individual "
+            "changes ranged from 3 to 7 units. Normality was not formally assessed."
+        )
+    )
+
+    validation = validate_report(report)
+
+    assert "group_mean_uniformity_overclaim" not in {
+        finding.code for finding in validation.findings
+    }
+
+
 def test_report_validator_rejects_sandbox_plan_as_protocol_timing_evidence(tmp_path):
     plan = tmp_path / "locked_analysis_plan.json"
     plan.write_text('{"status":"locked"}\n', encoding="utf-8")

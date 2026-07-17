@@ -1,0 +1,53 @@
+{
+  "case": "known-effect",
+  "release_candidate": "v0.4.1",
+  "deployment_commit": "4ba1f7a304aaa9798844021b036545d21a67d992",
+  "deployment_image_digest": "sha256:e9f4a8103e3e65c288ffd773a3d3b99905bf6ef62be8fbb4596a79ea94b48d9d",
+  "workspace_id": "75112e60-932c-4e18-8059-7a65f353e6ac",
+  "run_id": "f9a82678-13d4-4d5d-b574-72b1fb30cc96",
+  "started_at": "2026-07-17T20:10:43.913950+00:00",
+  "finished_at": "2026-07-17T21:06:09.129247+00:00",
+  "terminal_status": "supported",
+  "evaluator_score_before_exact_j_field_fix": "16/18",
+  "evaluator_score_after_exact_j_field_fix": "18/18",
+  "merit_gate": "failed",
+  "productive_behavior": [
+    "The prespecified plan passed independent audit and deterministic lint without repair, and the first Python and final full-precision R executions independently recovered the exact planted effect.",
+    "The final successful repair reconciled the exact mean difference, Welch statistic, and Hedges g to absolute tolerance 1e-6 and registered a raster figure and reader-facing summary table.",
+    "The terminal run passed deployed deterministic validation, Gemma report review, and Gemma raster/table review; the immutable result rescored 18/18 after the evaluator learned the exact Hedges correction-factor field.",
+    "The append-only computation trail retained every rejected script and made four distinct static-analysis false positives independently reproducible."
+  ],
+  "release_blockers": [
+    "The deployed effect-axis checker rejected valid limits expressed as min(..., 0)/max(..., 0) through variables, valid literal limits such as (-1.5, 7.5), valid self-clamping reassignments, and valid named numeric constants, even though each form proved that zero was included.",
+    "The deployed empty-legend checker treated f-string artist labels as absent, rejecting a valid legend because it recognized only literal string labels.",
+    "Two runtime calls were lost to invalid ErrorbarContainer inspection: one called get_segments() on the capline tuple and another called get_xdata() on the whole container. The deployed prompt and preflight did not prevent either known Matplotlib type error.",
+    "The terminal Discussion and figure caption claimed a uniform 5-unit treatment response even though individual treatment changes ranged from 3 to 7, conflating the group mean with individual-level homogeneity.",
+    "The terminal Discussion used the balanced design and lack of outliers to claim reduced sensitivity to untested normality departures. Deployed deterministic validation and both final Gemma reviews passed this assumption reassurance.",
+    "The terminal figure placed both n=20 text labels in the individual point clouds, and its caption incorrectly described horizontal group-mean lines even though the panel used point estimates with vertical SD bars.",
+    "The deployed evaluator omitted the exact field effect_size.hedges_g_correction_factor_J, producing a false 16/18 despite correct, hash-bound Python and R artifacts."
+  ],
+  "terminal_artifacts": [
+    {
+      "path": "computations/attempt-1/exec-006/output/figures/analysis_figure.png",
+      "sha256": "6c797ef8b7f7d1898605a2834c193d59c181027e506b7e141e7dd12c611ad601",
+      "width": 2582,
+      "height": 1318
+    },
+    {
+      "path": "computations/attempt-1/exec-006/output/tables/summary_table.csv",
+      "sha256": "75b332577e4123daa7838f84752fa5826e099897102eeeec7e15334882d25a9f"
+    },
+    {
+      "path": "scientific_report.json",
+      "sha256": "bea1603b42f77c16e7d3ea4513c02362024e2563c11a72538798e00c33d58e92"
+    }
+  ],
+  "implemented_repairs": [
+    "Effect-axis preflight now proves lower and upper bounds through numeric literals, unary negatives, min/max clamps, named values, and the latest pre-call assignment, while rejecting a later unsafe overwrite.",
+    "Computed artist labels are treated as potentially visible unless they are statically proven empty or Matplotlib-hidden; literal hidden labels remain rejected.",
+    "Generation guidance documents all ErrorbarContainer members, and preflight rejects line-coordinate methods on the container and get_segments() on the capline tuple.",
+    "Reporter guidance and deterministic validation reject group-mean-to-uniform-response overclaims and the observed balanced-design reduces-sensitivity reassurance wording.",
+    "The known-effect evaluator accepts effect_size.hedges_g_correction_factor_J and has an exact regression fixture for the bound Python/R artifact schema from this run."
+  ],
+  "disposition": "Rejected despite terminal supported and a corrected 18/18 mechanical score; live static-analysis false positives consumed the computation budget, while unsupported individual-uniformity and normality-reassurance claims plus caption/display defects passed deterministic and Gemma review. Every observed defect is now represented by a regression or explicit generation contract."
+}

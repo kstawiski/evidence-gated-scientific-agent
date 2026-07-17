@@ -491,6 +491,33 @@ def test_known_effect_accepts_current_deployed_language_artifact_shape():
     assert _known_effect_matches_reference(value) is True
 
 
+def test_known_effect_accepts_exact_f9a_language_artifact_shape():
+    value = {
+        "primary": {
+            "mean_difference": 5.0,
+            "t_statistic": 10.897247358851683,
+            "degrees_of_freedom": 38.0,
+            "p_value": 2.971749478841818e-13,
+            "ci_95_lower": 4.071144254485707,
+            "ci_95_upper": 5.928855745514293,
+            "standard_error": 0.45883146774112343,
+        },
+        "effect_size": {
+            "pooled_sd": 1.4509525002200232,
+            "cohen_d": 3.446012188022556,
+            "hedges_g_correction_factor_J": 0.9801324503311258,
+            "hedges_g": 3.3775483697174717,
+        },
+        "sample_sizes": {"n_treatment": 20, "n_control": 20, "n_total": 40},
+        "group_means": {
+            "treatment_mean_change": 5.0,
+            "control_mean_change": 0.0,
+        },
+    }
+
+    assert _known_effect_matches_reference(value) is True
+
+
 def test_known_effect_rejects_reference_echo_that_conflicts_with_results():
     reference = {
         "n_treatment": 20,

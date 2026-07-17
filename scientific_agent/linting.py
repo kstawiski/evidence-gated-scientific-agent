@@ -529,13 +529,22 @@ _BALANCED_DESIGN_REASSURANCE = re.compile(
     r".{0,100}\btype\s*i\s*error\b|"
     r"\b(?:normality|non[- ]?normality|distributional\s+assumptions?)\b"
     r".{0,180}\bbalanced\b.{0,80}\b(?:design|groups?|sample sizes?)\b"
-    r".{0,140}\b(?:mitigat(?:e[sd]?|ing)|reassur\w*|reduc\w*\s+concern)\b",
+    r".{0,140}\b(?:mitigat(?:e[sd]?|ing)|reassur\w*|"
+    r"reduc\w*\s+(?:concern|sensitivity))\b",
     re.IGNORECASE,
 )
 _UNQUALIFIED_RESULT_ROBUSTNESS = re.compile(
     r"\b(?:analysis|association|contrast|estimate|finding|result)s?\b.{0,80}"
     r"\b(?:is|are|was|were)\s+(?:statistically\s+)?robust\b|"
     r"\brobust\b.{0,50}\b(?:analysis|association|contrast|estimate|finding|result)s?\b",
+    re.IGNORECASE,
+)
+_GROUP_MEAN_UNIFORMITY_OVERCLAIM = re.compile(
+    r"\b(?:group|condition|arm)\b.{0,100}\b"
+    r"(?:show(?:s|ed|ing)?|exhibit(?:s|ed|ing)?)\b.{0,30}\buniform\b"
+    r".{0,30}\b(?:increase|decrease|change|response)\b|"
+    r"\buniform\b.{0,30}\b(?:increase|decrease|change|response)\b"
+    r".{0,80}\b(?:group|condition|arm|mean)\b",
     re.IGNORECASE,
 )
 _METHODOLOGICAL_GENERALIZATION = re.compile(
@@ -2160,6 +2169,19 @@ def validate_report(
                 message=(
                     "Do not summarize a result as robust. State the exact observed "
                     "reproducibility or sensitivity evidence and its scope instead."
+                ),
+            )
+        )
+    if _GROUP_MEAN_UNIFORMITY_OVERCLAIM.search(report_text):
+        findings.append(
+            LintFinding(
+                code="group_mean_uniformity_overclaim",
+                location="report",
+                message=(
+                    "A group mean does not establish a uniform individual response. "
+                    "Describe the group mean and observed dispersion directly; use "
+                    "individual-level language only when every corresponding value "
+                    "is explicitly verified by a successful artifact."
                 ),
             )
         )

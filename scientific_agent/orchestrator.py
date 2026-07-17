@@ -121,6 +121,10 @@ TABLE_PRECISION_REPAIR_GUIDANCE = (
     "as inequalities such as p < 0.001 rather than rounding them to zero."
 )
 
+REPORT_AUDIT_JSON_MAX_FILES = 8
+REPORT_AUDIT_JSON_MAX_FILE_BYTES = 16 * 1024
+REPORT_AUDIT_JSON_MAX_TOTAL_BYTES = 64 * 1024
+
 
 def _review_deferred_by_deterministic_gate(
     validation: DeterministicValidation,
@@ -2431,8 +2435,12 @@ def _merge_controller_artifacts(
     return tuple(by_path[path] for path in sorted(by_path))
 
 
-def _compact_computation_summary(computation: ComputationEvidence) -> dict:
-    """Keep audit evidence complete without replaying non-evidence file records."""
+def _compact_computation_summary(
+    computation: ComputationEvidence,
+    *,
+    referenced_json_paths: set[str] | None = None,
+) -> dict:
+    """Keep audit evidence compact, with bounded cited JSON values when requested."""
 
     records = []
     for record in computation.records:
@@ -2453,7 +2461,7 @@ def _compact_computation_summary(computation: ComputationEvidence) -> dict:
                 ],
             }
         )
-    return {
+    summary = {
         "successful_calls": computation.successful_calls,
         "failed_or_denied_calls": sum(
             record.status != "succeeded" for record in computation.records
@@ -2463,6 +2471,86 @@ def _compact_computation_summary(computation: ComputationEvidence) -> dict:
             artifact.model_dump(mode="json") for artifact in computation.artifacts
         ],
     }
+    if referenced_json_paths is None:
+        return summary
+
+    requested_paths = {os.path.normpath(path) for path in referenced_json_paths}
+    included_paths: set[str] = set()
+    referenced_json_values: list[dict] = []
+    referenced_json_unavailable: list[dict[str, object]] = []
+    total_bytes = 0
+    for record in computation.records:
+        if record.status != "succeeded":
+            continue
+        for artifact in record.artifacts:
+            normalized_path = os.path.normpath(artifact.path)
+            if (
+                normalized_path not in requested_paths
+                or normalized_path in included_paths
+                or Path(normalized_path).suffix.lower() != ".json"
+                or artifact.description != "sandbox-generated analysis artifact"
+            ):
+                continue
+            included_paths.add(normalized_path)
+            if len(referenced_json_values) >= REPORT_AUDIT_JSON_MAX_FILES:
+                referenced_json_unavailable.append(
+                    {"path": artifact.path, "reason": "file_count_limit"}
+                )
+                continue
+            path = Path(normalized_path)
+            try:
+                file_bytes = path.stat().st_size
+            except OSError:
+                referenced_json_unavailable.append(
+                    {"path": artifact.path, "reason": "not_readable"}
+                )
+                continue
+            if file_bytes > REPORT_AUDIT_JSON_MAX_FILE_BYTES:
+                referenced_json_unavailable.append(
+                    {
+                        "path": artifact.path,
+                        "bytes": file_bytes,
+                        "reason": "file_size_limit",
+                    }
+                )
+                continue
+            if total_bytes + file_bytes > REPORT_AUDIT_JSON_MAX_TOTAL_BYTES:
+                referenced_json_unavailable.append(
+                    {
+                        "path": artifact.path,
+                        "bytes": file_bytes,
+                        "reason": "total_size_limit",
+                    }
+                )
+                continue
+            try:
+                actual_sha256 = sha256_file(path)
+                if artifact.sha256 is None or actual_sha256 != artifact.sha256:
+                    referenced_json_unavailable.append(
+                        {
+                            "path": artifact.path,
+                            "reason": "sha256_mismatch",
+                        }
+                    )
+                    continue
+                value = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+                referenced_json_unavailable.append(
+                    {"path": artifact.path, "reason": "invalid_json"}
+                )
+                continue
+            total_bytes += file_bytes
+            referenced_json_values.append(
+                {
+                    "path": artifact.path,
+                    "sha256": actual_sha256,
+                    "bytes": file_bytes,
+                    "value": value,
+                }
+            )
+    summary["referenced_json_values"] = referenced_json_values
+    summary["referenced_json_unavailable"] = referenced_json_unavailable
+    return summary
 
 
 def _write_attempt_bundle(
@@ -3179,6 +3267,12 @@ async def _audit_report(
 ) -> VerificationReport:
     _cancel_checkpoint(cancel_event)
     acquired_article_evidence = build_acquired_article_audit(report, retrieval)
+    referenced_json_paths = {
+        source.artifact_path
+        for source in report.sources
+        if source.artifact_path is not None
+        and Path(source.artifact_path).suffix.lower() == ".json"
+    }
     payload = {
         "task": planning.master_plan.task.model_dump(mode="json"),
         "master_plan": planning.master_plan.model_dump(mode="json"),
@@ -3186,7 +3280,10 @@ async def _audit_report(
         "deterministic_validation": validation.model_dump(mode="json"),
         "retrieval_evidence": retrieval.model_dump(mode="json"),
         "acquired_article_evidence": acquired_article_evidence,
-        "computation_evidence": _compact_computation_summary(computation),
+        "computation_evidence": _compact_computation_summary(
+            computation,
+            referenced_json_paths=referenced_json_paths,
+        ),
         "controller_evidence": {
             "artifacts": [
                 artifact.model_dump(mode="json") for artifact in controller_artifacts

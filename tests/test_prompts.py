@@ -60,6 +60,8 @@ def test_researcher_documents_matplotlib_hlines_return_type():
     assert "`Axes.hlines()` returns one `LineCollection`" in RESEARCHER
     assert "inspect `get_segments()`" in RESEARCHER
     assert "cross-check every reported test statistic" in REPORT_AUDITOR
+    assert "referenced_json_values" in REPORT_AUDITOR
+    assert "bounded, hash-verified values" in REPORT_AUDITOR
     assert "horizontal versus\nvertical bars" in DISPLAY_AUDITOR
     assert "zero-spread group alongside a nonzero reported\nSD" in DISPLAY_AUDITOR
     assert "must never be shifted or duplicated around\nboth group means" in (
@@ -71,6 +73,9 @@ def test_researcher_documents_matplotlib_hlines_return_type():
         DISPLAY_AUDITOR
     )
     assert "jitter only the categorical position coordinate" in RESEARCHER
+    assert "consecutive integer centers" in RESEARCHER
+    assert "jitter\nenvelopes overlap" in RESEARCHER
+    assert "point estimate, and both confidence-interval endpoints" in RESEARCHER
     assert "without `openssl`, `digest`" in RESEARCHER
     assert "shifted or duplicated contrast interval" in REPORT_AUDITOR
     assert "Shared boolean quality-control\nfields" in RESEARCHER

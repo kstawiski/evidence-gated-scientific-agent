@@ -185,6 +185,32 @@ effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
     )
 
 
+def test_python_static_preflight_rejects_duplicate_group_jitter_centers():
+    violations = _python_static_violations(
+        """
+jitter_control = rng.uniform(-0.15, 0.15, len(control))
+jitter_treatment = rng.uniform(-0.15, 0.15, len(treatment))
+ax.scatter(jitter_control, control, label="Control")
+ax.scatter(jitter_treatment, treatment, label="Treatment")
+ax.set_xticks([0, 1])
+"""
+    )
+
+    assert any("share a jitter center" in item for item in violations)
+    assert (
+        _python_static_violations(
+            """
+jitter_control = rng.uniform(-0.15, 0.15, len(control))
+jitter_treatment = rng.uniform(-0.15, 0.15, len(treatment))
+ax.scatter(0 + jitter_control, control, label="Control")
+ax.scatter(1 + jitter_treatment, treatment, label="Treatment")
+ax.set_xticks([0, 1])
+"""
+        )
+        == []
+    )
+
+
 def test_python_static_preflight_rejects_empty_legend():
     violations = _python_static_violations(
         """

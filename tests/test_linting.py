@@ -2403,6 +2403,39 @@ def test_welch_variance_scope_and_nonnormality_limitation_are_valid():
     }
 
 
+def test_welch_explicit_nonnormality_disclaimer_is_valid():
+    report = article_report(
+        introduction=(
+            "The Welch t-test accommodates unequal variances; it does not "
+            "inherently correct for distributional departures."
+        ),
+        discussion=(
+            "While the Welch adjustment accounts for potential variance "
+            "heterogeneity, it does not mitigate the non-normality detected by "
+            "Shapiro-Wilk tests."
+        ),
+    )
+
+    validation = validate_report(report)
+
+    assert "welch_normality_overclaim" not in {
+        finding.code for finding in validation.findings
+    }
+
+
+def test_protocol_timing_regex_does_not_cross_sentence_boundary():
+    report = article_report(
+        methods=["The protocol was locked before outcome analysis."],
+        results="Data inspection confirmed 40 complete records.",
+    )
+
+    validation = validate_report(report)
+    codes = {finding.code for finding in validation.findings}
+
+    assert "protocol_timing_without_controller_artifact" in codes
+    assert "protocol_timing_overstates_input_blinding" not in codes
+
+
 def _display_computation(tmp_path, artifact_path):
     artifact = ArtifactRef(
         path=str(artifact_path),

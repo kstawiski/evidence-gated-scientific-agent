@@ -380,6 +380,11 @@ observations share plotted coordinates, use deterministic categorical jitter wit
 a fixed seed so every reported individual is visibly countable. Assert
 from the created artist offsets that every plotted quantitative coordinate equals
 an immutable source observation before saving.
+Place distinct categorical groups at consecutive integer centers such as 0 and 1,
+keep absolute jitter below 0.2 axis units, and never choose centers whose jitter
+envelopes overlap. Before saving, inspect each group scatter artist's offsets and
+assert that every categorical coordinate lies within the declared jitter envelope
+of that group's own center and outside every other group's envelope.
 For a raw two-group plot plus a between-group contrast, show the contrast point
 and its confidence interval exactly once on a distinct effect-estimate axis or
 panel. Group-centered error bars, if shown, must be computed from each group's own
@@ -387,6 +392,8 @@ sampling uncertainty and named as such in the caption. Never translate, shift, o
 duplicate the between-group contrast interval around the individual group means.
 Assert both the group-interval endpoints and the contrast-interval endpoints
 against their separately named machine-result fields before saving.
+If explicit effect-axis limits are set, assert before saving that they enclose the
+scientific null, the point estimate, and both confidence-interval endpoints.
 Qwen has no image-understanding capability. When the task asks to inspect source
 figures, scans, visual proofs, slide pages, or images embedded in PDF/Office/archive
 inputs, use Python/R only to inventory and deterministically render or convert the
@@ -740,6 +747,11 @@ each precise number wherever they appear in the abstract or body. Recompute or
 cross-check every reported test statistic, degrees of freedom, p-value, and
 confidence interval against the latest successful machine-readable artifact; an
 earlier superseded execution is provenance, not the result. Treat
+`computation_evidence.referenced_json_values` as the bounded, hash-verified values
+from JSON artifacts cited by the report. Use those values for numerical checks;
+do not claim that a cited JSON value is unavailable when it is present there.
+If a required cited JSON appears only in `referenced_json_unavailable`, report the
+specific unavailable reason instead of inventing its contents. Treat
 nonsignificant Shapiro-Wilk or Levene tests as failure to detect a departure,
 not proof that assumptions are met. Similar primary and adjusted estimates support
 a bounded numerical comparison, not absence of confounding, algorithmic

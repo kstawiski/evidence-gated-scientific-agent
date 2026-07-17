@@ -3438,6 +3438,94 @@ def test_compact_computation_summary_keeps_evidence_and_drops_log_artifacts():
     assert "stdout_path" not in summary["records"][0]
 
 
+def test_compact_computation_summary_includes_only_cited_verified_json(tmp_path):
+    cited_path = tmp_path / "cited.json"
+    cited_path.write_text('{"estimate": 5.0, "ci": [4.1, 5.9]}', encoding="utf-8")
+    unreferenced_path = tmp_path / "unreferenced.json"
+    unreferenced_path.write_text('{"estimate": 999}', encoding="utf-8")
+    cited = ArtifactRef(
+        path=str(cited_path),
+        sha256=sha256_file(cited_path),
+        description="sandbox-generated analysis artifact",
+    )
+    unreferenced = ArtifactRef(
+        path=str(unreferenced_path),
+        sha256=sha256_file(unreferenced_path),
+        description="sandbox-generated analysis artifact",
+    )
+    computation = ComputationEvidence(
+        successful_calls=1,
+        records=[
+            ComputationRecord(
+                execution_id="exec-001",
+                language="python",
+                code_sha256="c" * 64,
+                started_at="2026-07-17T20:00:00Z",
+                duration_seconds=1.0,
+                exit_code=0,
+                status="succeeded",
+                stdout_path=str(tmp_path / "stdout.txt"),
+                stderr_path=str(tmp_path / "stderr.txt"),
+                artifacts=[cited, unreferenced],
+            )
+        ],
+        artifacts=[cited, unreferenced],
+    )
+
+    summary = _compact_computation_summary(
+        computation,
+        referenced_json_paths={str(cited_path)},
+    )
+
+    assert summary["referenced_json_values"] == [
+        {
+            "path": str(cited_path),
+            "sha256": sha256_file(cited_path),
+            "bytes": cited_path.stat().st_size,
+            "value": {"estimate": 5.0, "ci": [4.1, 5.9]},
+        }
+    ]
+    assert summary["referenced_json_unavailable"] == []
+
+
+def test_compact_computation_summary_rejects_hash_mismatched_json(tmp_path):
+    result_path = tmp_path / "result.json"
+    result_path.write_text('{"estimate": 5.0}', encoding="utf-8")
+    result = ArtifactRef(
+        path=str(result_path),
+        sha256="0" * 64,
+        description="sandbox-generated analysis artifact",
+    )
+    computation = ComputationEvidence(
+        successful_calls=1,
+        records=[
+            ComputationRecord(
+                execution_id="exec-001",
+                language="r",
+                code_sha256="d" * 64,
+                started_at="2026-07-17T20:00:00Z",
+                duration_seconds=1.0,
+                exit_code=0,
+                status="succeeded",
+                stdout_path=str(tmp_path / "stdout.txt"),
+                stderr_path=str(tmp_path / "stderr.txt"),
+                artifacts=[result],
+            )
+        ],
+        artifacts=[result],
+    )
+
+    summary = _compact_computation_summary(
+        computation,
+        referenced_json_paths={str(result_path)},
+    )
+
+    assert summary["referenced_json_values"] == []
+    assert summary["referenced_json_unavailable"] == [
+        {"path": str(result_path), "reason": "sha256_mismatch"}
+    ]
+
+
 @pytest.mark.anyio
 async def test_unavailable_critic_is_inconclusive_and_recorded(tmp_path, monkeypatch):
     async def unavailable(*args, **kwargs):

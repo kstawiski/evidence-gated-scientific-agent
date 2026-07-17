@@ -96,6 +96,51 @@ def _python_static_violations(code: str) -> list[str]:
         # A computed label cannot be proven empty or Matplotlib-hidden statically.
         return True
 
+    def categorical_position_center(
+        expression: ast.AST,
+        before_line: int | None = None,
+        seen_names: frozenset[str] = frozenset(),
+    ) -> float | None:
+        literal = numeric_literal(expression)
+        if literal is not None:
+            return literal
+        if isinstance(expression, ast.Name) and expression.id not in seen_names:
+            assignments = [
+                candidate
+                for candidate in assignment_candidates.get(expression.id, ())
+                if before_line is None
+                or getattr(candidate, "lineno", before_line) < before_line
+            ]
+            if assignments:
+                latest = max(assignments, key=lambda item: getattr(item, "lineno", -1))
+                return categorical_position_center(
+                    latest,
+                    getattr(latest, "lineno", before_line),
+                    seen_names | {expression.id},
+                )
+        if isinstance(expression, ast.BinOp) and isinstance(
+            expression.op, (ast.Add, ast.Sub)
+        ):
+            left = categorical_position_center(expression.left, before_line, seen_names)
+            right = categorical_position_center(
+                expression.right, before_line, seen_names
+            )
+            if left is not None and right is not None:
+                return (
+                    left + right if isinstance(expression.op, ast.Add) else left - right
+                )
+        if (
+            isinstance(expression, ast.Call)
+            and isinstance(expression.func, ast.Attribute)
+            and expression.func.attr == "uniform"
+            and len(expression.args) >= 2
+        ):
+            lower = numeric_literal(expression.args[0])
+            upper = numeric_literal(expression.args[1])
+            if lower is not None and upper is not None:
+                return (lower + upper) / 2.0
+        return None
+
     def bound_proves_at_most_zero(
         expression: ast.AST,
         before_line: int | None = None,
@@ -215,6 +260,8 @@ def _python_static_violations(code: str) -> list[str]:
     }
     labeled_artist_axes: set[str] = set()
     null_reference_axes: set[str] = set()
+    labeled_scatter_centers: dict[str, list[float]] = {}
+    categorical_tick_counts: dict[str, int] = {}
     for candidate in ast.walk(tree):
         if not isinstance(candidate, ast.Call) or not isinstance(
             candidate.func, ast.Attribute
@@ -234,6 +281,24 @@ def _python_static_violations(code: str) -> list[str]:
             "scatter",
         } and could_be_visible_label(label):
             labeled_artist_axes.add(axis_key)
+        if (
+            candidate.func.attr == "scatter"
+            and could_be_visible_label(label)
+            and candidate.args
+        ):
+            center = categorical_position_center(
+                candidate.args[0], getattr(candidate, "lineno", None)
+            )
+            if center is not None:
+                labeled_scatter_centers.setdefault(axis_key, []).append(center)
+        if (
+            candidate.func.attr == "set_xticks"
+            and candidate.args
+            and isinstance(candidate.args[0], (ast.List, ast.Tuple))
+        ):
+            tick_values = [numeric_literal(item) for item in candidate.args[0].elts]
+            if all(value is not None for value in tick_values):
+                categorical_tick_counts[axis_key] = len(set(tick_values))
         if candidate.func.attr == "axvline":
             x_expression = (
                 candidate.args[0]
@@ -249,6 +314,17 @@ def _python_static_violations(code: str) -> list[str]:
             )
             if is_literal_zero(x_expression):
                 null_reference_axes.add(axis_key)
+    if any(
+        categorical_tick_counts.get(axis_key, 0) >= 2
+        and len(centers) >= 2
+        and len({round(center, 12) for center in centers}) < len(centers)
+        for axis_key, centers in labeled_scatter_centers.items()
+    ):
+        violations.add(
+            "Scientific categorical scatter groups share a jitter center despite "
+            "distinct x-axis categories; add each group's declared category center "
+            "to its jitter so raw observations align with their own tick and mean"
+        )
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue

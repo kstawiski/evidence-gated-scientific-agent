@@ -512,8 +512,8 @@ _PROTOCOL_TIMING = re.compile(
     re.IGNORECASE,
 )
 _PROTOCOL_BEFORE_DATA_INSPECTION = re.compile(
-    r"\b(?:lock(?:ed|ing)?|prespecif(?:ied|ication))\b.{0,120}"
-    r"\b(?:before|prior to)\b.{0,40}\bdata inspection\b",
+    r"\b(?:lock(?:ed|ing)?|prespecif(?:ied|ication))\b[^.!?]{0,120}"
+    r"\b(?:before|prior to)\b[^.!?]{0,40}\bdata inspection\b",
     re.IGNORECASE,
 )
 _AI_ROLE_UNDERSTATEMENT = re.compile(
@@ -685,13 +685,16 @@ _ASSUMPTION_ACCEPTANCE_LANGUAGE = re.compile(
     re.IGNORECASE,
 )
 _WELCH_NORMALITY_OVERCLAIM = re.compile(
-    r"\b(?:welch(?:'s)?(?:\s+(?:t[- ]?test|procedure|test))?).{0,140}"
-    r"\b(?:accommodat(?:e[sd]?|ing)|account(?:s|ed|ing)?\s+for|correct(?:s|ed|ing)?\s+for|"
-    r"handle(?:s|d|ing)?|remain(?:s|ed)?\s+applicable|robust)\b.{0,100}"
-    r"\b(?:non[- ]?normal(?:ity)?|normality|gaussian)\b|"
-    r"\b(?:non[- ]?normal(?:ity)?|normality|gaussian)\b.{0,140}"
-    r"\b(?:welch(?:'s)?(?:\s+(?:t[- ]?test|procedure|test))?).{0,100}"
-    r"\b(?:accommodat(?:e[sd]?|ing)|handle(?:s|d|ing)?|remain(?:s|ed)?\s+applicable|robust)\b",
+    r"\b(?:welch(?:'s)?(?:\s+(?:t[- ]?test|procedure|test))?)\b[^.!?]{0,100}"
+    r"\b(?:accommodat(?:e[sd]?|ing)|account(?:s|ed|ing)?\s+for|"
+    r"correct(?:s|ed|ing)?\s+for|handle(?:s|d|ing)?)\b\s+"
+    r"(?:departures?\s+from\s+)?\b(?:non[- ]?normal(?:ity)?|normality|gaussian)\b|"
+    r"\b(?:welch(?:'s)?(?:\s+(?:t[- ]?test|procedure|test))?)\b[^.!?]{0,100}"
+    r"\brobust\s+(?:to|against)\s+(?:non[- ]?normal(?:ity)?|normality|gaussian)\b|"
+    r"\b(?:non[- ]?normal(?:ity)?|normality|gaussian)\b[^.!?]{0,140}"
+    r"\b(?:welch(?:'s)?(?:\s+(?:t[- ]?test|procedure|test))?)\b[^.!?]{0,80}"
+    r"\b(?:accommodat(?:e[sd]?|ing)|handle(?:s|d|ing)?|"
+    r"remain(?:s|ed)?\s+applicable|robust)\b",
     re.IGNORECASE,
 )
 

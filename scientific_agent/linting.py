@@ -313,7 +313,8 @@ def reconciliation_verdict(
                 ] = Path(artifact.path)
 
     observed_passes: list[bool] = []
-    bound_documents: dict[str, dict[str, object]] = {}
+    bound_documents: dict[tuple[str, str], dict[str, object]] = {}
+    bound_document_pairs: set[tuple[tuple[str, str], tuple[str, str]]] = set()
     for comparison in comparisons:
         if (
             not isinstance(comparison, dict)
@@ -321,6 +322,7 @@ def reconciliation_verdict(
         ):
             return None
         sources: dict[str, float] = {}
+        comparison_document_keys: dict[str, tuple[str, str]] = {}
         for side in ("python", "r"):
             source = comparison.get(side)
             if not isinstance(source, dict) or source.get("language") != side:
@@ -353,11 +355,21 @@ def reconciliation_verdict(
             ):
                 return None
             if document is not None:
-                previous = bound_documents.get(side)
+                document_key = (side, digest.lower())
+                previous = bound_documents.get(document_key)
                 if previous is not None and previous != document:
                     return None
-                bound_documents[side] = document
+                bound_documents[document_key] = document
+                comparison_document_keys[side] = document_key
             sources[side] = observed
+
+        if set(comparison_document_keys) == {"python", "r"}:
+            bound_document_pairs.add(
+                (
+                    comparison_document_keys["python"],
+                    comparison_document_keys["r"],
+                )
+            )
 
         tolerance = _json_number(comparison.get("tolerance"))
         declared_difference = _json_number(comparison.get("absolute_difference"))
@@ -383,11 +395,11 @@ def reconciliation_verdict(
             return None
         observed_passes.append(observed_pass)
 
-    # A shared boolean diagnostic with the same JSON path has the same declared
-    # meaning in both language artifacts.  Do not certify numerical agreement
-    # while those machine-readable quality-control conclusions contradict one
-    # another.  This intentionally ignores language-specific fields and numeric
-    # diagnostics, which may use different implementations or tolerances.
+    # Shared structural input checks with the same JSON path have the same
+    # declared meaning in both language artifacts. Do not certify numerical
+    # agreement while those machine-readable conclusions contradict one another.
+    # Method-dependent booleans such as normality-test decisions are intentionally
+    # excluded because different implementations can use different tests.
     def diagnostic_booleans(document: dict[str, object]) -> dict[str, bool]:
         found: dict[str, bool] = {}
 
@@ -404,12 +416,16 @@ def reconciliation_verdict(
                 visit(value, section)
         return found
 
-    if set(bound_documents) == {"python", "r"}:
-        python_diagnostics = diagnostic_booleans(bound_documents["python"])
-        r_diagnostics = diagnostic_booleans(bound_documents["r"])
+    for python_key, r_key in bound_document_pairs:
+        python_diagnostics = diagnostic_booleans(bound_documents[python_key])
+        r_diagnostics = diagnostic_booleans(bound_documents[r_key])
         if any(
             python_diagnostics[path] is not r_diagnostics[path]
             for path in python_diagnostics.keys() & r_diagnostics.keys()
+            if re.search(
+                r"(?:^|_)(?:missing|duplicate|duplicated|schema|empty|finite|nan|inf|infinite)(?:_|$)",
+                path.rsplit(".", 1)[-1].lower(),
+            )
         ):
             observed_passes.append(False)
 

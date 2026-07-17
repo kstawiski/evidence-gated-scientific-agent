@@ -7,6 +7,7 @@ from PIL import Image
 from scientific_agent.linting import (
     _inferential_consistency_findings,
     lint_plan,
+    reconciliation_verdict,
     validate_report,
 )
 from scientific_agent.provenance import sha256_file
@@ -1500,6 +1501,129 @@ def test_reconciliation_rejects_conflicting_shared_boolean_diagnostic(tmp_path):
     assert "reconciliation_artifact_invalid" in {
         finding.code for finding in validation.findings
     }
+
+
+def test_reconciliation_accepts_multiple_bound_artifacts_per_language(tmp_path):
+    source_paths = {}
+    for language in ("python", "r"):
+        for index, (json_path, value) in enumerate(
+            (("primary.estimate", 5.0), ("secondary.estimate", 2.0)), start=1
+        ):
+            section, field = json_path.split(".")
+            path = tmp_path / f"{language}-{index}.json"
+            path.write_text(
+                json.dumps(
+                    {section: {field: value}, "diagnostics": {"missing": False}}
+                ),
+                encoding="utf-8",
+            )
+            source_paths[(language, index)] = path
+
+    comparisons = []
+    for index, metric in enumerate(("primary", "secondary"), start=1):
+        comparisons.append(
+            {
+                "metric": metric,
+                "python": {
+                    "language": "python",
+                    "artifact_sha256": sha256_file(source_paths[("python", index)]),
+                    "json_path": f"{metric}.estimate",
+                    "value": 5.0 if index == 1 else 2.0,
+                },
+                "r": {
+                    "language": "r",
+                    "artifact_sha256": sha256_file(source_paths[("r", index)]),
+                    "json_path": f"{metric}.estimate",
+                    "value": 5.0 if index == 1 else 2.0,
+                },
+                "absolute_difference": 0.0,
+                "tolerance": 1e-6,
+                "passed": True,
+            }
+        )
+    reconciliation_path = tmp_path / "cross_language_reconciliation.json"
+    reconciliation_path.write_text(
+        json.dumps({"all_pass": True, "comparisons": comparisons}), encoding="utf-8"
+    )
+    artifacts = [
+        ArtifactRef(
+            path=str(path),
+            sha256=sha256_file(path),
+            description="sandbox-generated analysis artifact",
+        )
+        for path in (*source_paths.values(), reconciliation_path)
+    ]
+    records = [
+        ComputationRecord(
+            execution_id=f"exec-{index}",
+            language=language,
+            code_sha256=str(index) * 64,
+            started_at="2026-07-13T15:00:00Z",
+            duration_seconds=0.1,
+            exit_code=0,
+            status="succeeded",
+            stdout_path=str(tmp_path / f"stdout-{index}.txt"),
+            stderr_path=str(tmp_path / f"stderr-{index}.txt"),
+            artifacts=[artifacts[index - 1]],
+        )
+        for index, language in enumerate(("python", "python", "r", "r"), start=1)
+    ]
+    records[0].artifacts.append(artifacts[-1])
+    computation = ComputationEvidence(records=records, artifacts=artifacts)
+
+    assert reconciliation_verdict(reconciliation_path, computation) is True
+
+
+def test_reconciliation_allows_method_dependent_boolean_diagnostics(tmp_path):
+    python_path = tmp_path / "python.json"
+    r_path = tmp_path / "r.json"
+    python_path.write_text(
+        '{"primary":{"point_estimate":5.0},"diagnostics":{"normality_passed":false}}\n',
+        encoding="utf-8",
+    )
+    r_path.write_text(
+        '{"primary":{"point_estimate":5.0},"diagnostics":{"normality_passed":true}}\n',
+        encoding="utf-8",
+    )
+    payload = reconciliation_document(
+        python_path, r_path, python_value=5.0, r_value=5.0
+    )
+    reconciliation_path = tmp_path / "cross_language_reconciliation.json"
+    reconciliation_path.write_text(json.dumps(payload), encoding="utf-8")
+    artifacts = [
+        ArtifactRef(
+            path=str(path),
+            sha256=sha256_file(path),
+            description="sandbox-generated analysis artifact",
+        )
+        for path in (python_path, r_path, reconciliation_path)
+    ]
+    records = [
+        ComputationRecord(
+            execution_id=f"exec-{index}",
+            language=language,
+            code_sha256=str(index) * 64,
+            started_at="2026-07-13T15:00:00Z",
+            duration_seconds=0.1,
+            exit_code=0,
+            status="succeeded",
+            stdout_path=str(tmp_path / f"stdout-{index}.txt"),
+            stderr_path=str(tmp_path / f"stderr-{index}.txt"),
+            artifacts=record_artifacts,
+        )
+        for index, (language, record_artifacts) in enumerate(
+            (("python", [artifacts[0], artifacts[2]]), ("r", [artifacts[1]])),
+            start=1,
+        )
+    ]
+
+    assert (
+        reconciliation_verdict(
+            reconciliation_path,
+            ComputationEvidence(records=records, artifacts=artifacts),
+        )
+        is True
+    )
 
 
 def test_cross_language_claim_must_cite_reconciliation_artifact(tmp_path):

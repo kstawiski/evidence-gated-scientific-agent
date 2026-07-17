@@ -66,8 +66,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/* \
     && /usr/sbin/groupadd --gid "$APP_GID" evidence \
     && /usr/sbin/useradd --uid "$APP_UID" --gid "$APP_GID" --no-create-home --shell /usr/sbin/nologin evidence \
-    && install -d -o evidence -g evidence -m 0700 /data /tmp/home \
-    && chmod u+s /usr/bin/bwrap
+    && install -d -o evidence -g evidence -m 0700 /data /tmp/home
 
 COPY --from=uv /uv /uvx /usr/local/bin/
 COPY --from=node-build /usr/local/bin/node /usr/local/bin/node

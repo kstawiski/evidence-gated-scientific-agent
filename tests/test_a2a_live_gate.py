@@ -56,7 +56,7 @@ def _transport(
                 200,
                 json={
                     "name": "Evidence Bench",
-                    "version": "0.4.0",
+                    "version": "0.4.1",
                     "supportedInterfaces": [
                         {
                             "url": "https://agent.example.test/a2a",
@@ -194,7 +194,7 @@ def test_live_gate_verifies_stream_artifacts_get_task_and_imrad():
 
     assert result == {
         "passed": True,
-        "agent_version": "0.4.0",
+        "agent_version": "0.4.1",
         "protocol_binding": "JSONRPC",
         "protocol_version": "1.0",
         "task_id": "server-assigned-task",

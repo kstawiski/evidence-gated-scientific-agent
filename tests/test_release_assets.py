@@ -64,3 +64,13 @@ def test_wheel_and_container_include_webui_integration_sources():
     assert forced["integrations/a2a"].endswith("release_assets/a2a")
     assert "COPY skills/evidence-bench ./skills/evidence-bench" in dockerfile
     assert "COPY integrations/a2a ./integrations/a2a" in dockerfile
+
+
+def test_runtime_image_has_no_setuid_bubblewrap_and_privilege_model_is_documented():
+    dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+    threat_model = Path("docs/THREAT_MODEL.md").read_text(encoding="utf-8")
+
+    assert "chmod u+s /usr/bin/bwrap" not in dockerfile
+    assert "SYS_ADMIN" in threat_model
+    assert "unconfined Docker\n  seccomp/AppArmor" in threat_model
+    assert "does not install a setuid bubblewrap binary" in threat_model

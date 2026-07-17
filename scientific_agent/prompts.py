@@ -476,7 +476,7 @@ describe abstract_only as full text or invent a missing local PDF path. The lite
 controller value `license: "unknown"` is data, not a missing value: copy it as
 `"unknown"`, never normalize it to null or omit the recorded terms warning.
 For a generic browser or MCP result recorded as web_page, documentation, dataset,
-or other, leave pmid, pmcid, citekey, rights_status, terms_warning,
+or other, leave pmid, pmcid, citekey, license, rights_status, terms_warning,
 local_pdf_path, local_markdown_path, and full_text_status null. Its URL, title,
 DOI, license, and retrieval time may be recorded when observed. A Chrome snapshot
 hash or saved tool response is RetrievalEvidence, not a local article path and not

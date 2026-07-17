@@ -602,7 +602,7 @@ The project is Apache-2.0 licensed and includes generic CI, multi-architecture
 GHCR release automation for runtime, package-builder, and managed-browser images,
 contribution/security policies, an A2A 1.0 Agent Card, and no secrets in tracked
 configuration. The optional lab skill documents its explicitly authorized
-private deployment endpoint; runtime configuration remains portable. Tagging `v0.4.0` in a
+private deployment endpoint; runtime configuration remains portable. Tagging `v0.4.1` in a
 public GitHub repository builds and publishes the corresponding containers. A
 ready-to-adapt upstream contribution dossier lives in
 [`docs/A2A_ECOSYSTEM_SUBMISSION.md`](docs/A2A_ECOSYSTEM_SUBMISSION.md).

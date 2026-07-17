@@ -39,6 +39,7 @@ def test_researcher_forbids_mixed_effect_scales_and_zero_rounded_p_values():
     assert "Shared boolean quality-control\nfields" in RESEARCHER
     assert '`license: "unknown"` is data' in REPORTER
     assert "preserve literal `license:" in REPAIRER
+    assert "pmid, pmcid, citekey, license, rights_status" in REPORTER
 
 
 def test_planners_do_not_invent_input_names_or_qwen_visual_audits():

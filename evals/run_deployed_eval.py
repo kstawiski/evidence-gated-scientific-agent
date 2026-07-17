@@ -229,7 +229,32 @@ def _known_effect_matches_reference(value: dict) -> bool:
             else:
                 if isinstance(current, (int, float)) and not isinstance(current, bool):
                     return float(current)
-        return _metric(value, *aliases)
+
+        # A fallback alias is accepted only when every occurrence agrees. This
+        # supports alternate schemas without letting a shallow reference/target
+        # echo mask a contradictory value in the actual result object.
+        observed: list[float] = []
+        pending: list[object] = [value]
+        while pending:
+            current = pending.pop(0)
+            if isinstance(current, dict):
+                for key, candidate in current.items():
+                    if (
+                        key in aliases
+                        and isinstance(candidate, (int, float))
+                        and not isinstance(candidate, bool)
+                    ):
+                        observed.append(float(candidate))
+                    elif isinstance(candidate, (dict, list)):
+                        pending.append(candidate)
+            elif isinstance(current, list):
+                pending.extend(current)
+        if not observed or any(
+            not math.isclose(candidate, observed[0], rel_tol=1e-12, abs_tol=1e-12)
+            for candidate in observed[1:]
+        ):
+            return 1e9
+        return observed[0]
 
     expected = [
         (

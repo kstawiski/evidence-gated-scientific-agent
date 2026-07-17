@@ -35,6 +35,21 @@
 - The computation namespace unshares networking and clears the inherited
   environment. Runtime probes and adversarial tests verify that outbound sockets,
   `/etc/passwd`, inherited test secrets, and workspace writes are unavailable.
+- The sandbox and package workers are intentionally privileged *inside their own
+  containers*: they run as container root with `SYS_ADMIN` and unconfined Docker
+  seccomp/AppArmor profiles so bubblewrap can create the nested, per-operation
+  namespaces described below. They receive neither the Docker socket nor host
+  directories; their only writable mounts are the dedicated computation data or
+  package-environment roots. `no-new-privileges` remains mandatory. The runtime
+  image does not install a setuid bubblewrap binary, so using it outside the
+  supplied Compose topology cannot silently acquire that privilege.
+- This worker boundary assumes a trusted, single-lab Docker host. A hostile
+  multi-tenant deployment should place the complete stack in a dedicated VM or
+  stronger microVM boundary. In particular, Python/R package installation runs
+  package build scripts as root inside the isolated package worker with outbound
+  access restricted to the configured PyPI/CRAN/Bioconductor routes. Package
+  indexes and selected packages are therefore part of the trusted supply chain;
+  installed environments are mounted read-only into computation workers.
 - The application never shares a network with either execution worker. It reaches
   the sandbox only through a capability-dropped, fixed-destination TCP 8090
   gateway spanning `sandbox-client` and the internal `sandbox` network. The

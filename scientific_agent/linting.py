@@ -2053,8 +2053,10 @@ def validate_report(
         os.path.normpath(path) for path in (retrieval.artifacts if retrieval else [])
     }
     knowledge_passages_by_url: dict[str, tuple[Any, str]] = {}
+    knowledge_passages_by_document_path: dict[str, tuple[Any, str]] = {}
     knowledge_visuals_by_url: dict[str, Any] = {}
     knowledge_snapshot_documents: dict[str, tuple[str, str]] = {}
+    knowledge_snapshot_metadata: dict[str, dict[str, Any]] = {}
     snapshot_record = next(
         (
             artifact
@@ -2095,6 +2097,9 @@ def validate_report(
                 )
                 for item in snapshot.get("documents", [])
             }
+            knowledge_snapshot_metadata = {
+                str(item["document_id"]): item for item in snapshot.get("documents", [])
+            }
         except (OSError, ValueError, KeyError, TypeError, json.JSONDecodeError):
             findings.append(
                 LintFinding(
@@ -2111,6 +2116,11 @@ def validate_report(
             expected_document = knowledge_snapshot_documents.get(passage.document_id)
             if expected_document is None:
                 raise ValueError("passage document is absent from the snapshot")
+            expected_metadata = knowledge_snapshot_metadata.get(passage.document_id)
+            if expected_metadata is None:
+                raise ValueError(
+                    "passage document metadata is absent from the snapshot"
+                )
             if snapshot_artifact is None:
                 raise ValueError("knowledge snapshot artifact is absent")
             run_root = snapshot_artifact.parent.resolve()
@@ -2184,6 +2194,15 @@ def validate_report(
                 and passage.content_sha256 == expected_document[1]
                 and passage.document_text_sha256 == expected_document[1]
                 and passage.document_original_sha256 == expected_document[0]
+                and (
+                    passage.canonical_url is None
+                    or passage.canonical_url == expected_metadata.get("canonical_url")
+                )
+                and (
+                    passage.source_type is None
+                    or passage.source_type == expected_metadata.get("source_type")
+                )
+                and passage.title == expected_metadata.get("title")
                 and passage.char_end <= len(document_text)
                 and source_text == exact_source_text
                 and passage.chunk_sha256 == exact_chunk_sha256
@@ -2229,6 +2248,15 @@ def validate_report(
             )
             continue
         knowledge_passages_by_url[normalized_url] = (passage, source_text)
+        document_path = os.path.normpath(passage.document_text_path)
+        existing_document = knowledge_passages_by_document_path.get(document_path)
+        if existing_document is None:
+            knowledge_passages_by_document_path[document_path] = (passage, source_text)
+        elif existing_document[0].document_id == passage.document_id:
+            knowledge_passages_by_document_path[document_path] = (
+                existing_document[0],
+                existing_document[1] + "\n" + source_text,
+            )
     for visual in retrieval.knowledge_visuals if retrieval else []:
         location = f"knowledge_visuals[{visual.knowledge_visual_id}]"
         path = Path(visual.artifact_path)
@@ -2303,6 +2331,51 @@ def validate_report(
             if source.url is not None
             else None
         )
+        if (
+            knowledge_match is None
+            and source.url is not None
+            and source.local_markdown_path is not None
+        ):
+            document_match = knowledge_passages_by_document_path.get(
+                os.path.normpath(source.local_markdown_path)
+            )
+            if document_match is not None:
+                document_metadata = knowledge_snapshot_metadata.get(
+                    document_match[0].document_id, {}
+                )
+                canonical_url = document_match[
+                    0
+                ].canonical_url or document_metadata.get("canonical_url")
+                if canonical_url and _normalize_url(str(source.url)) == _normalize_url(
+                    str(canonical_url)
+                ):
+                    knowledge_match = document_match
+        if knowledge_match is not None:
+            document_metadata = knowledge_snapshot_metadata.get(
+                knowledge_match[0].document_id, {}
+            )
+            if source.title != document_metadata.get("title"):
+                findings.append(
+                    LintFinding(
+                        code="knowledge_source_title_mismatch",
+                        location=f"sources[{index}].title",
+                        message=(
+                            "Knowledge SourceRecord title must match the immutable "
+                            "document generation."
+                        ),
+                    )
+                )
+            if source.source_type != document_metadata.get("source_type"):
+                findings.append(
+                    LintFinding(
+                        code="knowledge_source_type_mismatch",
+                        location=f"sources[{index}].source_type",
+                        message=(
+                            "Knowledge SourceRecord type must match the immutable "
+                            "document generation."
+                        ),
+                    )
+                )
         knowledge_visual_match = (
             knowledge_visuals_by_url.get(_normalize_url(str(source.url)))
             if source.url is not None

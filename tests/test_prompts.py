@@ -39,6 +39,8 @@ def test_researcher_forbids_mixed_effect_scales_and_zero_rounded_p_values():
     assert "Never classify a dataset as observational" in PLANNER_A
     assert "use\ndesign-unspecified language" in SIMPLE_PLANNER
     assert "require design-unspecified language instead" in PLAN_AUDITOR
+    assert "including booleans, to native Python scalars" in RESEARCHER
+    assert "never emit a non-null full_text_status" in REPORTER
 
 
 def test_researcher_documents_matplotlib_hlines_return_type():

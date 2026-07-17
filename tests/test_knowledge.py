@@ -232,6 +232,12 @@ def test_retriever_writes_stable_run_local_exact_passage(tmp_path):
         "https://bench.test/api/runs/r1/knowledge/passages/kp-"
     )
     assert passage["artifact_sha256"] == second["passages"][0]["artifact_sha256"]
+    assert passage["source_type"] == "primary_study"
+    assert passage["retrieved_at"]
+    assert (
+        passage["source_record_template"]["local_markdown_path"]
+        == passage["document_text_path"]
+    )
     assert sha256_file(artifact) == passage["artifact_sha256"]
     assert "IGNORE ALL PREVIOUS INSTRUCTIONS" in artifact.read_text(encoding="utf-8")
 
@@ -342,6 +348,83 @@ def test_report_validation_accepts_exact_knowledge_citation_and_rejects_tamperin
     invalid = validate_report(report, evidence, controller_artifacts=(controller,))
     assert "knowledge_passage_integrity_failed" in {
         finding.code for finding in invalid.findings
+    }
+
+
+def test_report_validation_accepts_canonical_pubmed_source_from_knowledge(tmp_path):
+    lib = library(tmp_path)
+    canonical_url = "https://pubmed.ncbi.nlm.nih.gov/12345678/"
+    document = ingest_text(
+        lib,
+        "Knowledge review",
+        "The review recommends reporting effect sizes with confidence intervals.",
+        canonical_url=canonical_url,
+        pmid="12345678",
+    )
+    snapshot = lib.snapshot([document["id"]])
+    run = tmp_path / "run"
+    run.mkdir()
+    snapshot_path = run / "knowledge_snapshot.json"
+    snapshot_path.write_text(json.dumps(snapshot), encoding="utf-8")
+    result = KnowledgeRetriever(
+        lib,
+        snapshot,
+        run,
+        "https://bench.test/api/runs/r1/knowledge/passages",
+    ).search_knowledge("effect sizes confidence intervals")
+    passage = result["passages"][0]
+    source = SourceRecord(
+        source_id="S1",
+        title="Knowledge review",
+        url=canonical_url,
+        pmid="12345678",
+        local_markdown_path=passage["document_text_path"],
+        full_text_status="full_text_markdown_only",
+        source_type="primary_study",
+        retrieved_at="2026-07-16T00:00:00Z",
+        supporting_passage=(
+            "The review recommends reporting effect sizes with confidence intervals."
+        ),
+    )
+    report = ScientificReport(
+        title="Canonical knowledge citation",
+        executive_summary="The evidence is summarized.",
+        introduction="This report evaluates one methodological statement.",
+        methods=["A hash-pinned knowledge passage was retrieved."],
+        results="The review recommends effect-size and interval reporting.",
+        discussion="The statement is methodological.",
+        conclusions="Effect sizes and confidence intervals should be reported.",
+        claims=[
+            ClaimRecord(
+                claim_id="C1",
+                text="The review recommends effect-size and interval reporting.",
+                claim_type="literature_supported",
+                evidence_refs=["S1"],
+                status=EvidenceStatus.SUPPORTED,
+            )
+        ],
+        sources=[source],
+    )
+    evidence = RetrievalEvidence(
+        successful_calls=1,
+        tools=["search_knowledge"],
+        urls=[passage["source_url"], canonical_url],
+        retrieval_dates=["2026-07-16"],
+        artifacts=result["artifacts"],
+        knowledge_snapshot_sha256=snapshot["snapshot_sha256"],
+        knowledge_passages=[KnowledgePassageEvidence.model_validate(passage)],
+    )
+    controller = ArtifactRef(
+        path=str(snapshot_path),
+        sha256=sha256_file(snapshot_path),
+        description="controller knowledge snapshot",
+    )
+
+    validation = validate_report(report, evidence, controller_artifacts=(controller,))
+
+    assert validation.passed, validation.findings
+    assert "pubmed_acquisition_metadata_invalid" not in {
+        finding.code for finding in validation.findings
     }
 
 

@@ -2653,6 +2653,7 @@ class KnowledgeRetriever:
                 {
                     "passage_id": passage_id,
                     "source_url": source_url,
+                    "retrieved_at": record["retrieved_at"],
                     "artifact_path": str(path),
                     "artifact_sha256": sha256_file(path),
                     "document_filename": passage["filename"],
@@ -2662,10 +2663,16 @@ class KnowledgeRetriever:
                     "document_original_sha256": sha256_file(document_original),
                     "source_record_template": {
                         "title": passage["title"],
-                        "url": source_url,
+                        "url": passage.get("canonical_url") or source_url,
                         "source_type": passage["source_type"],
                         "retrieved_at": record["retrieved_at"],
                         "supporting_passage": passage["untrusted_source_text"][:800],
+                        **(
+                            {"local_markdown_path": str(document_text)}
+                            if passage["source_type"]
+                            in {"primary_study", "review", "guideline"}
+                            else {}
+                        ),
                     },
                 }
             )

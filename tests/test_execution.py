@@ -7,6 +7,8 @@ from scientific_agent.config import SandboxSettings
 from scientific_agent.execution import (
     AnalysisExecutor,
     RemoteAnalysisExecutor,
+    _python_static_violations,
+    _unavailable_prior_reference_violations,
     sandbox_preflight,
 )
 
@@ -16,6 +18,37 @@ def _executor(tmp_path: Path, **overrides) -> AnalysisExecutor:
     workspace.mkdir(parents=True)
     settings = replace(SandboxSettings(), **overrides)
     return AnalysisExecutor(workspace, tmp_path / "computations", settings)
+
+
+def test_python_static_preflight_rejects_invalid_errorbar_arguments():
+    violations = _python_static_violations(
+        "ax.errorbar(1, estimate, yerr=[lower, upper], linewidths=2)"
+    )
+    assert any("rejects linewidths" in item for item in violations)
+    assert any("singleton asymmetric yerr" in item for item in violations)
+    assert (
+        _python_static_violations(
+            "ax.errorbar([1, 2], values, yerr=[0.1, 0.2], linewidth=2)"
+        )
+        == []
+    )
+    assert (
+        _python_static_violations(
+            "ax.errorbar(1, estimate, yerr=[[lower], [upper]], elinewidth=2)"
+        )
+        == []
+    )
+
+
+def test_prior_reference_preflight_requires_current_successful_execution():
+    code = "open('/prior/exec-002/output/results.json').read()"
+
+    denied = _unavailable_prior_reference_violations(code, {"exec-001"})
+    allowed = _unavailable_prior_reference_violations(code, {"exec-002"})
+
+    assert len(denied) == 1
+    assert "/history/attempt-N/exec-ID/output" in denied[0]
+    assert allowed == []
 
 
 def test_environment_snapshot_resolves_immutable_generation_and_copies_lock(tmp_path):

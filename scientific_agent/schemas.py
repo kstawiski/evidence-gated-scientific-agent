@@ -91,6 +91,9 @@ class KnowledgePassageEvidence(BaseModel):
     passage_id: str
     document_id: str
     title: str
+    source_type: str | None = None
+    canonical_url: str | None = None
+    retrieved_at: str | None = None
     chunk_id: str
     chunk_ordinal: int = Field(ge=0)
     char_start: int = Field(ge=0)

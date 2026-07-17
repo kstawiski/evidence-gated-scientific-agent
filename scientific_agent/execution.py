@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import ast
 import os
+import re
 import signal
 import shutil
 import stat
@@ -26,6 +28,58 @@ Language = Literal["python", "r"]
 RETURN_TEXT_BYTES = 32 * 1024
 PREVIEW_TEXT_BYTES = 8 * 1024
 PREVIEW_SUFFIXES = {".csv", ".json", ".md", ".tsv", ".txt"}
+PRIOR_EXECUTION_REFERENCE = re.compile(r"/prior/(?P<execution_id>exec-[0-9]{3})/")
+
+
+def _python_static_violations(code: str) -> list[str]:
+    """Reject a small set of unambiguously invalid scientific API calls."""
+
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return []
+    violations: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        if not isinstance(node.func, ast.Attribute) or node.func.attr != "errorbar":
+            continue
+        keywords = {item.arg: item.value for item in node.keywords if item.arg}
+        if "linewidths" in keywords:
+            violations.add(
+                "Matplotlib errorbar rejects linewidths=; use linewidth= or elinewidth="
+            )
+        scalar_x = bool(node.args and isinstance(node.args[0], ast.Constant))
+        if not scalar_x:
+            continue
+        for name in ("xerr", "yerr"):
+            value = keywords.get(name)
+            if not isinstance(value, (ast.List, ast.Tuple)) or len(value.elts) != 2:
+                continue
+            if any(isinstance(item, (ast.List, ast.Tuple)) for item in value.elts):
+                continue
+            violations.add(
+                f"Matplotlib singleton asymmetric {name} must have shape (2, 1); "
+                f"use [[lower], [upper]] rather than [lower, upper]"
+            )
+    return sorted(violations)
+
+
+def _unavailable_prior_reference_violations(
+    code: str, successful_execution_ids: set[str]
+) -> list[str]:
+    referenced = {
+        match.group("execution_id")
+        for match in PRIOR_EXECUTION_REFERENCE.finditer(code)
+    }
+    return [
+        (
+            f"/prior/{execution_id} is not a successful execution in the current "
+            "attempt; use /history/attempt-N/exec-ID/output only for the exact "
+            "registered prior-attempt artifact"
+        )
+        for execution_id in sorted(referenced - successful_execution_ids)
+    ]
 
 
 def _read_bounded(path: Path) -> str:
@@ -370,6 +424,18 @@ class AnalysisExecutor:
             violations.append(f"code exceeds {self.settings.max_code_bytes} byte limit")
         if len(self._records) >= self.settings.max_calls_per_attempt:
             violations.append("analysis call budget exhausted")
+        if language == "python":
+            violations.extend(_python_static_violations(code))
+        violations.extend(
+            _unavailable_prior_reference_violations(
+                code,
+                {
+                    record.execution_id
+                    for record in self._records
+                    if record.status == "succeeded"
+                },
+            )
+        )
         try:
             (
                 workspace_packages,

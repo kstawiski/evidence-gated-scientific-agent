@@ -408,7 +408,9 @@ used as scientific evidence by themselves.
 Machine-readable JSON must be strict JSON: encode missing or non-finite values as
 null, never NaN or Infinity. Every object key must be a string; convert pandas
 MultiIndex or group-by tuple keys into named nested objects or explicit string
-labels before calling `json.dump`.
+labels before calling `json.dump`. Convert NumPy and pandas scalar values,
+including booleans, to native Python scalars with `.item()` (or an equivalent
+explicit conversion) before JSON serialization.
 Do not import or install a Python/R package solely to calculate artifact hashes or
 provenance. The controller hashes every successful output; analysis scripts should
 write the scientific artifact and exit without `openssl`, `digest`, or an analogous
@@ -522,6 +524,10 @@ state that prominently and do not use it as ordinary supporting evidence. Do not
 describe abstract_only as full text or invent a missing local PDF path. The literal
 controller value `license: "unknown"` is data, not a missing value: copy it as
 `"unknown"`, never normalize it to null or omit the recorded terms warning.
+The same exact-copy rule applies to literature returned from the local knowledge
+library: never emit a non-null full_text_status unless you also copy its
+controller-provided local_markdown_path (and the required local_pdf_path for a
+PDF-bearing status).
 For a generic browser or MCP result recorded as web_page, documentation, dataset,
 or other, leave pmid, pmcid, citekey, license, rights_status, terms_warning,
 local_pdf_path, local_markdown_path, and full_text_status null. Its URL, title,

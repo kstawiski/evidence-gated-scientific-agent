@@ -553,6 +553,14 @@ may originate in browser downloads.
 Set `EVIDENCE_BENCH_DEPLOYMENT_ID` to a stable, unique value for each instance.
 The knowledge directory is stamped with that identity and startup fails if a
 private volume is accidentally mounted into the lab deployment or vice versa.
+Give every instance an explicit, stable Compose project name as well; a second
+checkout is not an isolation boundary by itself. For example, use
+`docker compose -p evidence-bench-private up -d` and
+`docker compose -p evidence-bench-prod up -d`, and include the same `-p` value
+on every later update, stop, and inspection command. When replacing only the Web
+and sandbox-worker containers, use `--no-deps` so Compose does not unnecessarily
+recreate the instance's browser or environment services. Verify the effective
+host-to-`/data` mount before admitting work after every deployment.
 Knowledge documents are managed from the WebUI. Every new run snapshots the
 selected immutable generations; verified PubMed article Markdown and available
 PDFs cited by a deterministically passing run are automatically deduplicated and

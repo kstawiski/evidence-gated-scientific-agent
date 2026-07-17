@@ -398,6 +398,9 @@ consistent; do not hand-edit Welch-Satterthwaite degrees of freedom. For figures
 avoid version-fragile Matplotlib calls: label boxplots with `tick_labels` (or set
 ticks after plotting), and pass singleton asymmetric error bars as shape `(2, 1)`,
 for example `xerr=[[estimate-low], [high-estimate]]`.
+`Axes.hlines()` returns one `LineCollection`, not a subscriptable list; retain that
+object directly and inspect `get_segments()` if a display-fidelity assertion needs
+the interval endpoints.
 When a later analysis needs an earlier call's artifact, read it from
 /prior/<execution-id>/output/<filename>. During a repair, outputs from an earlier
 attempt are read-only at /history/attempt-N/<execution-id>/output/<filename>;

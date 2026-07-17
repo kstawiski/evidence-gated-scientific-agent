@@ -33,6 +33,11 @@ def test_researcher_forbids_mixed_effect_scales_and_zero_rounded_p_values():
     assert "independent numeric JSON and reconciliation first" in RESEARCHER
     assert "exit successfully without display generation" in RESEARCHER
     assert "never\ncombine the only required Python/R validation result" in RESEARCHER
+
+
+def test_researcher_documents_matplotlib_hlines_return_type():
+    assert "`Axes.hlines()` returns one `LineCollection`" in RESEARCHER
+    assert "inspect `get_segments()`" in RESEARCHER
     assert "cross-check every reported test statistic" in REPORT_AUDITOR
     assert "horizontal versus\nvertical bars" in DISPLAY_AUDITOR
     assert "zero-spread group alongside a nonzero reported\nSD" in DISPLAY_AUDITOR

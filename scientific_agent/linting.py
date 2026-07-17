@@ -526,12 +526,16 @@ _BALANCED_DESIGN_REASSURANCE = re.compile(
     r"\b(?:mitigat(?:e[sd]?|ing)|protect(?:s|ed|ing)?|robust)\b.{0,100}"
     r"\b(?:type\s*i\s*error|non[- ]?normal(?:ity)?|normality|assumption)\b|"
     r"\bbalanced\b.{0,80}\b(?:mitigat(?:e[sd]?|ing)|protect(?:s|ed|ing)?)\b"
-    r".{0,100}\btype\s*i\s*error\b",
+    r".{0,100}\btype\s*i\s*error\b|"
+    r"\b(?:normality|non[- ]?normality|distributional\s+assumptions?)\b"
+    r".{0,180}\bbalanced\b.{0,80}\b(?:design|groups?|sample sizes?)\b"
+    r".{0,140}\b(?:mitigat(?:e[sd]?|ing)|reassur\w*|reduc\w*\s+concern)\b",
     re.IGNORECASE,
 )
 _UNQUALIFIED_RESULT_ROBUSTNESS = re.compile(
     r"\b(?:analysis|contrast|estimate|finding|result)s?\b.{0,80}"
-    r"\b(?:is|are|was|were)\s+(?:statistically\s+)?robust\b",
+    r"\b(?:is|are|was|were)\s+(?:statistically\s+)?robust\b|"
+    r"\brobust\b.{0,50}\b(?:analysis|contrast|estimate|finding|result)s?\b",
     re.IGNORECASE,
 )
 _METHODOLOGICAL_GENERALIZATION = re.compile(
@@ -2128,7 +2132,8 @@ def validate_report(
                 ),
             )
         )
-    if _BALANCED_DESIGN_REASSURANCE.search(report_text):
+    assumption_text = " ".join((report_text, *report.limitations))
+    if _BALANCED_DESIGN_REASSURANCE.search(assumption_text):
         findings.append(
             LintFinding(
                 code="balanced_design_assumption_reassurance",

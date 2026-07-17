@@ -1264,6 +1264,26 @@ def test_report_validator_rejects_protocol_ai_and_robustness_overclaims(tmp_path
     }
 
 
+def test_report_validator_rejects_untested_normality_reassurance_and_robust_contrast():
+    report = article_report(
+        limitations=[
+            "Normality assumptions were not formally tested, though the balanced "
+            "sample size and symmetric distributions mitigate concern."
+        ],
+        conclusions=(
+            "These findings establish a robust quantitative contrast within the "
+            "supplied dataset."
+        ),
+    )
+
+    validation = validate_report(report)
+
+    assert {finding.code for finding in validation.findings} >= {
+        "balanced_design_assumption_reassurance",
+        "unqualified_result_robustness",
+    }
+
+
 def test_report_validator_rejects_sandbox_plan_as_protocol_timing_evidence(tmp_path):
     plan = tmp_path / "locked_analysis_plan.json"
     plan.write_text('{"status":"locked"}\n', encoding="utf-8")

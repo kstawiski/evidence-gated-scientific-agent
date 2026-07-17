@@ -339,6 +339,7 @@ def _known_effect_matches_reference(value: dict) -> bool:
         ),
         (
             (
+                "primary.ci_lower",
                 "primary.ci_95_lower",
                 "primary.ci_lower_95",
                 "primary.ci_95_percent.lower",
@@ -349,6 +350,7 @@ def _known_effect_matches_reference(value: dict) -> bool:
         ),
         (
             (
+                "primary.ci_upper",
                 "primary.ci_95_upper",
                 "primary.ci_upper_95",
                 "primary.ci_95_percent.upper",

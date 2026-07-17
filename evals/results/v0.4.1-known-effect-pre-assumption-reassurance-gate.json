@@ -1,0 +1,30 @@
+{
+  "case": "known-effect",
+  "release_candidate": "v0.4.1",
+  "deployment_commit": "f149f20de8a6407581eb2d878508ced583919f15",
+  "deployment_image_digest": "sha256:53ae91cd384abffc77bbb8d816ee2cbddc85b5abadf3bc4909479b9c076ad516",
+  "workspace_id": "e870cc41-da2c-433b-bec4-77a00693e4c5",
+  "run_id": "3f49337d-b3ce-4a62-84a7-6624b988c510",
+  "started_at": "2026-07-17T18:13:00.614148+00:00",
+  "finished_at": "2026-07-17T18:55:44.321001+00:00",
+  "terminal_status": "supported",
+  "evaluator_score_before_shape_fix": "16/18",
+  "evaluator_score_after_shape_fix": "18/18",
+  "merit_gate": "failed",
+  "productive_behavior": [
+    "The cumulative plan-repair fix converged in one round, preserved the exact finding in plan repair history, and advanced to execution with a passing independent plan audit and deterministic plan lint.",
+    "Python and R independently recovered the exact planted effect and the controller quarantined a failed figure assertion before accepting the corrected reconciliation, raster figure, and precision-repaired table.",
+    "The final report passed deterministic validation and separate Gemma report and multimodal display reviews, while the retained evaluator trace exposed an unsupported result-shape omission rather than mis-scoring the raw statistics silently."
+  ],
+  "release_blockers": [
+    "The deployed evaluator did not recognize primary.ci_lower and primary.ci_upper even though the bound Python and R result artifacts contained every exact reference value.",
+    "The final limitations claimed that balanced sample size and symmetric distributions mitigated concern after acknowledging that normality was not formally tested.",
+    "The conclusion called the observed contrast robust without a separately executed robustness or sensitivity analysis, and Gemma's report review returned a bare pass."
+  ],
+  "implemented_repairs": [
+    "The known-effect evaluator now accepts the exact bound primary.ci_lower and primary.ci_upper schema and has a regression fixture copied from the deployed language artifacts.",
+    "Deterministic prose validation rejects normality reassurance based on balance and rejects robust used as a modifier of an estimate, result, finding, analysis, or contrast.",
+    "The report contract distinguishes cross-language implementation concordance from scientific robustness and requires an un-reassured limitation when no appropriate diagnostic or sensitivity analysis was executed."
+  ],
+  "disposition": "Rejected despite terminal supported and a rescored 18/18 mechanical result; manual scientific review remains part of the release gate and overrules both deterministic and Gemma passes when claim scope is unsupported."
+}

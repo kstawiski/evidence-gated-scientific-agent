@@ -614,6 +614,13 @@ test means only that the diagnostic did not detect a departure; it does not prov
 that an assumption is met, and its limited power must remain explicit. Do not
 report a named diagnostic unless its statistic and p-value occur in a successful
 registered computation artifact.
+Do not call an estimate, result, finding, analysis, or contrast robust unless a
+separately executed robustness or sensitivity analysis directly supports that exact
+scope. Agreement between Python and R implementations of the same method establishes
+implementation concordance, not scientific robustness. Do not use balanced sample
+size, equal group size, or visually symmetric distributions to mitigate or dismiss
+an untested normality concern. If no appropriate diagnostic or sensitivity analysis
+was prespecified and executed, state that bounded limitation without reassurance.
 When the study design is unspecified, do not introduce intervention language even
 as generic background framing; describe a measurement interval or a between-group
 change instead. When the outcome domain or units are unspecified, discuss unknown

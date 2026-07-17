@@ -72,6 +72,7 @@ repository does not embed them.
 | v0.4.1 planted effect (pre critic normalization) | **FAILED MERIT GATE** | Run `7511eb4c-659f-4d84-9980-9fdc767cc578` reconciled the correct statistics, passed deterministic validation, linked a local PubMed article, and auto-published it to knowledge. It was still rejected because the figure ambiguously labeled a raw mean difference as `d`, while Gemma returned valid objections in an incomplete schema that failed closed without becoming repair actions. This motivated raw-effect label checks and conservative preservation of explicit failed-review objections. |
 | v0.4.1 planted effect (pre monotonic critic gate) | **TERMINAL SUPPORTED / FAILED MERIT GATE** | Run `6d3098ca-d2c4-4318-b403-d4900bea40d0` recovered the exact effect, corrected table precision, used the required Results structure, and rescored 18/18 after the evaluator learned its exact Welch schema. It remains rejected: Gemma first detected hidden point overplotting, then a format-repair call erased the fail with a bare pass; the article also understated AI involvement and overstated protocol timing and robustness. This motivated monotonic fail preservation and deterministic prose-overclaim gates. |
 | v0.4.1 planted effect (pre plan-convergence gate) | **REQUIRES MORE EVIDENCE / FAILED MERIT GATE** | Run `4d6f55e3-f7b1-4b53-9a86-4b2e9c572c15` correctly failed closed before computation, but four repairs did not converge because each round received only the latest audit. Earlier Hedges-formula, semantic-arm, site-role, and raster-specification requirements were not preserved together. This motivated cumulative repair findings and explicit monotonic preservation across rounds. |
+| v0.4.1 planted effect (pre assumption-reassurance gate) | **TERMINAL SUPPORTED / FAILED MERIT GATE** | Run `3f49337d-b3ce-4a62-84a7-6624b988c510` proved the cumulative planning fix live, recovered and reconciled the exact statistics, generated an unambiguous figure, and repaired table precision. It remains rejected because the report called the contrast robust and used balance/symmetry to reassure an untested normality assumption, while Gemma passed both. The evaluator's 16/18 was separately traced to valid `primary.ci_lower`/`primary.ci_upper` fields and rescored 18/18. |
 
 The PubMed gate's scored JSON and full provenance bundle are retained with the
 deployment evaluation artifacts. The local paper copies are hash verified and
@@ -108,6 +109,8 @@ The mechanically passing but scientifically rejected critic-regression run is re
 [`results/v0.4.1-known-effect-pre-monotonic-critic-gate.json`](results/v0.4.1-known-effect-pre-monotonic-critic-gate.json).
 The fail-closed but non-convergent planning run is retained as
 [`results/v0.4.1-known-effect-pre-plan-convergence.json`](results/v0.4.1-known-effect-pre-plan-convergence.json).
+The planning-convergent but prose-invalid run is retained as
+[`results/v0.4.1-known-effect-pre-assumption-reassurance-gate.json`](results/v0.4.1-known-effect-pre-assumption-reassurance-gate.json).
 
 The A2A evidence is retained as
 [`results/v0.4.0-a2a-live.json`](results/v0.4.0-a2a-live.json). The server uses

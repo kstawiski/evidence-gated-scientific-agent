@@ -211,6 +211,28 @@ ax.set_xticks([0, 1])
     )
 
 
+def test_python_static_preflight_rejects_empty_effect_axis_ticks():
+    violations = _python_static_violations(
+        """
+effect_ax.errorbar(mean_difference, 0, xerr=ci)
+effect_ax.set_xlabel("Mean difference (treatment - control)")
+effect_ax.set_xticks([])
+"""
+    )
+
+    assert any("require visible numeric x ticks" in item for item in violations)
+    assert (
+        _python_static_violations(
+            """
+effect_ax.errorbar(mean_difference, 0, xerr=ci)
+effect_ax.set_xlabel("Mean difference (treatment - control)")
+effect_ax.set_xticks([0, 2, 4, 6])
+"""
+        )
+        == []
+    )
+
+
 def test_python_static_preflight_rejects_empty_legend():
     violations = _python_static_violations(
         """

@@ -394,6 +394,9 @@ Assert both the group-interval endpoints and the contrast-interval endpoints
 against their separately named machine-result fields before saving.
 If explicit effect-axis limits are set, assert before saving that they enclose the
 scientific null, the point estimate, and both confidence-interval endpoints.
+Keep visible numeric ticks on every quantitative effect-estimate axis, including
+ticks that make the null, estimate, and confidence interval interpretable; never
+erase the scale with set_xticks([]) or blank tick labels.
 Qwen has no image-understanding capability. When the task asks to inspect source
 figures, scans, visual proofs, slide pages, or images embedded in PDF/Office/archive
 inputs, use Python/R only to inventory and deterministically render or convert the

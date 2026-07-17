@@ -597,6 +597,11 @@ def test_known_effect_accepts_live_effect_size_and_interval_array_shape():
 
     assert _known_effect_matches_reference(value) is True
 
+    value["effect_size"]["hedges_correction_J"] = value["effect_size"].pop(
+        "j_correction_factor"
+    )
+    assert _known_effect_matches_reference(value) is True
+
 
 def test_known_effect_accepts_live_change_mean_group_summary_shape():
     value = {

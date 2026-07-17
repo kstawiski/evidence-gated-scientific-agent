@@ -345,6 +345,12 @@ def _python_static_violations(code: str) -> list[str]:
             and node.args
             and isinstance(node.args[0], (ast.List, ast.Tuple))
         ):
+            axis_key = ast.dump(node.func.value, include_attributes=False)
+            if axis_key in effect_x_axes and not node.args[0].elts:
+                violations.add(
+                    "Scientific effect-estimate axes require visible numeric x ticks; "
+                    "do not remove the scale with set_xticks([])"
+                )
             tick_values = [
                 item.value
                 for item in node.args[0].elts

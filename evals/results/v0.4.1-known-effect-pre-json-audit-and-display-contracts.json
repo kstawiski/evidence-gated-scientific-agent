@@ -1,0 +1,71 @@
+{
+  "case": "known-effect",
+  "release_candidate": "v0.4.1",
+  "deployment_commit": "28f7eaa4762fae0874487e08ebc6267a83235aa3",
+  "deployment_image_digest": "sha256:6d77056d08344f7e102e6531da5bb85ffc2cd5fae71ecb01a48c3273a1e17f11",
+  "workspace_id": "a47aa43d-35d8-496c-b5a2-7008a27063e9",
+  "run_id": "8d708cd9-d940-4892-b342-518a5cb808af",
+  "started_at": "2026-07-17T21:12:41.941490+00:00",
+  "finished_at": "2026-07-17T22:45:28.179303+00:00",
+  "terminal_status": "supported",
+  "evaluator_score_before_live_schema_fix": "15/18",
+  "evaluator_score_after_live_schema_fix": "17/18",
+  "merit_gate": "failed",
+  "productive_behavior": [
+    "The prespecified plan passed independent audit and deterministic plan lint without planning repair.",
+    "Independent Python and R executions recovered the exact planted mean difference, Welch statistic, confidence interval, and Hedges g, and a hash-bound reconciliation agreed to tolerance 1e-6.",
+    "The reader-facing table was repaired to at most four significant digits while the Python and R JSON artifacts retained full precision.",
+    "The effect interval and null reference were no longer clipped after the deployed static effect-axis gate rejected two unsafe repair scripts."
+  ],
+  "release_blockers": [
+    "The final plotting source drew both raw groups around categorical center zero: treatment jitter omitted the +1 treatment center even though the treatment mean marker and tick were at one. The raster therefore placed treatment observations over the control category.",
+    "The final effect panel called set_xticks([]), removing every numeric tick from an axis labeled as the treatment-minus-control mean-difference scale.",
+    "Results claimed that the findings demonstrated a robust mean difference while the same report stated that no robust or rank-based sensitivity analysis had been executed.",
+    "The task required a top-level reconciliation_passed boolean, but the reconciliation artifact emitted only all_pass. The tightened task-specific evaluator correctly leaves cross_language_reconciled false.",
+    "The report critic initially said exact numerical claims were unverifiable because its payload contained computation paths and hashes but stripped the cited JSON values. This caused a needless repair despite valid machine results.",
+    "Deployed deterministic prose checks crossed a sentence boundary for protocol timing and treated an explicit statement that Welch does not mitigate non-normality as a Welch normality overclaim.",
+    "The terminal Gemma report and raster/table reviews returned pass with complete visual-clearance strings despite the misplaced treatment point cloud, absent effect-axis scale, and unsupported robustness claim.",
+    "The evaluator initially failed both exact-language checks because it omitted the legitimate effect_size.hedges_correction_J path; recognizing that field rescored the immutable run from 15/18 to 17/18 without changing the real missing-verdict failure."
+  ],
+  "terminal_artifacts": [
+    {
+      "path": "computations/attempt-0/exec-002/output/data/python_results.json",
+      "sha256": "c8f387aca436c2bb6a84974809ff29efa935e1be26c4b8b365250195f54c455c"
+    },
+    {
+      "path": "computations/attempt-0/exec-003/output/data/r_results.json",
+      "sha256": "fa46062e93b1b57647cdb9845e5cdc267b95664d634a222d986ebd45475451f8"
+    },
+    {
+      "path": "computations/attempt-0/exec-004/output/data/reconciliation.json",
+      "sha256": "166ba0ecb6985074d9c012aa65d2869dd9d772552a01d0f1f556821b4fabdd05"
+    },
+    {
+      "path": "computations/attempt-1/exec-001/output/tables/summary_table.csv",
+      "sha256": "9cb07a1eb7c91ee7f1517ce156169783e04015aa745ff9f5e401be6e8be11f3b"
+    },
+    {
+      "path": "computations/attempt-3/exec-003/output/figures/primary_analysis.png",
+      "sha256": "574ba42e1ee798797b96885381466cf91c4567534459954b7d125b8aa2f1d7cc",
+      "width": 3156,
+      "height": 1364
+    },
+    {
+      "path": "scientific_report.json",
+      "sha256": "440bbf6056da61c671fa6af45895d6974ccf929febfe6930df8cc0b3383832cf"
+    },
+    {
+      "path": "gemma_display_audit.json",
+      "sha256": "3aba874440f59d3941b5ded3c3528d33a9eabfc6b00cb6aa8c58aed3258b536f"
+    }
+  ],
+  "implemented_repairs": [
+    "The report auditor now receives bounded, hash-verified values from successful JSON artifacts actually cited by the report, while failed, unreferenced, oversized, invalid, and hash-mismatched files remain excluded.",
+    "Protocol-timing and Welch-normality prose checks are sentence bounded and preserve explicit non-normality disclaimers; a broader result-robustness gate rejects robust mean-difference wording.",
+    "Plotting guidance requires nonoverlapping categorical centers, artist-offset assertions, and effect limits enclosing the null, estimate, and interval endpoints.",
+    "Static plotting preflight rejects labeled scatter groups with duplicate inferred jitter centers and rejects set_xticks([]) on a quantitative effect-estimate axis.",
+    "Generation now preserves an explicitly requested task-level reconciliation verdict in addition to the controller all_pass field, and the known-effect evaluator requires reconciliation_passed.",
+    "The known-effect evaluator accepts the live effect_size.hedges_correction_J schema while retaining exact reference-value checks."
+  ],
+  "disposition": "Rejected despite terminal supported, deterministic pass, Gemma pass, and exact underlying statistics. The final display misregistered one raw group and removed the quantitative effect scale; the report overstated robustness; and the reconciliation omitted the task-required verdict. Every observed defect is now represented by deterministic regression coverage or a bounded audit contract."
+}

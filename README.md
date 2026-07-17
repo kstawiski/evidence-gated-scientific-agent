@@ -351,6 +351,10 @@ sample that emits roughly tens of thousands of private reasoning tokens without
 starting its final channel is terminated and independently retried once. This
 prevents a continuously varying Gemma reasoning loop from occupying the single
 local slot for hours while preserving a large reasoning allowance.
+Other models use the same safeguard at a more permissive 384 kB threshold, so a
+continuously decoding Qwen sample also cannot occupy a slot indefinitely without
+starting a final answer. Neither threshold is sent as `max_tokens`; both trigger
+the same one-time fresh structured-output retry.
 The raw reasoning suffix is immediately discarded and never becomes scientific
 evidence.
 If the repair sample also repeats, the planning transition is recorded as

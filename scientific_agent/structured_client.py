@@ -42,6 +42,7 @@ CAPACITY_BACKOFF_INITIAL_SECONDS = 5.0
 CAPACITY_BACKOFF_MAX_SECONDS = 60.0
 CAPACITY_ATTEMPT_LIMIT = 512
 GEMMA_MAX_PRIVATE_REASONING_BYTES_WITHOUT_FINAL = 192_000
+DEFAULT_MAX_PRIVATE_REASONING_BYTES_WITHOUT_FINAL = 384_000
 
 
 class _RepetitiveStreamError(RuntimeError):
@@ -49,7 +50,13 @@ class _RepetitiveStreamError(RuntimeError):
 
 
 class _NoFinalProgressStreamError(_RepetitiveStreamError):
-    """A Gemma sample consumed an extreme private stream without final output."""
+    """A sample consumed an extreme private stream without final output."""
+
+
+def _private_reasoning_no_final_limit(endpoint: ModelEndpoint) -> int:
+    if "gemma" in endpoint.model.casefold():
+        return GEMMA_MAX_PRIVATE_REASONING_BYTES_WITHOUT_FINAL
+    return DEFAULT_MAX_PRIVATE_REASONING_BYTES_WITHOUT_FINAL
 
 
 class _StructuredStreamComplete(RuntimeError):
@@ -502,6 +509,9 @@ async def request_structured(
                 content_guard = _StreamRepetitionGuard()
                 stream_started = False
                 private_reasoning_bytes_without_final = 0
+                private_reasoning_no_final_limit = _private_reasoning_no_final_limit(
+                    endpoint
+                )
 
                 async def consume_stream() -> None:
                     nonlocal last_finish_reason
@@ -536,16 +546,16 @@ async def request_structured(
                             reasoning_chunk = delta.get("reasoning_content")
                             if isinstance(reasoning_chunk, str) and reasoning_chunk:
                                 stream_started = True
-                                if not chunks and "gemma" in endpoint.model.casefold():
+                                if not chunks:
                                     private_reasoning_bytes_without_final += len(
                                         reasoning_chunk.encode("utf-8")
                                     )
                                     if (
                                         private_reasoning_bytes_without_final
-                                        > GEMMA_MAX_PRIVATE_REASONING_BYTES_WITHOUT_FINAL
+                                        > private_reasoning_no_final_limit
                                     ):
                                         raise _NoFinalProgressStreamError(
-                                            "Gemma private reasoning exceeded the "
+                                            "private reasoning exceeded the "
                                             "no-final-channel progress safeguard"
                                         )
                                 # Inspect only a bounded in-memory suffix. Never
@@ -661,7 +671,11 @@ async def request_structured(
                                 else "the bounded repair allowance is exhausted"
                             )
                             reason = (
-                                "a Gemma stream with no final-channel progress"
+                                (
+                                    "a Gemma stream with no final-channel progress"
+                                    if "gemma" in endpoint.model.casefold()
+                                    else "a model stream with no final-channel progress"
+                                )
                                 if isinstance(exc, _NoFinalProgressStreamError)
                                 else "a repetitive model stream"
                             )

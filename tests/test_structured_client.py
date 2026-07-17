@@ -11,6 +11,7 @@ from pydantic import BaseModel
 from scientific_agent.config import ModelEndpoint
 from scientific_agent.structured_client import (
     _StreamRepetitionGuard,
+    _private_reasoning_no_final_limit,
     _stream_is_repeating,
     request_structured,
 )
@@ -51,6 +52,18 @@ def test_stream_repetition_detector_targets_sentence_loops_not_json_structure():
         indent=2,
     )
     assert not _stream_is_repeating(structured)
+
+
+def test_private_reasoning_no_final_guard_is_stricter_for_gemma():
+    qwen_limit = _private_reasoning_no_final_limit(
+        replace(_endpoint(), model="umed-qwen")
+    )
+    gemma_limit = _private_reasoning_no_final_limit(
+        replace(_endpoint(), model="s8-gemma")
+    )
+
+    assert qwen_limit == 384_000
+    assert gemma_limit == 192_000
 
 
 def test_stream_repetition_detector_catches_unfinished_schema_fragment_loop():

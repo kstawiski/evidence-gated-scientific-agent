@@ -960,6 +960,34 @@ def test_active_run_streams_events_and_artifacts_blocks_upload_and_cancels(tmp_p
         assert repeated.json()["status"] == "cancelled"
 
 
+def test_live_artifact_listing_skips_transient_permission_race(tmp_path, monkeypatch):
+    from scientific_agent.web.service import TaskService
+
+    root = tmp_path / "run"
+    root.mkdir()
+    visible = root / "report.md"
+    visible.write_text("ready", encoding="utf-8")
+    staging = root / "execution.json"
+    staging.write_text("{}", encoding="utf-8")
+    original_is_file = Path.is_file
+
+    def transient_is_file(path):
+        if path == staging:
+            raise PermissionError("sandbox is atomically staging this artifact")
+        return original_is_file(path)
+
+    monkeypatch.setattr(Path, "is_file", transient_is_file)
+
+    assert TaskService._live_artifacts(root) == [
+        {
+            "path": "report.md",
+            "bytes": 5,
+            "sha256": None,
+            "live": True,
+        }
+    ]
+
+
 def test_registered_display_endpoints_are_integrity_gated(tmp_path):
     with _client(tmp_path) as client:
         auth = ("researcher", "correct horse")

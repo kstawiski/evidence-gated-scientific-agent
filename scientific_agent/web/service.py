@@ -499,7 +499,16 @@ class TaskService:
             return []
         artifacts = []
         for path in sorted(root.rglob("*")):
-            if not path.is_file() or path.is_symlink():
+            try:
+                is_file = path.is_file()
+                is_symlink = path.is_symlink()
+                size = path.stat().st_size if is_file and not is_symlink else None
+            except OSError:
+                # Sandbox workers tighten permissions while atomically staging an
+                # execution record. A concurrent Web/UI poll must remain available;
+                # the temporarily inaccessible artifact will appear on the next poll.
+                continue
+            if not is_file or is_symlink:
                 continue
             relative = path.relative_to(root).as_posix()
             if not web_visible_artifact(relative):
@@ -507,7 +516,7 @@ class TaskService:
             artifacts.append(
                 {
                     "path": relative,
-                    "bytes": path.stat().st_size,
+                    "bytes": size,
                     "sha256": None,
                     "live": True,
                 }

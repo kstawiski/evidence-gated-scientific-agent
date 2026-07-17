@@ -33,6 +33,9 @@ def test_researcher_forbids_mixed_effect_scales_and_zero_rounded_p_values():
     assert "independent numeric JSON and reconciliation first" in RESEARCHER
     assert "exit successfully without display generation" in RESEARCHER
     assert "never\ncombine the only required Python/R validation result" in RESEARCHER
+    assert "candidate_role_labels" in SIMPLE_PLANNER
+    assert "never copy example labels from the audit" in PLAN_REPAIRER
+    assert "`4*N - 9` is not `4*(N - 9)`" in PLAN_REPAIRER
 
 
 def test_researcher_documents_matplotlib_hlines_return_type():

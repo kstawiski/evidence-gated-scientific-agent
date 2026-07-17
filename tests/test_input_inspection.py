@@ -22,6 +22,9 @@ def test_delimited_intake_profiles_shape_types_and_missingness_without_values(tm
     assert columns["age"].missing_fraction == 1 / 3
     assert columns["age"].inferred_types == ["integer"]
     assert columns["outcome"].missing_count == 1
+    assert columns["arm"].candidate_role_labels == ["A", "B"]
+    assert columns["arm"].candidate_role_labels_complete is True
+    assert columns["patient_id"].candidate_role_labels == []
     serialized = json.dumps(profile.model_dump(mode="json"))
     assert "P001" not in serialized
     assert "4.5" not in serialized

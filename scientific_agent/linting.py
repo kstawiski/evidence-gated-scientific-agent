@@ -457,6 +457,21 @@ _ASSUMPTION_DIAGNOSTIC = re.compile(
     r"standard deviations?)\b",
     re.IGNORECASE,
 )
+_MAPPING_LITERAL = re.compile(r"\{[^{}\n]{1,1000}\}")
+_SEMANTIC_ROLE_NAMES = {
+    "case",
+    "comparator",
+    "control",
+    "exposed",
+    "intervention",
+    "placebo",
+    "reference",
+    "treatment",
+    "unexposed",
+}
+_INVALID_HEDGES_J_PARENTHESES = re.compile(
+    r"(?:1\s*-\s*)?3\s*/\s*\(\s*4\s*\*\s*\(\s*(?:n|N)\s*-\s*9\s*\)\s*\)",
+)
 _EXPLICIT_DIAGNOSTIC_ACTION = re.compile(
     r"\b(?:stop|halt|abort|terminate|exclude|drop|omit|remove)\w*\b"
     r".{0,120}\b(?:shapiro(?:-wilk)?|normality(?:\s+test)?|outliers?|"
@@ -708,6 +723,88 @@ def lint_plan(
     controller_method_lock: bool = False,
 ) -> PlanLintReport:
     findings: list[LintFinding] = []
+    plan_text_parts = [
+        plan.objective,
+        *plan.assumptions,
+        *plan.required_data,
+        *plan.alternatives_considered,
+        *plan.foreseeable_failure_modes,
+        *plan.expected_artifacts,
+        *plan.unresolved_questions,
+        *plan.estimated_resources,
+    ]
+    for step in plan.steps:
+        plan_text_parts.extend(
+            [
+                step.objective,
+                *step.inputs,
+                *step.outputs,
+                *step.methods,
+                *(validator.description for validator in step.validators),
+                *step.stop_conditions,
+            ]
+        )
+    plan_text = " ".join(plan_text_parts)
+    observed_role_columns = [
+        (source.path, column.name, set(column.candidate_role_labels))
+        for source in (task.input_profile.files if task.input_profile else [])
+        for column in source.columns
+        if column.candidate_role_labels_complete and column.candidate_role_labels
+    ]
+    for match in _MAPPING_LITERAL.finditer(plan_text):
+        try:
+            mapping = ast.literal_eval(match.group(0))
+        except (SyntaxError, ValueError):
+            continue
+        if not isinstance(mapping, dict) or not mapping:
+            continue
+        if not all(
+            isinstance(key, str) and isinstance(value, str)
+            for key, value in mapping.items()
+        ):
+            continue
+        mapped_roles = {value.casefold() for value in mapping.values()}
+        if len(mapped_roles & _SEMANTIC_ROLE_NAMES) < 2:
+            continue
+        mapping_keys = {key.casefold() for key in mapping}
+        if any(
+            mapping_keys == {label.casefold() for label in labels}
+            for _path, _name, labels in observed_role_columns
+        ):
+            continue
+        observed = (
+            "; ".join(
+                f"{path}:{name}={sorted(labels)}"
+                for path, name, labels in observed_role_columns
+            )
+            or "no complete candidate role-label set was exposed"
+        )
+        findings.append(
+            LintFinding(
+                code="role_mapping_not_grounded_in_input_profile",
+                location="plan",
+                message=(
+                    "An explicit semantic role mapping must use exactly the bounded "
+                    "category labels recorded by the immutable input profile; critic "
+                    f"examples are not data. Observed role columns: {observed}."
+                ),
+            )
+        )
+    if "hedges" in task.objective.casefold() and _INVALID_HEDGES_J_PARENTHESES.search(
+        plan_text
+    ):
+        findings.append(
+            LintFinding(
+                code="invalid_hedges_j_parentheses",
+                location="plan",
+                message=(
+                    "The Hedges small-sample correction is 1 - 3/(4*N - 9), "
+                    "where N is the total sample size; 1 - 3/(4*(N - 9)) is a "
+                    "different and invalid formula. Preserve the task-specified "
+                    "parentheses exactly."
+                ),
+            )
+        )
     step_ids = [step.step_id for step in plan.steps]
     if len(step_ids) != len(set(step_ids)):
         findings.append(

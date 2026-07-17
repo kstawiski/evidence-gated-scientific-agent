@@ -1,8 +1,10 @@
-"""Bounded, value-free structural inspection of immutable run inputs.
+"""Bounded structural inspection of immutable run inputs.
 
 This module deliberately reports shape, encoding, types, and missingness without
-including cell values or estimating scientific effects.  It can therefore run
-before the protocol lock without turning planning into post-hoc result review.
+including row-level values or estimating scientific effects. It exposes only a
+bounded complete set of labels from columns whose names identify a possible study
+role (for example ``group`` or ``arm``), because an estimand cannot be locked
+reproducibly without knowing those category identities.
 """
 
 from __future__ import annotations
@@ -27,6 +29,7 @@ MAX_PROFILE_FILES = 200
 MAX_TABULAR_ROWS = 250_000
 MAX_COLUMNS = 256
 MAX_DISTINCT_VALUES = 10_000
+MAX_CANDIDATE_ROLE_LABELS = 32
 MAX_JSON_BYTES = 32 * 1024 * 1024
 MAX_ARCHIVE_MEMBERS = 200
 MAX_TEXT_BYTES = 16 * 1024 * 1024
@@ -38,6 +41,11 @@ MISSING_TOKENS = {"", ".", "na", "n/a", "nan", "null", "none", "missing"}
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 DATETIME_RE = re.compile(
     r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?$"
+)
+CANDIDATE_ROLE_COLUMN_RE = re.compile(
+    r"(?:^|[_\s-])(?:arm|class|cohort|condition|exposure|group|intervention|"
+    r"treatment)(?:$|[_\s-])",
+    re.IGNORECASE,
 )
 
 
@@ -73,6 +81,11 @@ class _ColumnAccumulator:
                 self.types.items(), key=lambda item: (-item[1], item[0])
             )
         ]
+        expose_role_labels = bool(
+            CANDIDATE_ROLE_COLUMN_RE.search(self.name)
+            and not self.distinct_capped
+            and 0 < len(self.distinct) <= MAX_CANDIDATE_ROLE_LABELS
+        )
         return InputColumnProfile(
             name=self.name,
             inferred_types=ordered_types[:8],
@@ -81,6 +94,12 @@ class _ColumnAccumulator:
             missing_fraction=(self.missing / total if total else 0.0),
             distinct_non_missing=len(self.distinct),
             distinct_count_capped=self.distinct_capped,
+            candidate_role_labels=(
+                sorted(self.distinct, key=lambda value: (value.casefold(), value))
+                if expose_role_labels
+                else []
+            ),
+            candidate_role_labels_complete=expose_role_labels,
         )
 
 
@@ -196,6 +215,7 @@ def _profile_delimited(path: Path, base: dict[str, Any]) -> InputFileProfile:
         limitations.append(
             f"row and missingness counts cover only the first {MAX_TABULAR_ROWS} data rows"
         )
+    column_profiles = [item.finish() for item in accumulators]
     return InputFileProfile(
         **base,
         detected_format="delimited_text",
@@ -203,12 +223,15 @@ def _profile_delimited(path: Path, base: dict[str, Any]) -> InputFileProfile:
         inspection_status="complete" if completed else "partial",
         rows_observed=rows,
         rows_total=rows if completed else None,
-        columns=[item.finish() for item in accumulators],
+        columns=column_profiles,
         details={
             "encoding": encoding,
             "delimiter": "TAB" if delimiter == "\t" else delimiter,
             "declared_columns": len(header_row),
             "values_included_in_profile": False,
+            "bounded_candidate_role_labels_included": any(
+                item.candidate_role_labels_complete for item in column_profiles
+            ),
         },
         limitations=list(dict.fromkeys(limitations)),
     )
@@ -514,6 +537,7 @@ def _profile_xlsx(path: Path, base: dict[str, Any]) -> InputFileProfile:
             f"row and missingness counts cover only the first {MAX_TABULAR_ROWS} data rows"
         )
     data_rows = max(0, len(parsed_rows) - 1)
+    column_profiles = [item.finish() for item in accumulators]
     return InputFileProfile(
         **base,
         detected_format="xlsx",
@@ -521,13 +545,16 @@ def _profile_xlsx(path: Path, base: dict[str, Any]) -> InputFileProfile:
         inspection_status="partial" if capped or len(sheets) > 1 else "complete",
         rows_observed=data_rows,
         rows_total=None if capped else data_rows,
-        columns=[item.finish() for item in accumulators],
+        columns=column_profiles,
         details={
             "worksheets": len(sheets),
             "worksheet_files": sheets[:32],
             "first_worksheet": sheets[0],
             "declared_columns": width,
             "values_included_in_profile": False,
+            "bounded_candidate_role_labels_included": any(
+                item.candidate_role_labels_complete for item in column_profiles
+            ),
         },
         limitations=limitations,
     )
@@ -638,7 +665,7 @@ def build_input_profile(
             f"only the first {MAX_PROFILE_FILES} of {len(candidates)} inputs were structurally profiled"
         )
     limitations.append(
-        "intake profiles contain no cell values or effect estimates; semantic coding, units, sentinel missing values, and design metadata still require validated analysis"
+        "intake profiles contain no row-level cell values or effect estimates; only bounded complete candidate role labels may be exposed, while semantic coding, units, sentinel missing values, and design metadata still require validated analysis"
     )
     return InputProfile(
         total_files=len(candidates),

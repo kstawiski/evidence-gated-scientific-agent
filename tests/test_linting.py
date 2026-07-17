@@ -19,6 +19,9 @@ from scientific_agent.schemas import (
     EvidenceStatus,
     InlineCitation,
     ArtifactRef,
+    InputColumnProfile,
+    InputFileProfile,
+    InputProfile,
     PlanProposal,
     PlanStep,
     RetrievalEvidence,
@@ -186,6 +189,72 @@ def test_plan_linter_rejects_observed_baseline_arm_assignment():
     assert finding.blocking
     assert "observed baselines, outcomes, covariates" in finding.message
     assert not report.passed
+
+
+def test_plan_linter_rejects_role_mapping_keys_absent_from_input_profile():
+    profiled_task = task().model_copy(
+        update={
+            "input_profile": InputProfile(
+                total_files=1,
+                profiled_files=1,
+                files=[
+                    InputFileProfile(
+                        path="/workspace/cohort.csv",
+                        sha256="a" * 64,
+                        bytes=100,
+                        detected_format="delimited_text",
+                        media_type="text/csv",
+                        inspection_status="complete",
+                        columns=[
+                            InputColumnProfile(
+                                name="group",
+                                inferred_types=["string"],
+                                non_missing_count=40,
+                                missing_count=0,
+                                missing_fraction=0,
+                                distinct_non_missing=2,
+                                candidate_role_labels=["control", "treatment"],
+                                candidate_role_labels_complete=True,
+                            )
+                        ],
+                    )
+                ],
+            )
+        }
+    )
+    plan = good_plan()
+    plan.steps[0].methods = [
+        "Use {'Group_A': 'control', 'Group_B': 'treatment'} as the role mapping."
+    ]
+
+    rejected = lint_plan(profiled_task, plan)
+    plan.steps[0].methods = [
+        "Use {'control': 'control', 'treatment': 'treatment'} as the role mapping."
+    ]
+    accepted = lint_plan(profiled_task, plan)
+
+    assert "role_mapping_not_grounded_in_input_profile" in {
+        finding.code for finding in rejected.findings
+    }
+    assert "role_mapping_not_grounded_in_input_profile" not in {
+        finding.code for finding in accepted.findings
+    }
+
+
+def test_plan_linter_rejects_wrong_hedges_j_parentheses():
+    hedges_task = task().model_copy(
+        update={"objective": "Calculate Hedges g with J = 1 - 3/(4*N - 9)."}
+    )
+    plan = good_plan()
+    plan.steps[0].validators[
+        0
+    ].description = "Check Hedges g uses J = 1 - 3/(4*(N - 9))."
+
+    report = lint_plan(hedges_task, plan)
+
+    assert "invalid_hedges_j_parentheses" in {
+        finding.code for finding in report.findings
+    }
 
 
 def test_plan_linter_rejects_unrequested_normality_based_primary_stop():

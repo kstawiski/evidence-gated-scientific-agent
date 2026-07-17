@@ -23,7 +23,7 @@ class ArtifactRef(BaseModel):
 
 
 class InputColumnProfile(BaseModel):
-    """Value-free structural summary used before a scientific method is locked."""
+    """Structural summary used before a scientific method is locked."""
 
     name: str
     inferred_types: list[str] = Field(default_factory=list, max_length=8)
@@ -32,6 +32,8 @@ class InputColumnProfile(BaseModel):
     missing_fraction: float = Field(ge=0, le=1)
     distinct_non_missing: int = Field(ge=0)
     distinct_count_capped: bool = False
+    candidate_role_labels: list[str] = Field(default_factory=list, max_length=32)
+    candidate_role_labels_complete: bool = False
 
 
 class InputFileProfile(BaseModel):

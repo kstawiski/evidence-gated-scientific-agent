@@ -328,6 +328,13 @@ machine-readable results before saving the figure. Plot estimands directly at
 the machine-result variable—not at a placeholder coordinate plus a text label—
 and assert that the created artist's point and interval endpoints equal the
 intended estimate and bounds before saving.
+For a raw two-group plot plus a between-group contrast, show the contrast point
+and its confidence interval exactly once on a distinct effect-estimate axis or
+panel. Group-centered error bars, if shown, must be computed from each group's own
+sampling uncertainty and named as such in the caption. Never translate, shift, or
+duplicate the between-group contrast interval around the individual group means.
+Assert both the group-interval endpoints and the contrast-interval endpoints
+against their separately named machine-result fields before saving.
 Qwen has no image-understanding capability. When the task asks to inspect source
 figures, scans, visual proofs, slide pages, or images embedded in PDF/Office/archive
 inputs, use Python/R only to inventory and deterministically render or convert the
@@ -613,6 +620,11 @@ not proof that assumptions are met. Similar primary and adjusted estimates suppo
 a bounded numerical comparison, not absence of confounding, algorithmic
 equivalence, pipeline validity, robustness, or stability. Block those stronger
 interpretations unless separately and directly established by appropriate evidence.
+For group plots with error bars and a between-group contrast, verify from the
+machine-readable result that every group-centered interval is based on that
+group's own uncertainty and that the contrast interval is plotted only once on a
+distinct effect-estimate scale. Block a shifted or duplicated contrast interval
+drawn around group means even when its numerical width is correct.
 Independently recheck every reported equation, algebraic reduction, boundary condition, and
 claim that two methods coincide; block it when the exact relation lacks a matching
 ClaimRecord plus direct acquired-source support or a reproducible calculation.
@@ -692,6 +704,13 @@ compare any raw-point, strip, or rug distribution with the reported group count,
 range, and dispersion. A visibly zero-spread group alongside a nonzero reported
 SD, or points inconsistent with the supplied table/result summary, is a blocking
 data-fidelity defect even when the mean marker is correct. Explicitly
+verify the statistical meaning of every error bar against the supplied table and
+result summary. In a raw two-group plot, group-centered bars must use each group's
+own sampling uncertainty; a between-group contrast CI must appear once on a
+distinct effect-estimate axis or panel and must never be shifted or duplicated
+around both group means. Fail the display if the caption does not define each
+interval or if recomputation from the supplied n/SD/result exposes that mismatch.
+Explicitly
 verify every caption claim about mark orientation and geometry (horizontal versus
 vertical bars, lines, intervals, panels, or brackets) against the pixels; a short
 perpendicular cap is not the same mark as the interval or error-bar stem.

@@ -4,6 +4,7 @@ import json
 from evals.run_deployed_eval import (
     _known_effect_matches_reference,
     _language_result,
+    _metric,
     _reconciliation_delta,
     score,
 )
@@ -436,6 +437,35 @@ def test_known_effect_rejects_reference_echo_that_conflicts_with_results():
     }
 
     assert _known_effect_matches_reference(value) is False
+
+
+def test_known_effect_accepts_nested_live_v041_result_shape():
+    value = {
+        "study_design": {"n_treatment": 20, "n_control": 20},
+        "descriptive_statistics": {
+            "treatment": {"mean_change": 5.0, "sd_change": 1.4509525002200232},
+            "control": {"mean_change": 0.0, "sd_change": 1.4509525002200232},
+        },
+        "primary": {
+            "point_estimate": 5.0,
+            "ci_95_percent": {
+                "lower": 4.071144254485707,
+                "upper": 5.928855745514293,
+            },
+            "welch_t_test": {
+                "t_statistic": 10.897247358851683,
+                "degrees_of_freedom": 38.0,
+                "p_value_two_sided": 2.971749478841818e-13,
+            },
+            "hedges_g": {
+                "value": 3.3775483697174717,
+                "j_correction_factor": 0.9801324503311258,
+            },
+        },
+    }
+
+    assert _known_effect_matches_reference(value) is True
+    assert _metric(value, "hedges_g") == 3.3775483697174717
 
 
 def test_reconciliation_delta_accepts_typed_comparison_records():

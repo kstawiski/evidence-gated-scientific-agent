@@ -114,6 +114,12 @@ def _metric(value: dict, *names: str) -> float:
             if isinstance(candidate, (int, float)) and not isinstance(candidate, bool):
                 return float(candidate)
             if (
+                isinstance(candidate, dict)
+                and isinstance(candidate.get("value"), (int, float))
+                and not isinstance(candidate["value"], bool)
+            ):
+                return float(candidate["value"])
+            if (
                 isinstance(candidate, list)
                 and len(candidate) == 1
                 and isinstance(candidate[0], (int, float))
@@ -271,6 +277,7 @@ def _known_effect_matches_reference(value: dict) -> bool:
             (
                 "group_summaries.treatment.mean_change",
                 "group_descriptives.treatment.mean_change",
+                "descriptive_statistics.treatment.mean_change",
             ),
             ("treatment_mean_change", "mean_change_treatment"),
             5.0,
@@ -279,6 +286,7 @@ def _known_effect_matches_reference(value: dict) -> bool:
             (
                 "group_summaries.control.mean_change",
                 "group_descriptives.control.mean_change",
+                "descriptive_statistics.control.mean_change",
             ),
             ("control_mean_change", "mean_change_control"),
             0.0,
@@ -289,24 +297,49 @@ def _known_effect_matches_reference(value: dict) -> bool:
             5.0,
         ),
         (
-            ("primary.welch_t_statistic",),
+            ("primary.welch_t_statistic", "primary.welch_t_test.t_statistic"),
             ("welch_t_statistic", "t_statistic"),
             10.897247358851683,
         ),
         (
-            ("primary.degrees_of_freedom",),
+            (
+                "primary.degrees_of_freedom",
+                "primary.welch_t_test.degrees_of_freedom",
+            ),
             ("degrees_of_freedom", "welch_df", "df_welch"),
             38.0,
         ),
-        (("primary.ci_95_lower",), ("ci_95_lower", "ci_lower_95"), 4.071144254485707),
-        (("primary.ci_95_upper",), ("ci_95_upper", "ci_upper_95"), 5.928855745514293),
-        (("primary.pooled_sd",), ("pooled_sd",), 1.4509525002200232),
         (
-            ("primary.hedges_g_correction_factor_J",),
+            ("primary.ci_95_lower", "primary.ci_95_percent.lower"),
+            ("ci_95_lower", "ci_lower_95"),
+            4.071144254485707,
+        ),
+        (
+            ("primary.ci_95_upper", "primary.ci_95_percent.upper"),
+            ("ci_95_upper", "ci_upper_95"),
+            5.928855745514293,
+        ),
+        (
+            (
+                "primary.pooled_sd",
+                "descriptive_statistics.treatment.sd_change",
+            ),
+            ("pooled_sd",),
+            1.4509525002200232,
+        ),
+        (
+            (
+                "primary.hedges_g_correction_factor_J",
+                "primary.hedges_g.j_correction_factor",
+            ),
             ("hedges_g_correction_J", "j_correction", "J_correction"),
             0.9801324503311258,
         ),
-        (("primary.hedges_g",), ("hedges_g",), 3.3775483697174717),
+        (
+            ("primary.hedges_g", "primary.hedges_g.value"),
+            ("hedges_g",),
+            3.3775483697174717,
+        ),
     ]
     if not all(
         math.isclose(metric(paths, aliases), target, rel_tol=1e-9, abs_tol=1e-6)
@@ -314,7 +347,10 @@ def _known_effect_matches_reference(value: dict) -> bool:
     ):
         return False
     return math.isclose(
-        metric(("primary.p_value",), ("p_value", "p_value_two_sided")),
+        metric(
+            ("primary.p_value", "primary.welch_t_test.p_value_two_sided"),
+            ("p_value", "p_value_two_sided"),
+        ),
         2.971749478841818e-13,
         rel_tol=1e-6,
         abs_tol=1e-18,

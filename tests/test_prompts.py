@@ -29,6 +29,10 @@ def test_researcher_forbids_mixed_effect_scales_and_zero_rounded_p_values():
     assert "Never reconstruct, hand-copy, or hard-code subject-level" in RESEARCHER
     assert "not at a placeholder coordinate plus a text label" in RESEARCHER
     assert "never copy a pooled or\nwhole-cohort diagnostic" in RESEARCHER
+    assert "an R validation call must not plot" in RESEARCHER
+    assert "independent numeric JSON and reconciliation first" in RESEARCHER
+    assert "exit successfully without display generation" in RESEARCHER
+    assert "never\ncombine the only required Python/R validation result" in RESEARCHER
     assert "cross-check every reported test statistic" in REPORT_AUDITOR
     assert "horizontal versus\nvertical bars" in DISPLAY_AUDITOR
     assert "zero-spread group alongside a nonzero reported\nSD" in DISPLAY_AUDITOR

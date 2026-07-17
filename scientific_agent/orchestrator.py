@@ -2521,7 +2521,10 @@ async def _produce_report(
         elif simple_mode:
             sandbox = replace(
                 settings.sandbox,
-                max_calls_per_attempt=min(settings.sandbox.max_calls_per_attempt, 4),
+                # A dual-language task needs room for one bounded correction in
+                # each implementation plus reconciliation. Four calls made one
+                # ordinary Python and one ordinary R correction exhaust the run.
+                max_calls_per_attempt=min(settings.sandbox.max_calls_per_attempt, 8),
                 max_wall_seconds=min(settings.sandbox.max_wall_seconds, 120),
             )
         else:

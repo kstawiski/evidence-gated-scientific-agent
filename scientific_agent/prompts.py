@@ -356,7 +356,15 @@ implementation only. The validation implementation should emit numeric and
 diagnostic artifacts, not a redundant figure or table, unless the task explicitly
 requests parallel displays. In that situation, do not write validation-language
 artifacts below /output/figures or /output/tables; write its numeric JSON below
-/output/validation instead.
+/output/validation instead. If Python has already produced the requested display,
+an R validation call must not plot, save, copy, or modify any figure/table; finish
+the independent numeric JSON and reconciliation first so an unrelated plotting
+error cannot invalidate an otherwise successful cross-language check. More
+generally, every required validation-language call must emit its numeric JSON and
+exit successfully without display generation. Generate the reader-facing display
+in a later primary-language call after both language results have succeeded; never
+combine the only required Python/R validation result and fallible plotting in one
+process.
 Tables must be strict CSV or TSV with one nonempty header row and rectangular
 rows. Exact-count cohort/CONSORT/PRISMA schematics must be generated
 deterministically from an auditable count table, never improvised as AI imagery.

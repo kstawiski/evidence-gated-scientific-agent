@@ -411,6 +411,11 @@ MultiIndex or group-by tuple keys into named nested objects or explicit string
 labels before calling `json.dump`. Convert NumPy and pandas scalar values,
 including booleans, to native Python scalars with `.item()` (or an equivalent
 explicit conversion) before JSON serialization.
+In R, write result JSON with `jsonlite::write_json(..., auto_unbox = TRUE)` (or
+explicit `jsonlite::unbox()` values): inferential scalars such as estimates,
+t statistics, degrees of freedom, p-values, interval bounds, and effect sizes
+must be JSON numbers, never length-one arrays such as `[5.0]`. Arrays are reserved
+for genuinely repeated values.
 Do not import or install a Python/R package solely to calculate artifact hashes or
 provenance. The controller hashes every successful output; analysis scripts should
 write the scientific artifact and exit without `openssl`, `digest`, or an analogous

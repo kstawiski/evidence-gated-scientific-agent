@@ -40,6 +40,8 @@ def test_researcher_forbids_mixed_effect_scales_and_zero_rounded_p_values():
     assert "use\ndesign-unspecified language" in SIMPLE_PLANNER
     assert "require design-unspecified language instead" in PLAN_AUDITOR
     assert "including booleans, to native Python scalars" in RESEARCHER
+    assert "`jsonlite::write_json(..., auto_unbox = TRUE)`" in RESEARCHER
+    assert "never length-one arrays such as `[5.0]`" in RESEARCHER
     assert "never emit a non-null full_text_status" in REPORTER
 
 

@@ -27,6 +27,7 @@ def test_researcher_forbids_mixed_effect_scales_and_zero_rounded_p_values():
     assert "parent.mkdir(parents=True, exist_ok=True)" in RESEARCHER
     assert "dir.create(dirname(target), recursive=TRUE" in RESEARCHER
     assert "Never reconstruct, hand-copy, or hard-code subject-level" in RESEARCHER
+    assert "not at a placeholder coordinate plus a text label" in RESEARCHER
     assert "cross-check every reported test statistic" in REPORT_AUDITOR
     assert "horizontal versus\nvertical bars" in DISPLAY_AUDITOR
     assert "zero-spread group alongside a nonzero reported\nSD" in DISPLAY_AUDITOR

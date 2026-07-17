@@ -306,7 +306,10 @@ Never reconstruct, hand-copy, or hard-code subject-level observations for a
 figure. The plotting script must read raw points from the immutable workspace
 input or an exact successful generated data artifact, derive the plotted values
 in code, and assert that their counts and summary statistics agree with the
-machine-readable results before saving the figure.
+machine-readable results before saving the figure. Plot estimands directly at
+the machine-result variable—not at a placeholder coordinate plus a text label—
+and assert that the created artist's point and interval endpoints equal the
+intended estimate and bounds before saving.
 Qwen has no image-understanding capability. When the task asks to inspect source
 figures, scans, visual proofs, slide pages, or images embedded in PDF/Office/archive
 inputs, use Python/R only to inventory and deterministically render or convert the

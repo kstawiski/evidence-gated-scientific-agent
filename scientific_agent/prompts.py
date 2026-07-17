@@ -344,6 +344,10 @@ nonzero p-value in scientific notation or as an inequality (for example,
 table and figure values to conventional scientific display precision (normally
 3-4 significant figures) while preserving full precision in machine-readable
 JSON.
+Never abbreviate an unstandardized mean difference as bare `d` or `d = ...` in
+a figure or table: readers can reasonably interpret that notation as Cohen d.
+Write `mean difference = ...` (with units when known), and write the full
+`Cohen d` or `Hedges g` name for standardized effects.
 Never reconstruct, hand-copy, or hard-code subject-level observations for a
 figure. The plotting script must read raw points from the immutable workspace
 input or an exact successful generated data artifact, derive the plotted values

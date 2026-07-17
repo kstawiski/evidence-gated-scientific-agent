@@ -1380,6 +1380,20 @@ def _figure_ocr_semantic_findings(
                 "use separate, explicitly scaled panels or omit the secondary effect.",
             )
         )
+    if (
+        re.search(r"\bmean\s+(?:difference|diff)\b", text)
+        and re.search(r"\bd\s*=\s*[+-]?(?:\d+(?:[.,]\d*)?|[.,]\d+)", text)
+        and not re.search(r"\bcohen(?:'s)?\s+d\b", text)
+    ):
+        findings.append(
+            (
+                "figure_ambiguous_bare_d_label",
+                "The rendered figure labels a mean-difference display with bare "
+                "'d = ...', which is readily confused with Cohen d. Spell out "
+                "'mean difference' for the raw estimand or 'Cohen d' for the "
+                "standardized effect.",
+            )
+        )
     return findings
 
 

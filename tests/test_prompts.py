@@ -19,6 +19,9 @@ def test_researcher_forbids_mixed_effect_scales_and_zero_rounded_p_values():
     assert "never plot an\nunstandardized estimate" in RESEARCHER
     assert "Hedges g" in RESEARCHER
     assert "never as zero after fixed-decimal rounding" in RESEARCHER
+    assert (
+        "Never abbreviate an unstandardized mean difference as bare `d`" in RESEARCHER
+    )
     assert "workspace-relative" in RESEARCHER
     assert "inside Python/R sandbox code" in RESEARCHER
     assert "exact controller-registered absolute host path" in RESEARCHER

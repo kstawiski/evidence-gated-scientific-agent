@@ -411,6 +411,46 @@ def test_rendered_ocr_blocks_mixed_scales_and_zero_rounded_p_value(
     assert "figure_mixed_incompatible_effect_scales" in codes
 
 
+def test_rendered_ocr_blocks_bare_d_on_mean_difference_display(
+    tmp_path: Path, monkeypatch
+):
+    report, computation = _fixture(tmp_path)
+    monkeypatch.setattr(
+        "scientific_agent.linting.extract_figure_ocr",
+        lambda _path: {
+            "available": True,
+            "text": "Between-Group Contrast Mean Difference d = 5.00",
+            "words": [],
+            "truncated": False,
+        },
+    )
+
+    validation = validate_report(report, computation=computation)
+    codes = {finding.code for finding in validation.findings}
+
+    assert "figure_ambiguous_bare_d_label" in codes
+
+
+def test_rendered_ocr_allows_explicit_cohen_d_on_mean_difference_display(
+    tmp_path: Path, monkeypatch
+):
+    report, computation = _fixture(tmp_path)
+    monkeypatch.setattr(
+        "scientific_agent.linting.extract_figure_ocr",
+        lambda _path: {
+            "available": True,
+            "text": "Mean Difference; Cohen d = 3.45",
+            "words": [],
+            "truncated": False,
+        },
+    )
+
+    validation = validate_report(report, computation=computation)
+    codes = {finding.code for finding in validation.findings}
+
+    assert "figure_ambiguous_bare_d_label" not in codes
+
+
 def test_later_display_artifact_supersedes_same_logical_output(tmp_path: Path):
     report, computation = _fixture(tmp_path)
     corrected_dir = (

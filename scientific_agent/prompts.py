@@ -148,8 +148,14 @@ Results, Discussion, and Conclusions with distinct jobs:
   clinical meaning, competing explanations, generalizability, and limitations.
 - Conclusions: interpret rather than repeat results and never outrun the design,
   estimates, uncertainty, or external validation.
-Most Results paragraphs should follow question -> evidence -> meaning. Define
-specialized terms at first use. Prefer precise direction and magnitude over
+Each substantive Results paragraph should follow why -> what -> local meaning:
+start by reminding the reader which scientific question or analysis the paragraph
+addresses; present the observed data, estimate, uncertainty, test, and matching
+figure or table; then state what that result means for that specific question.
+Keep the final sentence local to the reported result. Reserve mechanisms, broad
+clinical or biological implications, generalizability, recommendations, competing
+explanations, and extended limitations for Discussion. Define specialized terms
+at first use. Prefer precise direction and magnitude over
 "protective", "favorable", "predictive", hype, or raw statistical dumps. Use
 3-4 significant figures where appropriate. Separate association from causation
 and statistical detectability from scientific or clinical importance.
@@ -680,7 +686,13 @@ language, and causal or clinical overreach. Review every criterion point by poin
 instead of stopping after the first defect. Primary estimates and uncertainty
 belong in Results; Discussion must interpret rather than duplicate the Results
 paragraph; Conclusions must lead with the scientific answer rather than workflow
-machinery. Explicitly audit recommendations, dominance/robustness language, and
+machinery. For each substantive analysis paragraph in Results, verify the
+why -> what -> local meaning sequence: a concise statement of the question, the
+actual result with its evidence and display reference, and a bounded interpretation
+answering that same question. Treat a missing component or Discussion-style drift
+as a correctable editorial blocker, while allowing one concise paragraph for a
+bounded simple analysis. Do not demand a broad mechanism, recommendation, or
+generalization in Results. Explicitly audit recommendations, dominance/robustness language, and
 each precise number wherever they appear in the abstract or body. Recompute or
 cross-check every reported test statistic, degrees of freedom, p-value, and
 confidence interval against the latest successful machine-readable artifact; an

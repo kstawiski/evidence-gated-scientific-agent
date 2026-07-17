@@ -3170,7 +3170,7 @@ async def _audit_report(
         system_prompt=REPORT_AUDITOR,
         payload=payload,
         output_type=VerificationReport,
-        temperature=settings.gemma.temperature,
+        temperature=min(settings.gemma.temperature, 0.4),
         timeout=90 if simple_mode else 240,
         on_visible_text=on_visible_text,
         cancel_event=cancel_event,

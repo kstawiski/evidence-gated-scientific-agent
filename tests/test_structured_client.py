@@ -9,6 +9,7 @@ import pytest
 from pydantic import BaseModel
 
 from scientific_agent.config import ModelEndpoint
+from scientific_agent.schemas import VerificationReport
 from scientific_agent.structured_client import (
     _StreamRepetitionGuard,
     _private_reasoning_no_final_limit,
@@ -30,6 +31,52 @@ def _endpoint():
         temperature=0.2,
         top_p=0.9,
     )
+
+
+@pytest.mark.asyncio
+async def test_schema_incomplete_critic_fail_is_preserved_as_blockers_after_repair():
+    calls = 0
+    visible: list[str] = []
+    incomplete = json.dumps(
+        {
+            "verdict": "fail",
+            "unsupported_claims": [
+                "The Results reports a diagnostic without a matching ClaimRecord."
+            ],
+            "evidence_refs": ["src-python"],
+        }
+    )
+
+    def handler(request: httpx.Request):
+        nonlocal calls
+        calls += 1
+        body = json.loads(request.content)
+        assert body["stream"] is True
+        event = {
+            "choices": [{"delta": {"content": incomplete}, "finish_reason": "stop"}]
+        }
+        return httpx.Response(
+            200, text=f"data: {json.dumps(event)}\n\ndata: [DONE]\n\n"
+        )
+
+    result = await request_structured(
+        _endpoint(),
+        system_prompt="Audit the report.",
+        payload={"report": "example"},
+        output_type=VerificationReport,
+        temperature=0.4,
+        timeout=2,
+        repair_attempts=1,
+        on_visible_text=visible.append,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert calls == 2
+    assert result.verdict == "fail"
+    assert len(result.blocking_findings) == 1
+    assert result.blocking_findings[0].problem.startswith("The Results reports")
+    assert result.unsupported_claims
+    assert "no approval was inferred" in "".join(visible)
 
 
 def test_stream_repetition_detector_targets_sentence_loops_not_json_structure():

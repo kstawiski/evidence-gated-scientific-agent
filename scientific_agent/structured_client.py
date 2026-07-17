@@ -63,6 +63,70 @@ class _StructuredStreamComplete(RuntimeError):
     """The final channel already contains one complete structured value."""
 
 
+def _salvage_schema_incomplete_verification_report(
+    content: str, output_type: type[T]
+) -> T | None:
+    """Preserve explicit critic objections when verbose finding fields are absent.
+
+    A small local critic can return a useful ``fail`` object with explicit
+    unsupported claims while omitting the verbose Finding objects required by
+    VerificationReport. After the normal bounded repair is exhausted, convert only
+    those model-authored objections into generic actionable blockers. This never
+    converts an invalid review into approval or invents a scientific objection.
+    """
+
+    if output_type.__name__ != "VerificationReport":
+        return None
+    try:
+        value = json.loads(content)
+    except (TypeError, ValueError):
+        return None
+    if not isinstance(value, dict) or value.get("verdict") != "fail":
+        return None
+    if value.get("blocking_findings"):
+        return None
+    unsupported = value.get("unsupported_claims")
+    if not isinstance(unsupported, list):
+        return None
+    objections = [
+        item.strip() for item in unsupported if isinstance(item, str) and item.strip()
+    ]
+    if not objections:
+        return None
+
+    value.setdefault("nonblocking_findings", [])
+    value.setdefault("protocol_deviations", [])
+    value.setdefault("proposed_falsification_tests", [])
+    value.setdefault("evidence_refs", [])
+    value["blocking_findings"] = [
+        {
+            "finding_id": (
+                "critic-unsupported-claim-"
+                + hashlib.sha256(objection.encode("utf-8")).hexdigest()[:12]
+            ),
+            "location": "ScientificReport (critic did not supply a narrower location)",
+            "problem": objection[:1200],
+            "why_it_matters": (
+                "The independent critic identified this substantive statement as "
+                "unsupported; publication-quality reporting cannot infer approval "
+                "from a schema-incomplete review."
+            ),
+            "evidence": objection[:1600],
+            "falsification_test_or_correction": (
+                "Locate the exact statement, then either link it to a matching "
+                "ClaimRecord and direct controller-verified evidence or remove, "
+                "qualify, or correct it; rerun the independent audit on the "
+                "changed report."
+            ),
+        }
+        for objection in objections[:200]
+    ]
+    try:
+        return output_type.model_validate(value)
+    except (ValidationError, ValueError):
+        return None
+
+
 def _has_complete_top_level_json_value(value: str) -> bool:
     """Return whether visible output starts with one complete JSON value."""
 
@@ -702,6 +766,22 @@ async def request_structured(
                 last_error = str(exc)[:4000]
             except ValueError as exc:
                 last_error = str(exc)[:4000]
+
+            if attempt >= repair_attempts:
+                salvaged = _salvage_schema_incomplete_verification_report(
+                    content, output_type
+                )
+                if salvaged is not None:
+                    if on_visible_text is not None:
+                        try:
+                            on_visible_text(
+                                "\n[Evidence Bench preserved the critic's explicit "
+                                "unsupported-claim objections as fail-closed "
+                                "blocking findings; no approval was inferred.]\n"
+                            )
+                        except Exception:
+                            pass
+                    return salvaged
 
             if attempt < repair_attempts:
                 if on_visible_text is not None and not repair_notice_emitted:

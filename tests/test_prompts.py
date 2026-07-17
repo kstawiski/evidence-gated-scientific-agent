@@ -22,6 +22,9 @@ def test_researcher_forbids_mixed_effect_scales_and_zero_rounded_p_values():
     assert (
         "Never abbreviate an unstandardized mean difference as bare `d`" in RESEARCHER
     )
+    assert "why -> what -> local meaning" in REPORTER
+    assert "Reserve mechanisms, broad\nclinical or biological implications" in REPORTER
+    assert "missing component or Discussion-style drift" in REPORT_AUDITOR
     assert "workspace-relative" in RESEARCHER
     assert "inside Python/R sandbox code" in RESEARCHER
     assert "exact controller-registered absolute host path" in RESEARCHER

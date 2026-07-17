@@ -450,6 +450,9 @@ consistent; do not hand-edit Welch-Satterthwaite degrees of freedom. For figures
 avoid version-fragile Matplotlib calls: label boxplots with `tick_labels` (or set
 ticks after plotting), and pass singleton asymmetric error bars as shape `(2, 1)`,
 for example `xerr=[[estimate-low], [high-estimate]]`.
+When an axis is labeled with an effect estimate such as a mean difference, plot
+the estimate on x with `xerr` and use a constant categorical y position. Never
+fix x at zero and put the estimate or its confidence interval on y with `yerr`.
 Do not use `twinx()`, `twiny()`, `secondary_xaxis()`, or `secondary_yaxis()` in a
 scientific display. Put a between-group contrast and its confidence interval in a
 separate, plainly labeled effect-estimate panel rather than overlaying it on raw
@@ -614,9 +617,9 @@ test means only that the diagnostic did not detect a departure; it does not prov
 that an assumption is met, and its limited power must remain explicit. Do not
 report a named diagnostic unless its statistic and p-value occur in a successful
 registered computation artifact.
-Do not call an estimate, result, finding, analysis, or contrast robust unless a
-separately executed robustness or sensitivity analysis directly supports that exact
-scope. Agreement between Python and R implementations of the same method establishes
+Do not call an estimate, result, finding, analysis, association, or contrast robust
+unless a separately executed robustness or sensitivity analysis directly supports
+that exact scope. Agreement between Python and R implementations of the same method establishes
 implementation concordance, not scientific robustness. Do not use balanced sample
 size, equal group size, or visually symmetric distributions to mitigate or dismiss
 an untested normality concern. If no appropriate diagnostic or sensitivity analysis

@@ -39,6 +39,21 @@ def _python_static_violations(code: str) -> list[str]:
     except SyntaxError:
         return []
     violations: set[str] = set()
+    effect_x_axes = {
+        ast.dump(node.func.value, include_attributes=False)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "set_xlabel"
+        and node.args
+        and isinstance(node.args[0], ast.Constant)
+        and isinstance(node.args[0].value, str)
+        and re.search(
+            r"\b(?:effect|mean\s+difference|contrast|estimate)\b",
+            node.args[0].value,
+            re.IGNORECASE,
+        )
+    }
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -106,6 +121,27 @@ def _python_static_violations(code: str) -> list[str]:
                     "Matplotlib effect interval is transposed: xerr is derived from "
                     "the value plotted on y while x is fixed at zero; plot the "
                     "estimate on x and use a constant categorical y position"
+                )
+        if len(node.args) >= 2 and "yerr" in keywords:
+            x_expression = node.args[0]
+            if (
+                isinstance(x_expression, (ast.List, ast.Tuple))
+                and len(x_expression.elts) == 1
+            ):
+                x_expression = x_expression.elts[0]
+            x_is_literal_zero = (
+                isinstance(x_expression, ast.Constant)
+                and isinstance(x_expression.value, (int, float))
+                and not isinstance(x_expression.value, bool)
+                and float(x_expression.value) == 0.0
+            )
+            axis_key = ast.dump(node.func.value, include_attributes=False)
+            if x_is_literal_zero and axis_key in effect_x_axes:
+                violations.add(
+                    "Matplotlib effect interval is transposed: an axis labeled for "
+                    "the effect estimate fixes x at zero and places the interval in "
+                    "yerr; plot the estimate and confidence interval on x with a "
+                    "constant categorical y position"
                 )
         scalar_x = bool(node.args and isinstance(node.args[0], ast.Constant))
         if not scalar_x:

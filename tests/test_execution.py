@@ -53,6 +53,35 @@ def test_python_static_preflight_rejects_transposed_x_interval_by_dataflow():
     )
 
 
+def test_python_static_preflight_rejects_y_interval_on_effect_x_axis():
+    violations = _python_static_violations(
+        """
+effect_ax.errorbar([0.0], [mean_difference], yerr=np.array([[lower], [upper]]))
+effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
+"""
+    )
+
+    assert any("effect interval is transposed" in item for item in violations)
+    assert (
+        _python_static_violations(
+            """
+raw_ax.errorbar([0.0], [group_mean], yerr=np.array([[se], [se]]))
+raw_ax.set_xlabel("Group")
+"""
+        )
+        == []
+    )
+    assert (
+        _python_static_violations(
+            """
+effect_ax.errorbar([mean_difference], [0.0], xerr=np.array([[lower], [upper]]))
+effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
+"""
+        )
+        == []
+    )
+
+
 def test_python_static_preflight_rejects_secondary_scientific_axes():
     for code in (
         "effect_ax = raw_ax.twinx()",

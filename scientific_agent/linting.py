@@ -533,9 +533,9 @@ _BALANCED_DESIGN_REASSURANCE = re.compile(
     re.IGNORECASE,
 )
 _UNQUALIFIED_RESULT_ROBUSTNESS = re.compile(
-    r"\b(?:analysis|contrast|estimate|finding|result)s?\b.{0,80}"
+    r"\b(?:analysis|association|contrast|estimate|finding|result)s?\b.{0,80}"
     r"\b(?:is|are|was|were)\s+(?:statistically\s+)?robust\b|"
-    r"\brobust\b.{0,50}\b(?:analysis|contrast|estimate|finding|result)s?\b",
+    r"\brobust\b.{0,50}\b(?:analysis|association|contrast|estimate|finding|result)s?\b",
     re.IGNORECASE,
 )
 _METHODOLOGICAL_GENERALIZATION = re.compile(
@@ -1609,6 +1609,10 @@ def _figure_source_semantic_findings(
                 (keyword.value for keyword in node.keywords if keyword.arg == "xerr"),
                 None,
             )
+            yerr_expression = next(
+                (keyword.value for keyword in node.keywords if keyword.arg == "yerr"),
+                None,
+            )
             y_names = {
                 child.id
                 for child in ast.walk(node.args[1])
@@ -1625,7 +1629,9 @@ def _figure_source_semantic_findings(
             )
             transposed_interval = bool(y_names & xerr_names)
             if is_zero_position(node.args[0]) and (
-                contains_effect_estimate(node.args[1]) or transposed_interval
+                contains_effect_estimate(node.args[1])
+                or transposed_interval
+                or yerr_expression is not None
             ):
                 return [
                     (

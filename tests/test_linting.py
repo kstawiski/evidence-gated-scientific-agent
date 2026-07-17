@@ -1284,6 +1284,21 @@ def test_report_validator_rejects_untested_normality_reassurance_and_robust_cont
     }
 
 
+def test_report_validator_rejects_unqualified_robust_association():
+    report = article_report(
+        conclusions=(
+            "The prespecified analysis identifies a robust association between "
+            "group assignment and change scores."
+        )
+    )
+
+    validation = validate_report(report)
+
+    assert "unqualified_result_robustness" in {
+        finding.code for finding in validation.findings
+    }
+
+
 def test_report_validator_rejects_sandbox_plan_as_protocol_timing_evidence(tmp_path):
     plan = tmp_path / "locked_analysis_plan.json"
     plan.write_text('{"status":"locked"}\n', encoding="utf-8")
@@ -3023,6 +3038,45 @@ def test_figure_rejects_live_transposed_interval_with_short_variable_name(tmp_pa
     source.write_text(
         "ax.set_xlabel('Treatment - Control\\nDifference in Mean Change')\n"
         "ax.errorbar([0], [md], xerr=[[md - ci_lo], [ci_hi - md]])\n",
+        encoding="utf-8",
+    )
+    computation = _display_computation(tmp_path, figure)
+    computation.records[0].artifacts.append(
+        ArtifactRef(
+            path=str(source),
+            sha256=sha256_file(source),
+            description="python analysis source",
+        )
+    )
+    report = article_report(
+        results="Figure 1 shows the effect estimate.",
+        displays=[
+            ReportDisplay(
+                display_id="effect-figure",
+                kind="figure",
+                title="Effect",
+                caption="Difference in mean change with a 95% confidence interval.",
+                artifact_path=str(figure),
+                alt_text="Effect estimate and confidence interval.",
+            )
+        ],
+    )
+
+    validation = validate_report(report, computation=computation)
+
+    assert "figure_effect_axis_transposed" in {
+        finding.code for finding in validation.findings
+    }
+
+
+def test_figure_rejects_y_interval_on_effect_x_axis(tmp_path):
+    figure = tmp_path / "output" / "figures" / "effect.png"
+    figure.parent.mkdir(parents=True)
+    Image.new("RGB", (800, 600), color="white").save(figure, dpi=(300, 300))
+    source = tmp_path / "analysis.py"
+    source.write_text(
+        "ax.errorbar([0.0], [md], yerr=np.array([[el], [eh]]))\n"
+        "ax.set_xlabel('Mean Difference (Treatment - Control)')\n",
         encoding="utf-8",
     )
     computation = _display_computation(tmp_path, figure)

@@ -229,9 +229,18 @@ def _known_effect_matches_reference(value: dict) -> bool:
         for path in paths:
             current: object = value
             for component in path.split("."):
-                if not isinstance(current, dict) or component not in current:
+                if isinstance(current, dict) and component in current:
+                    current = current[component]
+                    continue
+                if (
+                    isinstance(current, list)
+                    and component.isdigit()
+                    and int(component) < len(current)
+                ):
+                    current = current[int(component)]
+                    continue
+                else:
                     break
-                current = current[component]
             else:
                 if isinstance(current, (int, float)) and not isinstance(current, bool):
                     return float(current)
@@ -310,12 +319,20 @@ def _known_effect_matches_reference(value: dict) -> bool:
             38.0,
         ),
         (
-            ("primary.ci_95_lower", "primary.ci_95_percent.lower"),
+            (
+                "primary.ci_95_lower",
+                "primary.ci_95_percent.lower",
+                "primary.confidence_interval_95.0",
+            ),
             ("ci_95_lower", "ci_lower_95"),
             4.071144254485707,
         ),
         (
-            ("primary.ci_95_upper", "primary.ci_95_percent.upper"),
+            (
+                "primary.ci_95_upper",
+                "primary.ci_95_percent.upper",
+                "primary.confidence_interval_95.1",
+            ),
             ("ci_95_upper", "ci_upper_95"),
             5.928855745514293,
         ),
@@ -323,6 +340,7 @@ def _known_effect_matches_reference(value: dict) -> bool:
             (
                 "primary.pooled_sd",
                 "descriptive_statistics.treatment.sd_change",
+                "effect_size.pooled_sd",
             ),
             ("pooled_sd",),
             1.4509525002200232,
@@ -331,12 +349,17 @@ def _known_effect_matches_reference(value: dict) -> bool:
             (
                 "primary.hedges_g_correction_factor_J",
                 "primary.hedges_g.j_correction_factor",
+                "effect_size.j_correction_factor",
             ),
             ("hedges_g_correction_J", "j_correction", "J_correction"),
             0.9801324503311258,
         ),
         (
-            ("primary.hedges_g", "primary.hedges_g.value"),
+            (
+                "primary.hedges_g",
+                "primary.hedges_g.value",
+                "effect_size.hedges_g",
+            ),
             ("hedges_g",),
             3.3775483697174717,
         ),

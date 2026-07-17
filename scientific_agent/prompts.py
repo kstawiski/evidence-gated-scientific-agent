@@ -532,6 +532,10 @@ or a bibliography-only citation into the final evidence ledger.
 Do not claim that a statistical method is robust to assumption violations unless
 that general methodological assertion cites a retrieved literature source; without
 one, retain the concern as a limitation rather than presenting reassurance.
+Welch's adjustment addresses unequal variances; it does not itself correct for or
+"accommodate" non-normality. Never use Welch as reassurance after a normality
+diagnostic. Retain the departure as a limitation or report a separately executed,
+appropriately scoped robustness analysis.
 Never say that similar primary and adjusted estimates prove robustness, stability,
 absence of confounding, algorithmic equivalence, or pipeline validity. State the
 observed estimates and bounded comparison. A nonsignificant Shapiro-Wilk or Levene
@@ -642,6 +646,9 @@ not proof that assumptions are met. Similar primary and adjusted estimates suppo
 a bounded numerical comparison, not absence of confounding, algorithmic
 equivalence, pipeline validity, robustness, or stability. Block those stronger
 interpretations unless separately and directly established by appropriate evidence.
+Explicitly block wording that says Welch's test or procedure accommodates, handles,
+or remains applicable merely because of a detected departure from normality:
+Welch's correction concerns unequal variances, not non-normality.
 For group plots with error bars and a between-group contrast, verify from the
 machine-readable result that every group-centered interval is based on that
 group's own uncertainty and that the contrast interval is plotted only once on a

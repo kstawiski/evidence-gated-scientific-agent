@@ -608,6 +608,16 @@ _ASSUMPTION_ACCEPTANCE_LANGUAGE = re.compile(
     r"\b(?:shapiro|levene|normality|homoscedasticity|equal[- ]variance)\b",
     re.IGNORECASE,
 )
+_WELCH_NORMALITY_OVERCLAIM = re.compile(
+    r"\b(?:welch(?:'s)?(?:\s+(?:t[- ]?test|procedure|test))?).{0,140}"
+    r"\b(?:accommodat(?:e[sd]?|ing)|account(?:s|ed|ing)?\s+for|correct(?:s|ed|ing)?\s+for|"
+    r"handle(?:s|d|ing)?|remain(?:s|ed)?\s+applicable|robust)\b.{0,100}"
+    r"\b(?:non[- ]?normal(?:ity)?|normality|gaussian)\b|"
+    r"\b(?:non[- ]?normal(?:ity)?|normality|gaussian)\b.{0,140}"
+    r"\b(?:welch(?:'s)?(?:\s+(?:t[- ]?test|procedure|test))?).{0,100}"
+    r"\b(?:accommodat(?:e[sd]?|ing)|handle(?:s|d|ing)?|remain(?:s|ed)?\s+applicable|robust)\b",
+    re.IGNORECASE,
+)
 
 
 def _is_report_output(path: Path, directory: str) -> bool:
@@ -1811,6 +1821,19 @@ def validate_report(
                     "that an assumption is met. State that the diagnostic did not "
                     "detect a departure, report its limited power, and retain the "
                     "relevant assumption as a limitation."
+                ),
+            )
+        )
+    if _WELCH_NORMALITY_OVERCLAIM.search(report_text):
+        findings.append(
+            LintFinding(
+                code="welch_normality_overclaim",
+                location="report",
+                message=(
+                    "Welch's adjustment addresses unequal variances, not departure "
+                    "from normality. Remove claims that Welch itself accommodates "
+                    "non-normality; retain the diagnostic as a limitation or support "
+                    "a separately scoped robustness analysis with direct evidence."
                 ),
             )
         )

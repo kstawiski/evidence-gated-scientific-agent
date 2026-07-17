@@ -2147,6 +2147,40 @@ def test_sensitivity_and_diagnostic_nonrejection_are_not_proof():
     assert "diagnostic_nonrejection_overclaim" in codes
 
 
+def test_welch_does_not_excuse_detected_nonnormality():
+    report = article_report(
+        discussion=(
+            "Normality diagnostics indicated mild departures from Gaussian "
+            "assumptions, which the Welch procedure accommodates."
+        ),
+        limitations=[
+            "The change scores were non-normal, though Welch's test remains applicable."
+        ],
+    )
+
+    validation = validate_report(report)
+
+    assert "welch_normality_overclaim" in {
+        finding.code for finding in validation.findings
+    }
+
+
+def test_welch_variance_scope_and_nonnormality_limitation_are_valid():
+    report = article_report(
+        methods=["Welch's test was used to avoid assuming equal variances."],
+        limitations=[
+            "The change-score distributions departed from normality; no separate "
+            "robustness analysis was performed."
+        ],
+    )
+
+    validation = validate_report(report)
+
+    assert "welch_normality_overclaim" not in {
+        finding.code for finding in validation.findings
+    }
+
+
 def _display_computation(tmp_path, artifact_path):
     artifact = ArtifactRef(
         path=str(artifact_path),

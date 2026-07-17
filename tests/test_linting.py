@@ -1299,6 +1299,22 @@ def test_report_validator_rejects_unqualified_robust_association():
     }
 
 
+def test_report_validator_rejects_unqualified_robust_mean_difference():
+    report = article_report(
+        results=(
+            "No sensitivity analysis was performed. These results demonstrate a "
+            "robust and precisely estimated mean difference under the parametric "
+            "framework."
+        )
+    )
+
+    validation = validate_report(report)
+
+    assert "unqualified_result_robustness" in {
+        finding.code for finding in validation.findings
+    }
+
+
 def test_report_validator_rejects_balance_sensitivity_and_uniformity_overclaims():
     report = article_report(
         discussion=(

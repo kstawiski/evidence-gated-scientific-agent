@@ -534,9 +534,11 @@ _BALANCED_DESIGN_REASSURANCE = re.compile(
     re.IGNORECASE,
 )
 _UNQUALIFIED_RESULT_ROBUSTNESS = re.compile(
-    r"\b(?:analysis|association|contrast|estimate|finding|result)s?\b.{0,80}"
+    r"\b(?:analysis|association|comparison|contrast|difference|estimate|finding|"
+    r"result|separation)s?\b.{0,80}"
     r"\b(?:is|are|was|were)\s+(?:statistically\s+)?robust\b|"
-    r"\brobust\b.{0,50}\b(?:analysis|association|contrast|estimate|finding|result)s?\b",
+    r"\brobust\b.{0,50}\b(?:analysis|association|comparison|contrast|difference|"
+    r"estimate|finding|result|separation)s?\b",
     re.IGNORECASE,
 )
 _GROUP_MEAN_UNIFORMITY_OVERCLAIM = re.compile(

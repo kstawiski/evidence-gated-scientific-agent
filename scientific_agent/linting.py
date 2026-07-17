@@ -1541,11 +1541,7 @@ def _figure_source_semantic_findings(
                 )
 
             xerr_expression = next(
-                (
-                    keyword.value
-                    for keyword in node.keywords
-                    if keyword.arg == "xerr"
-                ),
+                (keyword.value for keyword in node.keywords if keyword.arg == "xerr"),
                 None,
             )
             y_names = {
@@ -1553,11 +1549,15 @@ def _figure_source_semantic_findings(
                 for child in ast.walk(node.args[1])
                 if isinstance(child, ast.Name)
             }
-            xerr_names = {
-                child.id
-                for child in ast.walk(xerr_expression)
-                if isinstance(child, ast.Name)
-            } if xerr_expression is not None else set()
+            xerr_names = (
+                {
+                    child.id
+                    for child in ast.walk(xerr_expression)
+                    if isinstance(child, ast.Name)
+                }
+                if xerr_expression is not None
+                else set()
+            )
             transposed_interval = bool(y_names & xerr_names)
             if is_zero_position(node.args[0]) and (
                 contains_effect_estimate(node.args[1]) or transposed_interval

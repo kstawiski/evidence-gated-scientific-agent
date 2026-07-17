@@ -28,6 +28,7 @@ def test_researcher_forbids_mixed_effect_scales_and_zero_rounded_p_values():
     assert "dir.create(dirname(target), recursive=TRUE" in RESEARCHER
     assert "Never reconstruct, hand-copy, or hard-code subject-level" in RESEARCHER
     assert "not at a placeholder coordinate plus a text label" in RESEARCHER
+    assert "never copy a pooled or\nwhole-cohort diagnostic" in RESEARCHER
     assert "cross-check every reported test statistic" in REPORT_AUDITOR
     assert "horizontal versus\nvertical bars" in DISPLAY_AUDITOR
     assert "zero-spread group alongside a nonzero reported\nSD" in DISPLAY_AUDITOR
@@ -175,6 +176,7 @@ def test_display_auditor_requires_explicit_per_figure_layout_clearance():
     assert "display-reviewed:<display_id>" in DISPLAY_AUDITOR
     assert "visual-clearance:<display_id>:top-text" in DISPLAY_AUDITOR
     assert "visual-clearance:<display_id>:legend-data" in DISPLAY_AUDITOR
+    assert "visual-clearance:<display_id>:annotation-data" in DISPLAY_AUDITOR
     assert "primary Qwen agent never receives raster images" in DISPLAY_AUDITOR
     assert "A bare pass" in DISPLAY_AUDITOR
 

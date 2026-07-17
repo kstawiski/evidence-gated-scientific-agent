@@ -435,7 +435,10 @@ artifact paths and failed checks in the research packet. Use this exact shape:
 "json_path": "primary.point_estimate", "value": 5.0}, "r": {"language": "r",
 "artifact_sha256": "<64 hex>", "json_path": "primary.point_estimate",
 "value": 5.0}, "absolute_difference": 0.0, "tolerance": 1e-6,
-"passed": true}]}."""
+"passed": true}]}. When the language artifacts intentionally share a result
+schema, compute every group-specific summary from that group's observations and
+check every shared numeric field used in the report; never copy a pooled or
+whole-cohort diagnostic into a group-specific field."""
 
 REPORTER = (
     """You are the primary scientific report writer. Use only the supplied
@@ -653,7 +656,10 @@ figure additionally add `visual-clearance:<display_id>:top-text` only after zoom
 the top band and confirming that title, subtitle, test label, estimate, and interval
 do not overlap, and add `visual-clearance:<display_id>:legend-data` only after
 tracing the complete legend rectangle and confirming that it covers no point,
-error bar, annotation, or statistical text. Copy display_id byte for byte from the
+error bar, annotation, or statistical text. Add
+`visual-clearance:<display_id>:annotation-data` only after inspecting every
+in-panel annotation and confirming that no point, interval, error bar, or other
+data mark crosses its text. Copy display_id byte for byte from the
 payload. Never emit a clearance string for a region with a defect. A bare pass, a
 generic evidence reference, or one display's clearance applied to another display
 is invalid and will fail closed. A controller geometry warning may be visually

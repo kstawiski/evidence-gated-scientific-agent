@@ -392,6 +392,13 @@ def _high_priority_layout_questions():
             },
             "question": "Does the legend cover data or annotations?",
         },
+        "annotation_data_clearance": {
+            "required": True,
+            "candidate_count": 1,
+            "priority": "high",
+            "examples": [],
+            "question": "Does plotted geometry cross annotation text?",
+        },
     }
 
 
@@ -2314,6 +2321,7 @@ async def test_bare_gemma_display_pass_fails_closed_and_preserves_raw_output(
         "display-reviewed:effect-figure",
         "visual-clearance:effect-figure:top-text",
         "visual-clearance:effect-figure:legend-data",
+        "visual-clearance:effect-figure:annotation-data",
     ]
     raw = json.loads(
         (tmp_path / "live" / "gemma_display_batch_001_raw.json").read_text()
@@ -2379,6 +2387,7 @@ async def test_gemma_can_visually_clear_layout_warning_without_forced_repair(
         "display-reviewed:effect-figure",
         "visual-clearance:effect-figure:top-text",
         "visual-clearance:effect-figure:legend-data",
+        "visual-clearance:effect-figure:annotation-data",
     ]
 
 

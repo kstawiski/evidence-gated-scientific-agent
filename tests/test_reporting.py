@@ -8,6 +8,7 @@ from scientific_agent.provenance import sha256_file
 from scientific_agent.reporting import (
     _figure_layout_review_questions,
     _parse_tesseract_tsv,
+    figure_annotation_overlap_candidates,
     inspect_figure,
     materialize_displays,
     prepare_display_audit,
@@ -256,8 +257,83 @@ def test_layout_review_question_can_remain_routine_without_deciding_pixels(
     assert questions["top_text_clearance"]["candidate_overlap_count"] == 0
     assert questions["top_text_clearance"]["priority"] == "routine"
     assert questions["legend_data_clearance"]["candidate"]["priority"] == "routine"
+    assert questions["annotation_data_clearance"]["priority"] == "routine"
     assert questions["top_text_clearance"]["required"] is True
     assert questions["legend_data_clearance"]["required"] is True
+    assert questions["annotation_data_clearance"]["required"] is True
+
+
+def test_colored_mark_crossing_annotation_is_a_deterministic_candidate(
+    tmp_path: Path, monkeypatch
+):
+    report, computation = _fixture(tmp_path)
+    figure = Path(report.displays[0].artifact_path)
+    image = Image.open(figure).convert("RGB")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((345, 160, 355, 215), fill=(220, 90, 45))
+    image.save(figure)
+    computation.artifacts[0].sha256 = sha256_file(figure)
+    ocr = {
+        "available": True,
+        "text": "Estimate control interval Hedges 4.071",
+        "words": [
+            {
+                "text": "Estimate",
+                "confidence": 96,
+                "left": 80,
+                "top": 30,
+                "width": 90,
+                "height": 20,
+            },
+            {
+                "text": "Control",
+                "confidence": 96,
+                "left": 190,
+                "top": 30,
+                "width": 80,
+                "height": 20,
+            },
+            {
+                "text": "Interval",
+                "confidence": 96,
+                "left": 290,
+                "top": 30,
+                "width": 85,
+                "height": 20,
+            },
+            {
+                "text": "Hedges",
+                "confidence": 96,
+                "left": 395,
+                "top": 30,
+                "width": 80,
+                "height": 20,
+            },
+            {
+                "text": "4.071",
+                "confidence": 82,
+                "left": 300,
+                "top": 155,
+                "width": 110,
+                "height": 60,
+            },
+        ],
+    }
+
+    candidates = figure_annotation_overlap_candidates(
+        figure, ocr, width=640, height=400
+    )
+    assert candidates[0]["text"] == "4.071"
+    assert candidates[0]["height_vs_median"] == 3.0
+    assert candidates[0]["chromatic_pixel_fraction"] >= 0.02
+
+    monkeypatch.setattr(
+        "scientific_agent.linting.extract_figure_ocr", lambda _path: ocr
+    )
+    validation = validate_report(report, computation=computation)
+    assert "figure_annotation_data_overlap" in {
+        finding.code for finding in validation.findings
+    }
 
 
 def test_decompression_bomb_is_reported_as_invalid_figure(tmp_path, monkeypatch):

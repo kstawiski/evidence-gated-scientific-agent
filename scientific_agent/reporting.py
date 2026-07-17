@@ -10,6 +10,7 @@ import mimetypes
 import os
 import re
 import shutil
+import statistics
 import subprocess
 import urllib.request
 import uuid
@@ -388,6 +389,12 @@ def _figure_layout_review_questions(
     overlaps.sort(
         key=lambda item: item["overlap_fraction_of_smaller_box"], reverse=True
     )
+    annotation_overlap_candidates = figure_annotation_overlap_candidates(
+        path,
+        ocr,
+        width=width,
+        height=height,
+    )
 
     cue_words = []
     for word in words:
@@ -466,7 +473,123 @@ def _figure_layout_review_questions(
                 "any data point, error bar, annotation, or statistical text?"
             ),
         },
+        "annotation_data_clearance": {
+            "required": True,
+            "candidate_count": len(annotation_overlap_candidates),
+            "priority": "high" if annotation_overlap_candidates else "routine",
+            "examples": annotation_overlap_candidates[:MAX_LAYOUT_OVERLAP_EXAMPLES],
+            "question": (
+                "Inspect every in-panel annotation at native detail: does any point, "
+                "confidence interval, error bar, or other data mark cross its text?"
+            ),
+        },
     }
+
+
+def figure_annotation_overlap_candidates(
+    path: Path,
+    ocr: dict[str, Any],
+    *,
+    width: int,
+    height: int,
+) -> list[dict[str, Any]]:
+    """Detect high-confidence colored marks merged into horizontal OCR words.
+
+    Tesseract commonly expands a word box across adjacent lines when a plotted
+    point or interval crosses annotation text. Rotated axis labels are excluded,
+    and a candidate must also contain a material fraction of chromatic pixels.
+    The result is deliberately narrow: ordinary OCR uncertainty remains Gemma's
+    responsibility, while this reproducible geometry anomaly fails closed.
+    """
+
+    horizontal: list[dict[str, Any]] = []
+    for raw in ocr.get("words", []) if isinstance(ocr, dict) else []:
+        text = str(raw.get("text") or "").strip()[:80]
+        if not re.search(r"[A-Za-z0-9]{2,}", text):
+            continue
+        try:
+            left = max(0, int(raw["left"]))
+            top = max(0, int(raw["top"]))
+            word_width = max(0, int(raw["width"]))
+            word_height = max(0, int(raw["height"]))
+            confidence = float(raw.get("confidence", -1))
+        except (KeyError, TypeError, ValueError):
+            continue
+        right = min(width, left + word_width)
+        bottom = min(height, top + word_height)
+        word_width = right - left
+        word_height = bottom - top
+        if (
+            confidence < 50
+            or word_width <= 0
+            or word_height <= 0
+            or word_width / word_height < 0.75
+            or word_height > height * 0.16
+        ):
+            continue
+        horizontal.append(
+            {
+                "text": text,
+                "confidence": round(confidence, 1),
+                "left": left,
+                "top": top,
+                "right": right,
+                "bottom": bottom,
+                "width": word_width,
+                "height": word_height,
+            }
+        )
+    if len(horizontal) < 4:
+        return []
+    reference_heights = [
+        word["height"] for word in horizontal if word["height"] <= height * 0.08
+    ]
+    if len(reference_heights) < 3:
+        return []
+    median_height = float(statistics.median(reference_heights))
+    minimum_height = max(median_height * 2.35, height * 0.045)
+    candidates: list[dict[str, Any]] = []
+    try:
+        with Image.open(path) as image:
+            raster = image.convert("RGB")
+            for word in horizontal:
+                if word["height"] < minimum_height:
+                    continue
+                sample = raster.crop(
+                    (word["left"], word["top"], word["right"], word["bottom"])
+                )
+                pixels = list(sample.get_flattened_data())
+                if not pixels:
+                    continue
+                chromatic_fraction = sum(
+                    max(pixel) - min(pixel) >= 40 for pixel in pixels
+                ) / len(pixels)
+                if chromatic_fraction < 0.02:
+                    continue
+                candidates.append(
+                    {
+                        "text": word["text"],
+                        "confidence": word["confidence"],
+                        "height_vs_median": round(word["height"] / median_height, 2),
+                        "chromatic_pixel_fraction": round(chromatic_fraction, 4),
+                        "box_fraction": [
+                            round(word["left"] / width, 4),
+                            round(word["top"] / height, 4),
+                            round(word["right"] / width, 4),
+                            round(word["bottom"] / height, 4),
+                        ],
+                    }
+                )
+    except (OSError, ValueError, Image.DecompressionBombError):
+        return []
+    candidates.sort(
+        key=lambda item: (
+            item["height_vs_median"],
+            item["chromatic_pixel_fraction"],
+        ),
+        reverse=True,
+    )
+    return candidates
 
 
 def read_table_preview(

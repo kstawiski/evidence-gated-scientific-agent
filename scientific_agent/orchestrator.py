@@ -1721,6 +1721,7 @@ def _required_display_clearance_refs(display_inputs: list[dict]) -> list[str]:
                 [
                     f"visual-clearance:{display_id}:top-text",
                     f"visual-clearance:{display_id}:legend-data",
+                    f"visual-clearance:{display_id}:annotation-data",
                 ]
             )
     return required
@@ -1744,6 +1745,7 @@ def _enforce_display_clearance_refs(
                 [
                     f"visual-clearance:{display_id}:top-text",
                     f"visual-clearance:{display_id}:legend-data",
+                    f"visual-clearance:{display_id}:annotation-data",
                 ]
             )
         missing = [value for value in required if value not in present]
@@ -1813,6 +1815,11 @@ def _display_provenance_summary(
             if isinstance(legend_clearance.get("candidate"), dict)
             else {}
         )
+        annotation_clearance = (
+            layout_questions.get("annotation_data_clearance")
+            if isinstance(layout_questions.get("annotation_data_clearance"), dict)
+            else {}
+        )
         figure_text_inputs.append(
             {
                 "display_id": item["display_id"],
@@ -1835,6 +1842,9 @@ def _display_provenance_summary(
                     top_clearance.get("candidate_overlap_count_in_top_22_percent", 0)
                 ),
                 "legend_candidate_priority": legend_candidate.get("priority"),
+                "annotation_data_overlap_candidates": int(
+                    annotation_clearance.get("candidate_count", 0)
+                ),
             }
         )
     table_previews = [

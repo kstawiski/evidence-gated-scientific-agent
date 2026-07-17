@@ -21,6 +21,7 @@ from .reporting import (
     caption_has_number_prefix,
     extract_figure_ocr,
     excessive_table_precision,
+    figure_annotation_overlap_candidates,
     inspect_figure,
     logical_report_output_key,
     read_table_preview,
@@ -2547,6 +2548,33 @@ def validate_report(
                         )
                     )
                 figure_ocr = extract_figure_ocr(artifact_path)
+                annotation_overlap = figure_annotation_overlap_candidates(
+                    artifact_path,
+                    figure_ocr,
+                    width=int(figure_metadata["width"]),
+                    height=int(figure_metadata["height"]),
+                )
+                if annotation_overlap:
+                    examples = "; ".join(
+                        (
+                            f"{item['text']!r} box is "
+                            f"{item['height_vs_median']:.2f}x the median text height "
+                            f"with {item['chromatic_pixel_fraction']:.1%} chromatic pixels"
+                        )
+                        for item in annotation_overlap[:3]
+                    )
+                    findings.append(
+                        LintFinding(
+                            code="figure_annotation_data_overlap",
+                            location=location,
+                            message=(
+                                "Rendered OCR/raster geometry indicates that a colored "
+                                "data mark or interval crosses annotation text. Move the "
+                                "annotation away from the plotted geometry and regenerate "
+                                f"the raster. Candidates: {examples}"
+                            ),
+                        )
+                    )
                 for code, message in _figure_ocr_semantic_findings(
                     figure_ocr, machine_numbers
                 ):

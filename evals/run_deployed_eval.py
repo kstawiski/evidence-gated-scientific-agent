@@ -219,34 +219,63 @@ def _language_result(
 
 
 def _known_effect_matches_reference(value: dict) -> bool:
-    expected = {
-        ("n_treatment", "treatment_n"): 20.0,
-        ("n_control", "control_n"): 20.0,
-        ("treatment_mean_change", "mean_change_treatment"): 5.0,
-        ("control_mean_change", "mean_change_control"): 0.0,
+    def metric(paths: tuple[str, ...], aliases: tuple[str, ...]) -> float:
+        for path in paths:
+            current: object = value
+            for component in path.split("."):
+                if not isinstance(current, dict) or component not in current:
+                    break
+                current = current[component]
+            else:
+                if isinstance(current, (int, float)) and not isinstance(current, bool):
+                    return float(current)
+        return _metric(value, *aliases)
+
+    expected = [
+        (("study_design.n_treatment",), ("n_treatment", "treatment_n"), 20.0),
+        (("study_design.n_control",), ("n_control", "control_n"), 20.0),
         (
-            "mean_difference",
-            "mean_difference_treatment_minus_control",
-        ): 5.0,
-        ("welch_t_statistic", "t_statistic"): 10.897247358851683,
-        ("degrees_of_freedom", "welch_df", "df_welch"): 38.0,
-        ("ci_95_lower", "ci_lower_95"): 4.071144254485707,
-        ("ci_95_upper", "ci_upper_95"): 5.928855745514293,
-        ("pooled_sd",): 1.4509525002200232,
+            ("group_summaries.treatment.mean_change",),
+            ("treatment_mean_change", "mean_change_treatment"),
+            5.0,
+        ),
         (
-            "hedges_g_correction_J",
-            "j_correction",
-            "J_correction",
-        ): 0.9801324503311258,
-        ("hedges_g",): 3.3775483697174717,
-    }
+            ("group_summaries.control.mean_change",),
+            ("control_mean_change", "mean_change_control"),
+            0.0,
+        ),
+        (
+            ("primary.point_estimate",),
+            ("mean_difference", "mean_difference_treatment_minus_control"),
+            5.0,
+        ),
+        (
+            ("primary.welch_t_statistic",),
+            ("welch_t_statistic", "t_statistic"),
+            10.897247358851683,
+        ),
+        (
+            ("primary.degrees_of_freedom",),
+            ("degrees_of_freedom", "welch_df", "df_welch"),
+            38.0,
+        ),
+        (("primary.ci_95_lower",), ("ci_95_lower", "ci_lower_95"), 4.071144254485707),
+        (("primary.ci_95_upper",), ("ci_95_upper", "ci_upper_95"), 5.928855745514293),
+        (("primary.pooled_sd",), ("pooled_sd",), 1.4509525002200232),
+        (
+            ("primary.hedges_g_correction_factor_J",),
+            ("hedges_g_correction_J", "j_correction", "J_correction"),
+            0.9801324503311258,
+        ),
+        (("primary.hedges_g",), ("hedges_g",), 3.3775483697174717),
+    ]
     if not all(
-        math.isclose(_metric(value, *names), target, rel_tol=1e-9, abs_tol=1e-6)
-        for names, target in expected.items()
+        math.isclose(metric(paths, aliases), target, rel_tol=1e-9, abs_tol=1e-6)
+        for paths, aliases, target in expected
     ):
         return False
     return math.isclose(
-        _metric(value, "p_value", "p_value_two_sided"),
+        metric(("primary.p_value",), ("p_value", "p_value_two_sided")),
         2.971749478841818e-13,
         rel_tol=1e-6,
         abs_tol=1e-18,

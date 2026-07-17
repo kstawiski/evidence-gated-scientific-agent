@@ -54,10 +54,14 @@ def test_researcher_documents_matplotlib_hlines_return_type():
     assert "cross-check every reported test statistic" in REPORT_AUDITOR
     assert "horizontal versus\nvertical bars" in DISPLAY_AUDITOR
     assert "zero-spread group alongside a nonzero reported\nSD" in DISPLAY_AUDITOR
-    assert "must never be shifted or duplicated\naround both group means" in (
+    assert "must never be shifted or duplicated around\nboth group means" in (
         DISPLAY_AUDITOR
     )
-    assert "distinct effect-estimate axis or\npanel" in RESEARCHER
+    assert "Do not use `twinx()`, `twiny()`" in RESEARCHER
+    assert "separate, plainly labeled effect-estimate panel" in RESEARCHER
+    assert "Treat a twin/secondary axis over the raw-data panel as blocking" in (
+        DISPLAY_AUDITOR
+    )
     assert "jitter only the categorical position coordinate" in RESEARCHER
     assert "without `openssl`, `digest`" in RESEARCHER
     assert "shifted or duplicated contrast interval" in REPORT_AUDITOR

@@ -285,6 +285,7 @@ def _known_effect_matches_reference(value: dict) -> bool:
         (
             (
                 "group_summaries.treatment.mean_change",
+                "group_summaries.treatment.change_mean",
                 "group_descriptives.treatment.mean_change",
                 "descriptive_statistics.treatment.mean_change",
             ),
@@ -294,6 +295,7 @@ def _known_effect_matches_reference(value: dict) -> bool:
         (
             (
                 "group_summaries.control.mean_change",
+                "group_summaries.control.change_mean",
                 "group_descriptives.control.mean_change",
                 "descriptive_statistics.control.mean_change",
             ),

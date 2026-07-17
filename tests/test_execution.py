@@ -40,6 +40,20 @@ def test_python_static_preflight_rejects_invalid_errorbar_arguments():
     )
 
 
+def test_python_static_preflight_rejects_secondary_scientific_axes():
+    for code in (
+        "effect_ax = raw_ax.twinx()",
+        "effect_ax = raw_ax.twiny()",
+        "effect_ax = raw_ax.secondary_xaxis('top')",
+        "effect_ax = raw_ax.secondary_yaxis('right')",
+    ):
+        violations = _python_static_violations(code)
+        assert len(violations) == 1
+        assert "separate labeled panel" in violations[0]
+
+    assert _python_static_violations("fig, axes = plt.subplots(1, 2)") == []
+
+
 def test_prior_reference_preflight_requires_current_successful_execution():
     code = "open('/prior/exec-002/output/results.json').read()"
 

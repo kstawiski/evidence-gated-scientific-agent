@@ -42,6 +42,17 @@ def _python_static_violations(code: str) -> list[str]:
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
+        if isinstance(node.func, ast.Attribute) and node.func.attr in {
+            "twinx",
+            "twiny",
+            "secondary_xaxis",
+            "secondary_yaxis",
+        }:
+            violations.add(
+                "Scientific display preflight rejects secondary/twin axes; "
+                "place the contrast or differently scaled estimand in a separate "
+                "labeled panel"
+            )
         if not isinstance(node.func, ast.Attribute) or node.func.attr != "errorbar":
             continue
         keywords = {item.arg: item.value for item in node.keywords if item.arg}

@@ -421,6 +421,11 @@ consistent; do not hand-edit Welch-Satterthwaite degrees of freedom. For figures
 avoid version-fragile Matplotlib calls: label boxplots with `tick_labels` (or set
 ticks after plotting), and pass singleton asymmetric error bars as shape `(2, 1)`,
 for example `xerr=[[estimate-low], [high-estimate]]`.
+Do not use `twinx()`, `twiny()`, `secondary_xaxis()`, or `secondary_yaxis()` in a
+scientific display. Put a between-group contrast and its confidence interval in a
+separate, plainly labeled effect-estimate panel rather than overlaying it on raw
+group data. Keep estimate/CI/p-value annotations outside the data marks and reject
+the render yourself if any bracket, interval, label, or annotation overlaps.
 `Axes.errorbar()` accepts `linewidth` or `elinewidth`, never the scatter-style
 `linewidths` keyword. `Axes.plot()` returns `Line2D` objects; inspect their
 coordinates with `get_xdata()` and `get_ydata()`, not `get_xy()`.
@@ -766,8 +771,10 @@ data-fidelity defect even when the mean marker is correct. Explicitly
 verify the statistical meaning of every error bar against the supplied table and
 result summary. In a raw two-group plot, group-centered bars must use each group's
 own sampling uncertainty; a between-group contrast CI must appear once on a
-distinct effect-estimate axis or panel and must never be shifted or duplicated
-around both group means. Fail the display if the caption does not define each
+distinct effect-estimate panel and must never be shifted or duplicated around
+both group means. Treat a twin/secondary axis over the raw-data panel as blocking,
+even if its tick labels are hidden: it creates an ambiguous scale and invites
+annotation/data collisions. Fail the display if the caption does not define each
 interval or if recomputation from the supplied n/SD/result exposes that mismatch.
 Explicitly
 verify every caption claim about mark orientation and geometry (horizontal versus

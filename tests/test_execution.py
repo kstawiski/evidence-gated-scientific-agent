@@ -82,6 +82,48 @@ effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
     )
 
 
+def test_python_static_preflight_rejects_clipped_effect_null_reference():
+    violations = _python_static_violations(
+        """
+effect_ax.axvline(x=0)
+effect_ax.set_xlim(ci_lower - 1, ci_upper + 1)
+effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
+"""
+    )
+
+    assert any("clip the intended zero/null reference" in item for item in violations)
+    assert (
+        _python_static_violations(
+            """
+effect_ax.axvline(x=0)
+effect_ax.set_xlim(min(0, ci_lower - 1), max(0, ci_upper + 1))
+effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
+"""
+        )
+        == []
+    )
+
+
+def test_python_static_preflight_rejects_empty_legend():
+    violations = _python_static_violations(
+        """
+effect_ax.plot(mean_difference, 0, 'o')
+effect_ax.legend(loc='lower right')
+"""
+    )
+
+    assert any("legend() has no labeled artists" in item for item in violations)
+    assert (
+        _python_static_violations(
+            """
+effect_ax.plot(mean_difference, 0, 'o', label='Mean difference')
+effect_ax.legend(loc='lower right')
+"""
+        )
+        == []
+    )
+
+
 def test_python_static_preflight_rejects_secondary_scientific_axes():
     for code in (
         "effect_ax = raw_ax.twinx()",

@@ -1,0 +1,52 @@
+{
+  "case": "known-effect",
+  "release_candidate": "v0.4.1",
+  "deployment_commit": "bf8dec3c636d0c99c6ec8bc71f71b861d37a04dc",
+  "deployment_image_digest": "sha256:fca610187d4073c750af45d2f68b1591c8a8633734f342f71ccb8335026f80df",
+  "workspace_id": "f171e874-ed45-4643-94f7-7036b4fbdda8",
+  "run_id": "da50903b-48b1-4a46-8e79-4205ad278a49",
+  "started_at": "2026-07-17T19:05:51.809474+00:00",
+  "finished_at": "2026-07-17T20:07:56.388418+00:00",
+  "terminal_status": "supported",
+  "evaluator_score_before_shape_fix": "16/18",
+  "evaluator_score_after_shape_fix": "18/18",
+  "merit_gate": "failed",
+  "productive_behavior": [
+    "The prespecified plan passed independent audit and deterministic lint without a repair round, and Python and R independently recovered and reconciled the exact planted effect.",
+    "Deterministic validation repeatedly rejected unacquired literature metadata, stale or unregistered table artifacts, and excessive reader-facing precision before allowing independent review.",
+    "The controller converted an incomplete nominal visual pass into an inconclusive review because Gemma omitted a mandatory per-display clearance attestation, then allowed a bounded repair that corrected the initially transposed interval.",
+    "The immutable run rescored 18/18 after the evaluator learned the exact group_statistics and welch_t_test.statistic result schema, demonstrating that the original 16/18 was an evaluator-shape defect rather than a numerical failure."
+  ],
+  "release_blockers": [
+    "The first successful figure labeled x as mean difference while fixing x at zero and plotting the estimate and interval vertically with yerr; the deployed execution preflight and report-source gate admitted that transposed geometry.",
+    "The final repaired figure corrected the interval orientation but set the visible effect-axis range from the confidence bounds alone, clipping the explicitly drawn zero/null reference outside the panel; the final Gemma display review passed it.",
+    "An intermediate repaired raster rendered an empty legend box because legend() was called without a labeled artist; it was superseded later but exposed another missing deterministic display contract.",
+    "The final conclusion called the result a robust association without any separately executed robustness or sensitivity analysis, bypassing the deployed robustness regex and receiving a bare Gemma report pass.",
+    "The deployed evaluator did not recognize group_statistics treatment/control summaries or welch_t_test.statistic even though both bound language artifacts contained the exact reference values."
+  ],
+  "rejected_figures": [
+    {
+      "stage": "initial successful display",
+      "path": "computations/attempt-0/exec-006/output/figures/primary_contrast.png",
+      "sha256": "71536ddb171cb44f9c8609e611f419446eb1ee3b1546c7a56bb4a8d1ac147681",
+      "width": 2970,
+      "height": 1485,
+      "defect": "Transposed estimate and confidence interval on an effect-labeled x-axis."
+    },
+    {
+      "stage": "terminal registered display",
+      "path": "computations/attempt-4/exec-003/output/figures/primary_contrast.png",
+      "sha256": "ea52a6a176c0b6fd835112f9492e2b16e5b6d30b2332358fab31f547a13feaae",
+      "width": 2970,
+      "height": 1545,
+      "defect": "The effect-axis limits exclude zero, so the intended null reference line is not visible."
+    }
+  ],
+  "implemented_repairs": [
+    "Execution preflight, report-source validation, and generation guidance reject an effect-labeled x-axis that fixes x at zero and places the estimate or interval in yerr.",
+    "Execution preflight and generation guidance require explicit inclusion of zero when effect-axis limits accompany a zero/null reference and reject legend() without labeled artists.",
+    "Deterministic prose validation and the report contract now treat robust association as unsupported robustness language alongside robust results, findings, estimates, analyses, and contrasts.",
+    "The known-effect evaluator accepts the exact group_statistics treatment/control paths and welch_t_test.statistic path emitted by this run."
+  ],
+  "disposition": "Rejected despite terminal supported and a rescored 18/18 mechanical result; manual scientific and native-raster review overruled deterministic and Gemma passes, and the observed defects became release-gating regressions."
+}

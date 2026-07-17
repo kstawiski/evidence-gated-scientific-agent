@@ -453,6 +453,9 @@ for example `xerr=[[estimate-low], [high-estimate]]`.
 When an axis is labeled with an effect estimate such as a mean difference, plot
 the estimate on x with `xerr` and use a constant categorical y position. Never
 fix x at zero and put the estimate or its confidence interval on y with `yerr`.
+Keep the scientific null value visible on the effect-estimate axis; when drawing
+a zero reference line, compute explicit axis limits that include zero. Do not call
+`legend()` on an axis with no honestly labeled artists or leave an empty legend box.
 Do not use `twinx()`, `twiny()`, `secondary_xaxis()`, or `secondary_yaxis()` in a
 scientific display. Put a between-group contrast and its confidence interval in a
 separate, plainly labeled effect-estimate panel rather than overlaying it on raw

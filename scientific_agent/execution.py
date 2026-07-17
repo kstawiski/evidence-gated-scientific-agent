@@ -38,6 +38,17 @@ def _python_static_violations(code: str) -> list[str]:
         tree = ast.parse(code)
     except SyntaxError:
         return []
+
+    def is_literal_zero(expression: ast.AST | None) -> bool:
+        if isinstance(expression, (ast.List, ast.Tuple)) and len(expression.elts) == 1:
+            expression = expression.elts[0]
+        return (
+            isinstance(expression, ast.Constant)
+            and isinstance(expression.value, (int, float))
+            and not isinstance(expression.value, bool)
+            and float(expression.value) == 0.0
+        )
+
     violations: set[str] = set()
     effect_x_axes = {
         ast.dump(node.func.value, include_attributes=False)
@@ -54,6 +65,42 @@ def _python_static_violations(code: str) -> list[str]:
             re.IGNORECASE,
         )
     }
+    labeled_artist_axes: set[str] = set()
+    null_reference_axes: set[str] = set()
+    for candidate in ast.walk(tree):
+        if not isinstance(candidate, ast.Call) or not isinstance(
+            candidate.func, ast.Attribute
+        ):
+            continue
+        axis_key = ast.dump(candidate.func.value, include_attributes=False)
+        label = next(
+            (item.value for item in candidate.keywords if item.arg == "label"),
+            None,
+        )
+        if (
+            candidate.func.attr
+            in {"bar", "errorbar", "fill_between", "hlines", "plot", "scatter"}
+            and isinstance(label, ast.Constant)
+            and isinstance(label.value, str)
+            and label.value.strip()
+            and not label.value.lstrip().startswith("_")
+        ):
+            labeled_artist_axes.add(axis_key)
+        if candidate.func.attr == "axvline":
+            x_expression = (
+                candidate.args[0]
+                if candidate.args
+                else next(
+                    (
+                        item.value
+                        for item in candidate.keywords
+                        if item.arg in {"x", "xmin"}
+                    ),
+                    None,
+                )
+            )
+            if is_literal_zero(x_expression):
+                null_reference_axes.add(axis_key)
     for node in ast.walk(tree):
         if not isinstance(node, ast.Call):
             continue
@@ -88,6 +135,37 @@ def _python_static_violations(code: str) -> list[str]:
                     "Scientific categorical axes require unique tick positions; "
                     "duplicate x ticks overlap groups and make the display misleading"
                 )
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "legend":
+            axis_key = ast.dump(node.func.value, include_attributes=False)
+            explicit_handles = bool(node.args) or any(
+                item.arg in {"handles", "labels"} for item in node.keywords
+            )
+            if not explicit_handles and axis_key not in labeled_artist_axes:
+                violations.add(
+                    "Matplotlib legend() has no labeled artists on this axis; omit "
+                    "the empty legend or add an honest label to a plotted artist"
+                )
+        if isinstance(node.func, ast.Attribute) and node.func.attr == "set_xlim":
+            axis_key = ast.dump(node.func.value, include_attributes=False)
+            bound_expressions = list(node.args) + [
+                item.value
+                for item in node.keywords
+                if item.arg in {"left", "right", "xmin", "xmax"}
+            ]
+            explicitly_includes_zero = any(
+                any(is_literal_zero(item) for item in ast.walk(expression))
+                for expression in bound_expressions
+            )
+            if (
+                bound_expressions
+                and axis_key in effect_x_axes
+                and axis_key in null_reference_axes
+                and not explicitly_includes_zero
+            ):
+                violations.add(
+                    "Matplotlib effect-axis limits may clip the intended zero/null "
+                    "reference; include zero explicitly when computing set_xlim()"
+                )
         if not isinstance(node.func, ast.Attribute) or node.func.attr != "errorbar":
             continue
         keywords = {item.arg: item.value for item in node.keywords if item.arg}
@@ -102,12 +180,7 @@ def _python_static_violations(code: str) -> list[str]:
                 and len(x_expression.elts) == 1
             ):
                 x_expression = x_expression.elts[0]
-            x_is_literal_zero = (
-                isinstance(x_expression, ast.Constant)
-                and isinstance(x_expression.value, (int, float))
-                and not isinstance(x_expression.value, bool)
-                and float(x_expression.value) == 0.0
-            )
+            x_is_literal_zero = is_literal_zero(x_expression)
             y_names = {
                 item.id for item in ast.walk(node.args[1]) if isinstance(item, ast.Name)
             }
@@ -129,12 +202,7 @@ def _python_static_violations(code: str) -> list[str]:
                 and len(x_expression.elts) == 1
             ):
                 x_expression = x_expression.elts[0]
-            x_is_literal_zero = (
-                isinstance(x_expression, ast.Constant)
-                and isinstance(x_expression.value, (int, float))
-                and not isinstance(x_expression.value, bool)
-                and float(x_expression.value) == 0.0
-            )
+            x_is_literal_zero = is_literal_zero(x_expression)
             axis_key = ast.dump(node.func.value, include_attributes=False)
             if x_is_literal_zero and axis_key in effect_x_axes:
                 violations.add(

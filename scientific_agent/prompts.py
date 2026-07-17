@@ -531,7 +531,10 @@ After every required analysis language has a successful call with a generated
 artifact, complete any explicitly required cross-language reconciliation before
 writing the research packet. The reconciliation must be a JSON artifact whose
 filename contains reconciliation or crosscheck. Its top-level object must contain
-an all_pass boolean and a non-empty comparisons array. Each comparison must contain
+an all_pass boolean and a non-empty comparisons array. If the task explicitly
+names another required top-level verdict field (for example,
+reconciliation_passed), emit that boolean too with the same value as all_pass;
+never substitute the generic field for a task-required field. Each comparison must contain
 metric, tolerance, absolute_difference, passed, and python/r objects. Each language
 object must contain language, artifact_sha256, json_path, and value. Hash the exact
 successful JSON source artifact, use a dot-delimited JSON path to the compared
@@ -539,7 +542,7 @@ number, and never copy one implementation's value into the other. The controller
 reloads both hashed artifacts and independently recomputes every difference and
 verdict; a bare model-authored all_pass boolean is invalid. Report exact computation
 artifact paths and failed checks in the research packet. Use this exact shape:
-{"all_pass": true, "comparisons": [{"metric": "primary_point_estimate",
+{"all_pass": true, "reconciliation_passed": true, "comparisons": [{"metric": "primary_point_estimate",
 "python": {"language": "python", "artifact_sha256": "<64 hex>",
 "json_path": "primary.point_estimate", "value": 5.0}, "r": {"language": "r",
 "artifact_sha256": "<64 hex>", "json_path": "primary.point_estimate",

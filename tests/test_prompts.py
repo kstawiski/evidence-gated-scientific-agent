@@ -37,6 +37,7 @@ def test_researcher_forbids_mixed_effect_scales_and_zero_rounded_p_values():
     assert "never copy a pooled or\nwhole-cohort diagnostic" in RESEARCHER
     assert "an R validation call must not plot" in RESEARCHER
     assert "independent numeric JSON and reconciliation first" in RESEARCHER
+    assert "never substitute the generic field for a task-required field" in RESEARCHER
     assert "exit successfully without display generation" in RESEARCHER
     assert "never\ncombine the only required Python/R validation result" in RESEARCHER
     assert "candidate_role_labels" in SIMPLE_PLANNER

@@ -612,10 +612,7 @@ def score(
                 )
                 <= 1e-6
                 and _reconciliation_delta(reconciliation, "hedges_g") <= 1e-6
-                and (
-                    reconciliation.get("all_pass") is True
-                    or reconciliation.get("reconciliation_passed") is True
-                )
+                and reconciliation.get("reconciliation_passed") is True
             )
             displays = (detail.get("display_manifest") or {}).get("displays", [])
             checks["figure_generated"] = any(

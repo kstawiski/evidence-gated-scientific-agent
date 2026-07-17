@@ -805,6 +805,7 @@ def test_known_effect_score_reads_nested_run_result_and_checks_fixture():
                     "hedges_g": {"absolute_difference": 1e-14},
                 },
                 "all_pass": True,
+                "reconciliation_passed": True,
             },
             "gemma_display_audit.json": {
                 "verdict": "pass",
@@ -845,6 +846,18 @@ def test_known_effect_score_reads_nested_run_result_and_checks_fixture():
 
     assert result["passed"] is True
     assert result["checks"]["planted_effect_recovered"] is True
+
+    client.values[reconcile_path]["reconciliation_passed"] = False
+    result_without_requested_verdict = score(
+        "known-effect",
+        {"enable_code": True},
+        None,
+        detail,
+        client,
+    )
+    assert (
+        result_without_requested_verdict["checks"]["cross_language_reconciled"] is False
+    )
 
 
 def test_pubmed_fulltext_score_requires_verified_local_markdown_and_pdf():

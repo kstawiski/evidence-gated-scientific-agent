@@ -674,6 +674,40 @@ def test_known_effect_accepts_exact_live_groups_primary_shape():
     assert _known_effect_matches_reference(value) is True
 
 
+def test_known_effect_accepts_exact_live_group_summaries_effect_size_shape():
+    value = {
+        "diagnostics": {
+            "baseline_balance_welch_t_test": {
+                "t_statistic": 0.0,
+                "p_value": 1.0,
+            },
+        },
+        "study_design": {
+            "n_treatment": 20,
+            "n_control": 20,
+        },
+        "group_summaries": {
+            "control": {"n": 20, "mean_change": 0.0},
+            "treatment": {"n": 20, "mean_change": 5.0},
+        },
+        "primary": {
+            "point_estimate": 5.0,
+            "t_statistic": 10.897247358851683,
+            "degrees_of_freedom": 38.0,
+            "p_value": 2.971749478841818e-13,
+            "ci_95_lower": 4.071144254485707,
+            "ci_95_upper": 5.928855745514293,
+        },
+        "effect_size": {
+            "pooled_sd": 1.4509525002200232,
+            "j_correction": 0.9801324503311258,
+            "hedges_g": 3.3775483697174717,
+        },
+    }
+
+    assert _known_effect_matches_reference(value) is True
+
+
 def test_reconciliation_delta_accepts_typed_comparison_records():
     artifact = {
         "comparisons": [

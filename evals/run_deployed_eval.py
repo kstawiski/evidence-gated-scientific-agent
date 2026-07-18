@@ -325,6 +325,7 @@ def _known_effect_matches_reference(value: dict) -> bool:
         ),
         (
             (
+                "primary.t_statistic",
                 "primary.welch_t_statistic",
                 "primary.welch_t_test.t_statistic",
                 "welch_t_test.t_statistic",
@@ -382,6 +383,7 @@ def _known_effect_matches_reference(value: dict) -> bool:
                 "effect_size.hedges_g_correction_factor_J",
                 "effect_size.hedges_correction_J",
                 "effect_size.j_correction_factor",
+                "effect_size.j_correction",
             ),
             (
                 "hedges_g_correction_factor_J",

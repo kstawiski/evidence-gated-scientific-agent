@@ -524,8 +524,9 @@ def _python_static_violations(code: str) -> list[str]:
             violations.add(
                 "Matplotlib errorbar rejects linewidths=; use linewidth= or elinewidth="
             )
-        if len(node.args) >= 2 and "xerr" in keywords:
-            x_expression = node.args[0]
+        x_expression = node.args[0] if node.args else keywords.get("x")
+        y_expression = node.args[1] if len(node.args) >= 2 else keywords.get("y")
+        if x_expression is not None and y_expression is not None and "xerr" in keywords:
             if (
                 isinstance(x_expression, (ast.List, ast.Tuple))
                 and len(x_expression.elts) == 1
@@ -536,7 +537,7 @@ def _python_static_violations(code: str) -> list[str]:
                 == 0.0
             )
             y_names = {
-                item.id for item in ast.walk(node.args[1]) if isinstance(item, ast.Name)
+                item.id for item in ast.walk(y_expression) if isinstance(item, ast.Name)
             }
             xerr_names = {
                 item.id
@@ -549,8 +550,7 @@ def _python_static_violations(code: str) -> list[str]:
                     "the value plotted on y while x is fixed at zero; plot the "
                     "estimate on x and use a constant categorical y position"
                 )
-        if len(node.args) >= 2 and "yerr" in keywords:
-            x_expression = node.args[0]
+        if x_expression is not None and y_expression is not None and "yerr" in keywords:
             if (
                 isinstance(x_expression, (ast.List, ast.Tuple))
                 and len(x_expression.elts) == 1
@@ -568,7 +568,7 @@ def _python_static_violations(code: str) -> list[str]:
                     "yerr; plot the estimate and confidence interval on x with a "
                     "constant categorical y position"
                 )
-        scalar_x = bool(node.args and isinstance(node.args[0], ast.Constant))
+        scalar_x = isinstance(x_expression, ast.Constant)
         if not scalar_x:
             continue
         for name in ("xerr", "yerr"):

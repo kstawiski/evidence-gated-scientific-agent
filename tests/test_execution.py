@@ -81,6 +81,21 @@ effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
 """
     )
     assert any("effect interval is transposed" in item for item in violations)
+    violations = _python_static_violations(
+        """
+y_pos = 0
+mean_diff = primary["mean_difference"]
+ci_low = primary["ci_95_lower"]
+ci_high = primary["ci_95_upper"]
+effect_ax.errorbar(
+    x=[y_pos],
+    y=[mean_diff],
+    xerr=[[mean_diff - ci_low], [ci_high - mean_diff]],
+)
+effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
+"""
+    )
+    assert any("effect interval is transposed" in item for item in violations)
 
 
 def test_python_static_preflight_rejects_y_interval_on_effect_x_axis():

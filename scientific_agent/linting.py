@@ -1597,6 +1597,60 @@ def _figure_source_semantic_findings(
             tree = ast.parse(source_bytes.decode("utf-8"))
         except (OSError, UnicodeDecodeError, SyntaxError):
             continue
+        assignment_candidates: dict[str, list[ast.AST]] = {}
+        for candidate in ast.walk(tree):
+            if not (
+                isinstance(candidate, ast.Assign)
+                and len(candidate.targets) == 1
+                and isinstance(candidate.targets[0], ast.Name)
+            ):
+                continue
+            assignment_candidates.setdefault(candidate.targets[0].id, []).append(
+                candidate.value
+            )
+
+        def exact_numeric_value(
+            expression: ast.AST,
+            before_line: int | None = None,
+            seen_names: frozenset[str] = frozenset(),
+        ) -> float | None:
+            if (
+                isinstance(expression, (ast.List, ast.Tuple))
+                and len(expression.elts) == 1
+            ):
+                expression = expression.elts[0]
+            if (
+                isinstance(expression, ast.Constant)
+                and isinstance(expression.value, (int, float))
+                and not isinstance(expression.value, bool)
+            ):
+                return float(expression.value)
+            if (
+                isinstance(expression, ast.UnaryOp)
+                and isinstance(expression.op, ast.USub)
+                and isinstance(expression.operand, ast.Constant)
+                and isinstance(expression.operand.value, (int, float))
+                and not isinstance(expression.operand.value, bool)
+            ):
+                return -float(expression.operand.value)
+            if isinstance(expression, ast.Name) and expression.id not in seen_names:
+                assignments = [
+                    candidate
+                    for candidate in assignment_candidates.get(expression.id, ())
+                    if before_line is None
+                    or getattr(candidate, "lineno", before_line) < before_line
+                ]
+                if assignments:
+                    latest = max(
+                        assignments, key=lambda item: getattr(item, "lineno", -1)
+                    )
+                    return exact_numeric_value(
+                        latest,
+                        getattr(latest, "lineno", before_line),
+                        seen_names | {expression.id},
+                    )
+            return None
+
         effect_x_axes: set[str] = set()
         for node in ast.walk(tree):
             if not (
@@ -1686,22 +1740,15 @@ def _figure_source_semantic_findings(
                 node.func.attr in {"plot", "errorbar"}
                 and isinstance(node.func.value, ast.Name)
                 and node.func.value.id in effect_x_axes
-                and len(node.args) >= 2
             ):
                 continue
-
-            def is_zero_position(expression: ast.AST) -> bool:
-                if (
-                    isinstance(expression, (ast.List, ast.Tuple))
-                    and len(expression.elts) == 1
-                ):
-                    expression = expression.elts[0]
-                return (
-                    isinstance(expression, ast.Constant)
-                    and isinstance(expression.value, (int, float))
-                    and not isinstance(expression.value, bool)
-                    and float(expression.value) == 0.0
-                )
+            keywords = {
+                keyword.arg: keyword.value for keyword in node.keywords if keyword.arg
+            }
+            x_expression = node.args[0] if node.args else keywords.get("x")
+            y_expression = node.args[1] if len(node.args) >= 2 else keywords.get("y")
+            if x_expression is None or y_expression is None:
+                continue
 
             def contains_effect_estimate(expression: ast.AST) -> bool:
                 return any(
@@ -1718,17 +1765,11 @@ def _figure_source_semantic_findings(
                     if isinstance(child, ast.Name)
                 )
 
-            xerr_expression = next(
-                (keyword.value for keyword in node.keywords if keyword.arg == "xerr"),
-                None,
-            )
-            yerr_expression = next(
-                (keyword.value for keyword in node.keywords if keyword.arg == "yerr"),
-                None,
-            )
+            xerr_expression = keywords.get("xerr")
+            yerr_expression = keywords.get("yerr")
             y_names = {
                 child.id
-                for child in ast.walk(node.args[1])
+                for child in ast.walk(y_expression)
                 if isinstance(child, ast.Name)
             }
             xerr_names = (
@@ -1741,8 +1782,10 @@ def _figure_source_semantic_findings(
                 else set()
             )
             transposed_interval = bool(y_names & xerr_names)
-            if is_zero_position(node.args[0]) and (
-                contains_effect_estimate(node.args[1])
+            if exact_numeric_value(
+                x_expression, getattr(node, "lineno", None)
+            ) == 0.0 and (
+                contains_effect_estimate(y_expression)
                 or transposed_interval
                 or yerr_expression is not None
             ):

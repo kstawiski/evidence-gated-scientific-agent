@@ -1,0 +1,78 @@
+{
+  "case": "known-effect",
+  "release_candidate": "v0.4.1",
+  "deployment_commit": "c24c757e036b8a0409937c474aad99333bc1e7bf",
+  "deployment_image_digest": "sha256:71ac491b1ed6de26eed650fea8852f41d59f90c7aac1737bddfda771bdebf997",
+  "workspace_id": "5cb25947-e1fc-44f3-bae1-be6ec5a6fb77",
+  "run_id": "8e9ec0fb-9b10-4f69-a7b9-e9c9b3952281",
+  "started_at": "2026-07-18T02:19:35.743136+00:00",
+  "finished_at": "2026-07-18T03:01:02.030179+00:00",
+  "terminal_status": "supported",
+  "evaluator_score": "18/18",
+  "merit_gate": "failed",
+  "productive_behavior": [
+    "The independent plan audit and deterministic plan lint passed before execution.",
+    "After one ordinary Python code repair, Python exec-002 and R exec-003 independently recovered the exact planted mean difference, Welch statistic, confidence interval, and Hedges g while recording both sites A and B.",
+    "Successful exec-007 bound the exact language-artifact hashes into reconciliation.json with all_pass and reconciliation_passed true and every checked absolute difference below 1e-6.",
+    "Repair 1 acquired the cited PubMed abstract, removed an unsupported observational classification, corrected inline-citation use, and replaced an excessive-precision table with a rectangular 30-row reader table.",
+    "The immutable run passed final deterministic validation, Gemma report and multimodal display review, and the repository's known-effect scorer at 18/18."
+  ],
+  "release_blockers": [
+    "The effect-interval preflight normalized assigned zero only when x and y were positional arguments. The successful script instead called errorbar(x=[y_pos], y=[md], xerr=...) after y_pos = 0, so the equivalent transposition escaped the execution gate.",
+    "The post-execution figure-source validator had the same positional-only assumption and did not resolve the y_pos assignment, so deterministic report validation also admitted the misleading raster.",
+    "Panel B contains no plotted estimate or confidence interval in its data region: the script placed x at zero, y at the mean difference of 5, then restricted y to -0.5 through 0.5. The visible green point and interval are only the legend handle.",
+    "The registered caption and alt text falsely describe panel B as a forest plot displaying the mean difference and 95% confidence interval.",
+    "Gemma's multimodal audit returned pass with visual-clearance attestations, and the mechanical evaluator scored 18/18, so native raster inspection again overruled every automated verdict."
+  ],
+  "rejected_figure": {
+    "path": "computations/attempt-0/exec-007/output/figures/contrast_plot.png",
+    "sha256": "e733156191760190d94b5c90ba2a78533461cad6bae12f3b4ea5dc6be403c07b",
+    "width": 2970,
+    "height": 1485,
+    "defect": "Panel B shows a null line, annotation, and legend example but no estimate or confidence interval in the plotting region."
+  },
+  "terminal_artifacts": [
+    {
+      "path": "computations/attempt-0/exec-002/output/data/python_results.json",
+      "sha256": "fe8e3ac791b77eb318391f73b19b3189a7684d1d968c47dbbec43f58d1a26a9b"
+    },
+    {
+      "path": "computations/attempt-0/exec-003/output/data/r_results.json",
+      "sha256": "67aded5f118e6d86bb9c3a95ebd4df19d0b47d91fea96241502deea9503c66c5"
+    },
+    {
+      "path": "computations/attempt-0/exec-007/output/data/reconciliation.json",
+      "sha256": "c73476bd0c43d10575b29d77660fc0aea016c9aff5965e0cb22b51f36020f3b4"
+    },
+    {
+      "path": "computations/attempt-1/exec-003/output/tables/summary_table.csv",
+      "sha256": "332b7a5977c5ff2f0ab368a7c3e0bb38b9f38466cfd34023e1b79bfabf7d8258"
+    },
+    {
+      "path": "attempts/attempt-1/scientific_report.json",
+      "sha256": "6600682e9df811265da61e5f5ce08ba866c52ca0a81cb3ed3ab0d52580051dd5"
+    },
+    {
+      "path": "deterministic_validation.json",
+      "sha256": "49fb8eb3f7a3eeae5cf509025b5759003751abf57b629f033cc9ebbb65639151"
+    },
+    {
+      "path": "gemma_review.json",
+      "sha256": "e2647fcd75ef6981d2245023403dc6db003181c9712a18355b1f6a52aa092ea4"
+    },
+    {
+      "path": "gemma_display_audit.json",
+      "sha256": "632858e42ec77f9b02b01403234f9705105312ba6f328ac904c07c2f89c4b9ef"
+    },
+    {
+      "path": "report.md",
+      "sha256": "44acff0ea86f93dd327d455a4f308ceec36a460c3b2d6591987bce66ed47255c"
+    }
+  ],
+  "implemented_repairs": [
+    "Execution preflight now extracts Matplotlib x and y coordinates from either positional arguments or x=/y= keywords before applying assigned-constant and interval-dataflow checks.",
+    "The post-execution figure-source validator now applies the same positional-or-keyword normalization and resolves exact numeric constants through prior assignments.",
+    "Regression tests cover the exact y_pos = 0 plus errorbar(x=[y_pos], y=[mean_diff], xerr=...) syntax while preserving the valid estimate-on-x form."
+  ],
+  "disposition": "Rejected despite terminal supported, final deterministic and independent-review passes, and evaluator 18/18. The numerical analysis, reconciliation, and corrected table are sound, but the registered figure and its caption are materially misleading. Both the pre-execution and post-execution source gates now reject the exact keyword-coordinate transposition."
+}

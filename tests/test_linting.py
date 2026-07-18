@@ -3255,8 +3255,11 @@ def test_figure_rejects_live_transposed_interval_with_short_variable_name(tmp_pa
     Image.new("RGB", (800, 600), color="white").save(figure, dpi=(300, 300))
     source = tmp_path / "analysis.py"
     source.write_text(
+        "y_pos = 0\n"
         "ax.set_xlabel('Treatment - Control\\nDifference in Mean Change')\n"
-        "ax.errorbar([0], [md], xerr=[[md - ci_lo], [ci_hi - md]])\n",
+        "ax.errorbar(\n"
+        "    x=[y_pos], y=[md], xerr=[[md - ci_lo], [ci_hi - md]]\n"
+        ")\n",
         encoding="utf-8",
     )
     computation = _display_computation(tmp_path, figure)

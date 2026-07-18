@@ -915,7 +915,8 @@ def test_active_run_streams_events_and_artifacts_blocks_upload_and_cancels(tmp_p
         ).json()
         for _ in range(100):
             detail = client.get(f"/api/runs/{queued['id']}", auth=auth).json()
-            if detail["provenance_dir"]:
+            artifact_paths = {artifact["path"] for artifact in detail["artifacts"]}
+            if detail["provenance_dir"] and "visible-output.txt" in artifact_paths:
                 break
             time.sleep(0.01)
         assert detail["status"] == "running"

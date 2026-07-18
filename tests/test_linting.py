@@ -191,6 +191,19 @@ def test_plan_linter_rejects_observed_baseline_arm_assignment():
     assert not report.passed
 
 
+def test_plan_linter_accepts_explicit_prohibition_on_order_based_arm_assignment():
+    plan = good_plan()
+    plan.steps[0].methods = [
+        "Never assign control or treatment according to category order."
+    ]
+
+    report = lint_plan(task(), plan)
+
+    assert "arbitrary_semantic_arm_mapping" not in {
+        finding.code for finding in report.findings
+    }
+
+
 def test_plan_linter_rejects_role_mapping_keys_absent_from_input_profile():
     profiled_task = task().model_copy(
         update={
@@ -229,7 +242,9 @@ def test_plan_linter_rejects_role_mapping_keys_absent_from_input_profile():
 
     rejected = lint_plan(profiled_task, plan)
     plan.steps[0].methods = [
-        "Use {'control': 'control', 'treatment': 'treatment'} as the role mapping."
+        "Map labels with {'control': 'control', 'treatment': 'treatment'}. "
+        "Halt if a label requires inference from lexical, alphabetical, numeric, "
+        "row, or category order."
     ]
     accepted = lint_plan(profiled_task, plan)
 
@@ -237,6 +252,9 @@ def test_plan_linter_rejects_role_mapping_keys_absent_from_input_profile():
         finding.code for finding in rejected.findings
     }
     assert "role_mapping_not_grounded_in_input_profile" not in {
+        finding.code for finding in accepted.findings
+    }
+    assert "arbitrary_semantic_arm_mapping" not in {
         finding.code for finding in accepted.findings
     }
 

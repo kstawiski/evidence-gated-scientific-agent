@@ -453,6 +453,13 @@ _ARBITRARY_SEMANTIC_ARM_MAPPING = re.compile(
     r"group size|sample size|missing\w*|effect\w*|response)\b",
     re.IGNORECASE,
 )
+_SEMANTIC_MAPPING_PROHIBITION = re.compile(
+    r"\b(?:never|must\s+not|do\s+not|cannot|can't)\s+"
+    r"(?:\w+\s+){0,3}(?:assign|map|designat|classif|infer)\w*\b"
+    r"|\bwithout\s+(?:\w+\s+){0,3}"
+    r"(?:assign|map|designat|classif|infer)\w*\b",
+    re.IGNORECASE,
+)
 _ASSUMPTION_DIAGNOSTIC = re.compile(
     r"\b(?:shapiro(?:-wilk)?|normality(?:\s+test)?|outliers?|"
     r"standard deviations?)\b",
@@ -470,6 +477,20 @@ _SEMANTIC_ROLE_NAMES = {
     "treatment",
     "unexposed",
 }
+
+
+def _has_arbitrary_semantic_arm_mapping(text: str) -> bool:
+    """Reject affirmative arm inference without spanning safety clauses."""
+
+    for clause in re.split(r"[;.!?\n]+", text):
+        if not _ARBITRARY_SEMANTIC_ARM_MAPPING.search(clause):
+            continue
+        if _SEMANTIC_MAPPING_PROHIBITION.search(clause):
+            continue
+        return True
+    return False
+
+
 _INVALID_HEDGES_J_PARENTHESES = re.compile(
     r"(?:1\s*-\s*)?3\s*/\s*\(\s*4\s*\*\s*\(\s*(?:n|N)\s*-\s*9\s*\)\s*\)",
 )
@@ -1071,7 +1092,7 @@ def lint_plan(
                 )
             )
         step_text = " ".join([step.objective, *step.methods, *step.stop_conditions])
-        if _ARBITRARY_SEMANTIC_ARM_MAPPING.search(step_text):
+        if _has_arbitrary_semantic_arm_mapping(step_text):
             findings.append(
                 LintFinding(
                     code="arbitrary_semantic_arm_mapping",

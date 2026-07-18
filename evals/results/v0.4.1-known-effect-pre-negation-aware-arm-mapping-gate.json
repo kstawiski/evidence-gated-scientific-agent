@@ -1,0 +1,29 @@
+{
+  "case": "known-effect",
+  "release_candidate": "v0.4.1",
+  "deployment_commit": "ef9c42610a1474708ca255a9b10b71386dfcc629",
+  "deployment_image_digest": "sha256:9fe31d9caa0c537c4704c43c051b6c3bcc4ce692dec1f6804556563a012386c3",
+  "workspace_id": "171b51f7-86ad-42d0-90c9-91275ae1d696",
+  "run_id": "a4f97473-8c6a-4815-a57b-4335c2574443",
+  "started_at": "2026-07-18T04:01:12.425767+00:00",
+  "finished_at": "2026-07-18T04:24:24.762025+00:00",
+  "terminal_status": "requires_more_evidence",
+  "evaluator_score": "6/18",
+  "merit_gate": "failed",
+  "productive_behavior": [
+    "The input remained unchanged and both Qwen and Gemma planning output streamed with live artifact access.",
+    "Gemma passed all five independent plan-audit criteria.",
+    "The controller withheld execution while deterministic plan lint remained unresolved and failed closed after four bounded repairs."
+  ],
+  "release_blockers": [
+    "The semantic-arm regex searched across sentence boundaries, joining a valid explicit mapping dictionary to the next sentence's hard-stop prohibition on lexical or alphabetical inference.",
+    "Later repairs put the prohibited inference wording in the same method and stop-condition safety clauses; the regex still treated those negated safeguards as affirmative arm assignment.",
+    "All four repair rounds therefore preserved the exact requested safety contract while receiving the same arbitrary_semantic_arm_mapping finding, so no scientific computation was allowed to start."
+  ],
+  "implemented_repairs": [
+    "Semantic-arm lint now evaluates sentence and clause-local text rather than matching across punctuation boundaries.",
+    "Explicit never, must-not, do-not, cannot, and without mapping prohibitions are excluded while affirmative lexical/order- and observed-value-based assignments remain blocking.",
+    "Regression tests cover the exact live mapping dictionary plus hard-stop wording and retain both order-based and higher-baseline negative controls."
+  ],
+  "disposition": "Rejected fail-closed run retained as negative evidence. The plan was scientifically adequate and independently passed, but a deterministic negation/boundary false positive exhausted every repair before execution."
+}

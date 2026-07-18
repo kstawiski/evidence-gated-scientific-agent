@@ -265,6 +265,12 @@ Please read [CONTRIBUTING.md](CONTRIBUTING.md) and open an issue before proposin
 a substantial workflow or security-boundary change. Security reports should
 follow [SECURITY.md](SECURITY.md), not a public issue.
 
+## Project and affiliation
+
+Evidence Bench is led by [Konrad G. Stawiski](https://konsta.com.pl) at the
+[Department of Biostatistics and Translational Medicine](https://biostat.umed.pl),
+Medical University of Lodz.
+
 ## Citation and license
 
 Citation metadata is provided in [CITATION.cff](CITATION.cff). Evidence Bench is

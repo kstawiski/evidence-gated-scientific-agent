@@ -482,7 +482,8 @@ _DESIGN_CLASSIFICATION_ASSERTION = re.compile(
 )
 _TASK_DESIGN_CLASSIFICATION = {
     "observational": re.compile(
-        r"\bobservational\s+(?:cohort|data|dataset|design|study)\b", re.IGNORECASE
+        r"\bobservational\s+(?:cohort|data|dataset|design|nature|study)\b",
+        re.IGNORECASE,
     ),
     "randomized": re.compile(
         r"\brandomi[sz]ed\s+(?:allocation|controlled\s+trial|design|study|trial)\b",

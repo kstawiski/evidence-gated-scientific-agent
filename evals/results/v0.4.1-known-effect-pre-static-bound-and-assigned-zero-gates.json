@@ -1,0 +1,78 @@
+{
+  "case": "known-effect",
+  "release_candidate": "v0.4.1",
+  "deployment_commit": "d93bd0e56fb8b281993186fd6be1af4632b7fda5",
+  "deployment_image_digest": "sha256:5a1f6b67c2512687544d7c4ece3db302e382aa6ce1c65ab6e91003a5fc7d6c20",
+  "workspace_id": "bd7de203-1cea-4058-bb49-22a61ec916e7",
+  "run_id": "a2383355-084a-425a-a14e-cedd6f272211",
+  "started_at": "2026-07-18T01:24:31.226980+00:00",
+  "finished_at": "2026-07-18T02:09:59.484534+00:00",
+  "terminal_status": "supported",
+  "evaluator_score": "18/18",
+  "merit_gate": "failed",
+  "productive_behavior": [
+    "The fresh deployed run independently recovered the planted effect in Python and R, reconciled the mean difference, Welch statistic, and Hedges g within 1e-6, and retained exact machine-readable results.",
+    "The deterministic report validator repaired missing displays, unacquired literature metadata, an incorrect normality reassurance, and incomplete PubMed acquisition fields before independent review.",
+    "The final report and display package passed deterministic validation, Gemma report review, Gemma multimodal display review, and the immutable known-effect evaluator at 18/18.",
+    "A final literal-bound plotting implementation eventually passed the old static checker and produced a rectangular 17-row CSV table and a 2383 by 870 raster."
+  ],
+  "release_blockers": [
+    "The deployed static effect-axis checker denied multiple provably zero-inclusive bounds, including min(0, ci_low) - 1 and max(0, ci_high) + 1 as well as symmetric and list-derived outward limits. Static denials consumed ten plotting attempts across the initial and first repair rounds; one of those also contained unavailable prior-attempt paths.",
+    "The final successful figure code assigned y_pos = 0, plotted mean_diff on y with an x interval, and then constrained y to -0.5 through 0.5. Panel B therefore contained no visible estimate or confidence interval even though its caption and alt text claimed both were shown.",
+    "The transposition preflight recognized a literal x=0 but failed to resolve the prior y_pos assignment, allowing the misleading display to execute and register.",
+    "Gemma's multimodal display audit returned pass for the empty contrast panel, so native raster inspection overruled the automated 18/18 result.",
+    "The conclusion again classified unspecified data as having an observational nature. The deployed design-classification gate matched observational data, dataset, design, cohort, or study, but not this equivalent wording."
+  ],
+  "rejected_figure": {
+    "path": "computations/attempt-1/exec-007/output/figures/primary_contrast.png",
+    "sha256": "d1cc0776fba15aa363ac9e073cd0cd7c359477df671d8671aee884bc697a69a0",
+    "width": 2383,
+    "height": 870,
+    "defect": "Panel B labels x as the treatment-minus-control mean difference but plots the estimate at y=5 outside the visible y range, leaving only the null line and annotation visible."
+  },
+  "terminal_artifacts": [
+    {
+      "path": "computations/attempt-0/exec-001/output/data/results_python.json",
+      "sha256": "9d645a1f580a93223fb36d8927fae215241e57823f4cf5e650668ff988de2ec8"
+    },
+    {
+      "path": "computations/attempt-0/exec-002/output/data/results_r.json",
+      "sha256": "4c3b0798133c3019fd347392599ff72a3f26c3eb393a8f3ca8361a1c635eacbb"
+    },
+    {
+      "path": "computations/attempt-0/exec-004/output/data/reconciliation.json",
+      "sha256": "e8e4acbaad5c186d01ac3921b65eb05ceddc15dbc45d028ee4191ed04c3ad3a2"
+    },
+    {
+      "path": "computations/attempt-1/exec-007/output/tables/summary_report.csv",
+      "sha256": "e948c5c6b07dfb57451b6ea1e221a7dbc8349d88f8da41d481d2e4f3cb9a5f60"
+    },
+    {
+      "path": "attempts/attempt-2/scientific_report.json",
+      "sha256": "71d08a00f2f8ea7baeb78b3262556610fb5ecea8ac7093b320b2f2d844c6b8ec"
+    },
+    {
+      "path": "deterministic_validation.json",
+      "sha256": "49fb8eb3f7a3eeae5cf509025b5759003751abf57b629f033cc9ebbb65639151"
+    },
+    {
+      "path": "gemma_review.json",
+      "sha256": "103c65bd2048eb18a2d4fb9da4f6386c72fe0ca3d84fdb59e0e58fc0d3e718db"
+    },
+    {
+      "path": "gemma_display_audit.json",
+      "sha256": "82378894344497316e0cd77d4d146d93d40fd0bbe30569f5f027f7ea7aa08b4a"
+    },
+    {
+      "path": "report.md",
+      "sha256": "c2c3857e9f4f5309ec80ff0b62c725a0435e548e611c17fb9119478a5c05fcb4"
+    }
+  ],
+  "implemented_repairs": [
+    "Static bound analysis now propagates nonpositive and nonnegative guarantees through unary negation, addition, subtraction, multiplication, abs(), and min/max over literal or previously assigned lists and tuples.",
+    "The exact denied safe scripts from the immutable run pass the repaired checker while the genuinely uncertain ci_high + 1 construction remains fail-closed.",
+    "Effect-interval transposition checks now resolve exact numeric constants through prior assignments, so y_pos = 0 is treated like literal zero without treating random jitter centered at zero as an exact value.",
+    "The report-design gate now recognizes observational nature as an unsupported observational classification when the task does not establish the design."
+  ],
+  "disposition": "Rejected despite terminal supported, deterministic and independent-review passes, and evaluator 18/18. The numerical analysis, reconciliation, and table are sound, but the registered effect panel is visually empty and the conclusion invents an observational classification. Both defects and the preceding static-checker false positives now have deterministic regression coverage."
+}

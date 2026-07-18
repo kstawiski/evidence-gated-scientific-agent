@@ -1476,6 +1476,14 @@ def test_report_validator_rejects_design_site_and_reconciliation_overclaims():
         "cross_language_agreement_accuracy_overclaim",
     }
 
+    report.discussion = (
+        "Interpretation should remain bounded by the observational nature of the data."
+    )
+    validation = validate_report(report, task=report_task)
+    assert "unsupported_report_design_classification" in {
+        finding.code for finding in validation.findings
+    }
+
 
 def test_report_validator_requires_each_locked_computation_language(tmp_path):
     output = tmp_path / "summary.csv"

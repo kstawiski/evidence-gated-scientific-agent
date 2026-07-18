@@ -47,10 +47,40 @@ def test_python_static_preflight_rejects_transposed_x_interval_by_dataflow():
     assert any("effect interval is transposed" in item for item in violations)
     assert (
         _python_static_violations(
+            """
+y_pos = rng.uniform(-0.15, 0.15)
+mean_diff = primary["point_estimate"]
+effect_ax.errorbar(
+    y_pos,
+    mean_diff,
+    xerr=[[mean_diff - ci_low], [ci_high - mean_diff]],
+)
+effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
+"""
+        )
+        == []
+    )
+    assert (
+        _python_static_violations(
             "ax.errorbar([md], [0], xerr=[[md - ci_lo], [ci_hi - md]])"
         )
         == []
     )
+    violations = _python_static_violations(
+        """
+y_pos = 0
+mean_diff = primary["point_estimate"]
+ci_low = primary["ci_lower_95"]
+ci_high = primary["ci_upper_95"]
+effect_ax.errorbar(
+    y_pos,
+    mean_diff,
+    xerr=[[mean_diff - ci_low], [ci_high - mean_diff]],
+)
+effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
+"""
+    )
+    assert any("effect interval is transposed" in item for item in violations)
 
 
 def test_python_static_preflight_rejects_y_interval_on_effect_x_axis():
@@ -61,6 +91,18 @@ effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
 """
     )
 
+    assert any("effect interval is transposed" in item for item in violations)
+    violations = _python_static_violations(
+        """
+x_pos = 0
+effect_ax.errorbar(
+    x_pos,
+    mean_difference,
+    yerr=np.array([[lower], [upper]]),
+)
+effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
+"""
+    )
     assert any("effect interval is transposed" in item for item in violations)
     assert (
         _python_static_violations(
@@ -154,6 +196,34 @@ xlim_right = ci_upper + margin
 xlim_left = min(xlim_left, 0.0)
 xlim_right = max(xlim_right, 0.0)
 effect_ax.set_xlim(xlim_left, xlim_right)
+effect_ax.axvline(x=0)
+effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
+"""
+        )
+        == []
+    )
+    assert (
+        _python_static_violations(
+            """
+effect_span = max(abs(ci_lower), abs(ci_upper), abs(mean_difference), 0.5)
+xlim_left = -effect_span * 1.3
+xlim_right = effect_span * 1.3
+effect_ax.set_xlim(xlim_left, xlim_right)
+effect_ax.axvline(x=0)
+effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
+"""
+        )
+        == []
+    )
+    assert (
+        _python_static_violations(
+            """
+critical_values = [0.0, ci_lower, ci_upper, mean_difference]
+lo = min(critical_values)
+hi = max(critical_values)
+span = hi - lo
+padding = span * 0.2
+effect_ax.set_xlim(lo - padding, hi + padding)
 effect_ax.axvline(x=0)
 effect_ax.set_xlabel("Mean Difference (Treatment - Control)")
 """

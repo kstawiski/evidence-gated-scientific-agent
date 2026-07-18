@@ -84,6 +84,43 @@ def _python_static_violations(code: str) -> list[str]:
     def is_literal_zero(expression: ast.AST | None) -> bool:
         return numeric_literal(expression) == 0.0
 
+    def resolved_numeric_literal(
+        expression: ast.AST,
+        before_line: int | None = None,
+        seen_names: frozenset[str] = frozenset(),
+    ) -> float | None:
+        """Resolve exact numeric constants through simple prior assignments."""
+
+        literal = numeric_literal(expression)
+        if literal is not None:
+            return literal
+        if isinstance(expression, ast.Name) and expression.id not in seen_names:
+            assignments = [
+                candidate
+                for candidate in assignment_candidates.get(expression.id, ())
+                if before_line is None
+                or getattr(candidate, "lineno", before_line) < before_line
+            ]
+            if assignments:
+                latest = max(assignments, key=lambda item: getattr(item, "lineno", -1))
+                return resolved_numeric_literal(
+                    latest,
+                    getattr(latest, "lineno", before_line),
+                    seen_names | {expression.id},
+                )
+        if isinstance(expression, ast.BinOp):
+            left = resolved_numeric_literal(expression.left, before_line, seen_names)
+            right = resolved_numeric_literal(expression.right, before_line, seen_names)
+            if left is None or right is None:
+                return None
+            if isinstance(expression.op, ast.Add):
+                return left + right
+            if isinstance(expression.op, ast.Sub):
+                return left - right
+            if isinstance(expression.op, ast.Mult):
+                return left * right
+        return None
+
     def could_be_visible_label(expression: ast.AST | None) -> bool:
         if expression is None:
             return False
@@ -141,15 +178,44 @@ def _python_static_violations(code: str) -> list[str]:
                 return (lower + upper) / 2.0
         return None
 
-    def bound_proves_at_most_zero(
+    def extremum_items(
+        expression: ast.AST, before_line: int | None
+    ) -> tuple[ast.AST, ...]:
+        """Expand a literal or previously assigned list passed to min()/max()."""
+
+        resolved = expression
+        if isinstance(expression, ast.Name):
+            assignments = [
+                candidate
+                for candidate in assignment_candidates.get(expression.id, ())
+                if before_line is None
+                or getattr(candidate, "lineno", before_line) < before_line
+            ]
+            if assignments:
+                resolved = max(
+                    assignments, key=lambda item: getattr(item, "lineno", -1)
+                )
+        if isinstance(resolved, (ast.List, ast.Tuple)):
+            return tuple(resolved.elts)
+        return (expression,)
+
+    sign_cache: dict[tuple[int, int | None, frozenset[str]], tuple[bool, bool]] = {}
+
+    def bound_signs(
         expression: ast.AST,
         before_line: int | None = None,
         seen_names: frozenset[str] = frozenset(),
-    ) -> bool:
+    ) -> tuple[bool, bool]:
+        """Return whether an expression is provably nonpositive and nonnegative."""
+
+        cache_key = (id(expression), before_line, seen_names)
+        cached = sign_cache.get(cache_key)
+        if cached is not None:
+            return cached
         literal = numeric_literal(expression)
         if literal is not None:
-            return literal <= 0.0
-        if isinstance(expression, ast.Name) and expression.id not in seen_names:
+            result = (literal <= 0.0, literal >= 0.0)
+        elif isinstance(expression, ast.Name) and expression.id not in seen_names:
             assignments = [
                 candidate
                 for candidate in assignment_candidates.get(expression.id, ())
@@ -158,52 +224,96 @@ def _python_static_violations(code: str) -> list[str]:
             ]
             if assignments:
                 latest = max(assignments, key=lambda item: getattr(item, "lineno", -1))
-                return bound_proves_at_most_zero(
+                result = bound_signs(
                     latest,
                     getattr(latest, "lineno", before_line),
                     seen_names | {expression.id},
                 )
-        return bool(
+            else:
+                result = (False, False)
+        elif isinstance(expression, ast.UnaryOp) and isinstance(
+            expression.op, ast.USub
+        ):
+            nonpositive, nonnegative = bound_signs(
+                expression.operand, before_line, seen_names
+            )
+            result = (nonnegative, nonpositive)
+        elif (
             isinstance(expression, ast.Call)
             and isinstance(expression.func, ast.Name)
-            and expression.func.id == "min"
-            and any(
-                bound_proves_at_most_zero(item, before_line, seen_names)
-                for item in expression.args
+            and expression.func.id == "abs"
+            and len(expression.args) == 1
+        ):
+            nonpositive, nonnegative = bound_signs(
+                expression.args[0], before_line, seen_names
             )
-        )
+            result = (nonpositive and nonnegative, True)
+        elif isinstance(expression, ast.BinOp):
+            left_nonpositive, left_nonnegative = bound_signs(
+                expression.left, before_line, seen_names
+            )
+            right_nonpositive, right_nonnegative = bound_signs(
+                expression.right, before_line, seen_names
+            )
+            if isinstance(expression.op, ast.Add):
+                result = (
+                    left_nonpositive and right_nonpositive,
+                    left_nonnegative and right_nonnegative,
+                )
+            elif isinstance(expression.op, ast.Sub):
+                result = (
+                    left_nonpositive and right_nonnegative,
+                    left_nonnegative and right_nonpositive,
+                )
+            elif isinstance(expression.op, ast.Mult):
+                result = (
+                    (left_nonpositive and right_nonnegative)
+                    or (left_nonnegative and right_nonpositive),
+                    (left_nonnegative and right_nonnegative)
+                    or (left_nonpositive and right_nonpositive),
+                )
+            else:
+                result = (False, False)
+        elif (
+            isinstance(expression, ast.Call)
+            and isinstance(expression.func, ast.Name)
+            and expression.func.id in {"min", "max"}
+        ):
+            item_signs = [
+                bound_signs(item, before_line, seen_names)
+                for argument in expression.args
+                for item in extremum_items(argument, before_line)
+            ]
+            if not item_signs:
+                result = (False, False)
+            elif expression.func.id == "min":
+                result = (
+                    any(nonpositive for nonpositive, _ in item_signs),
+                    all(nonnegative for _, nonnegative in item_signs),
+                )
+            else:
+                result = (
+                    all(nonpositive for nonpositive, _ in item_signs),
+                    any(nonnegative for _, nonnegative in item_signs),
+                )
+        else:
+            result = (False, False)
+        sign_cache[cache_key] = result
+        return result
+
+    def bound_proves_at_most_zero(
+        expression: ast.AST,
+        before_line: int | None = None,
+        seen_names: frozenset[str] = frozenset(),
+    ) -> bool:
+        return bound_signs(expression, before_line, seen_names)[0]
 
     def bound_proves_at_least_zero(
         expression: ast.AST,
         before_line: int | None = None,
         seen_names: frozenset[str] = frozenset(),
     ) -> bool:
-        literal = numeric_literal(expression)
-        if literal is not None:
-            return literal >= 0.0
-        if isinstance(expression, ast.Name) and expression.id not in seen_names:
-            assignments = [
-                candidate
-                for candidate in assignment_candidates.get(expression.id, ())
-                if before_line is None
-                or getattr(candidate, "lineno", before_line) < before_line
-            ]
-            if assignments:
-                latest = max(assignments, key=lambda item: getattr(item, "lineno", -1))
-                return bound_proves_at_least_zero(
-                    latest,
-                    getattr(latest, "lineno", before_line),
-                    seen_names | {expression.id},
-                )
-        return bool(
-            isinstance(expression, ast.Call)
-            and isinstance(expression.func, ast.Name)
-            and expression.func.id == "max"
-            and any(
-                bound_proves_at_least_zero(item, before_line, seen_names)
-                for item in expression.args
-            )
-        )
+        return bound_signs(expression, before_line, seen_names)[1]
 
     def is_errorbar_caplines_expression(expression: ast.AST) -> bool:
         return bool(
@@ -421,7 +531,10 @@ def _python_static_violations(code: str) -> list[str]:
                 and len(x_expression.elts) == 1
             ):
                 x_expression = x_expression.elts[0]
-            x_is_literal_zero = is_literal_zero(x_expression)
+            x_is_zero = (
+                resolved_numeric_literal(x_expression, getattr(node, "lineno", None))
+                == 0.0
+            )
             y_names = {
                 item.id for item in ast.walk(node.args[1]) if isinstance(item, ast.Name)
             }
@@ -430,7 +543,7 @@ def _python_static_violations(code: str) -> list[str]:
                 for item in ast.walk(keywords["xerr"])
                 if isinstance(item, ast.Name)
             }
-            if x_is_literal_zero and y_names & xerr_names:
+            if x_is_zero and y_names & xerr_names:
                 violations.add(
                     "Matplotlib effect interval is transposed: xerr is derived from "
                     "the value plotted on y while x is fixed at zero; plot the "
@@ -443,9 +556,12 @@ def _python_static_violations(code: str) -> list[str]:
                 and len(x_expression.elts) == 1
             ):
                 x_expression = x_expression.elts[0]
-            x_is_literal_zero = is_literal_zero(x_expression)
+            x_is_zero = (
+                resolved_numeric_literal(x_expression, getattr(node, "lineno", None))
+                == 0.0
+            )
             axis_key = ast.dump(node.func.value, include_attributes=False)
-            if x_is_literal_zero and axis_key in effect_x_axes:
+            if x_is_zero and axis_key in effect_x_axes:
                 violations.add(
                     "Matplotlib effect interval is transposed: an axis labeled for "
                     "the effect estimate fixes x at zero and places the interval in "

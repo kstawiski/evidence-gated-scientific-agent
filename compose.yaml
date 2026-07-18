@@ -38,7 +38,7 @@ services:
       - ${EVIDENCE_BENCH_DATA_PATH:-evidence-bench-data}:/data
       - ${EVIDENCE_BENCH_BROWSER_PATH:-./.evidence-bench/browser}/downloads:/browser-downloads:ro
     extra_hosts:
-      - "host.docker.internal:host-gateway"
+      - "host.docker.internal:${OLLAMA_HOST_GATEWAY:-host-gateway}"
     read_only: true
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=1g,mode=1777

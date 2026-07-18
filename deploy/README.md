@@ -3,6 +3,11 @@
 `compose.yaml` is the portable release surface. Site-specific routes and credentials
 stay outside the repository in a mode-0600 `.env` file.
 
+For a laptop or workstation deployment that should install Ollama, select local
+Qwen/Gemma models from detected RAM/VRAM, and use the released container images,
+follow the [macOS, Linux, and WSL2 local setup tutorial](../docs/LOCAL_SETUP.md).
+This guide covers manually routed and persistent service deployments.
+
 ## Model routes
 
 Qwen and Gemma are independent OpenAI-compatible endpoints. Configure the critic

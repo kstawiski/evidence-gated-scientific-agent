@@ -8,6 +8,7 @@
 
 - [Product overview](https://kstawiski.github.io/evidence-gated-scientific-agent/)
 - [Source and quick start](https://github.com/kstawiski/evidence-gated-scientific-agent)
+- [Local setup for macOS, Linux, and WSL2](https://github.com/kstawiski/evidence-gated-scientific-agent/blob/main/docs/LOCAL_SETUP.md)
 - [Web, REST, and A2A contract](https://github.com/kstawiski/evidence-gated-scientific-agent/blob/main/docs/WEB_AND_A2A.md)
 - [Reporting and evidence standard](https://github.com/kstawiski/evidence-gated-scientific-agent/blob/main/docs/REPORTING_STANDARD.md)
 - [Threat model](https://github.com/kstawiski/evidence-gated-scientific-agent/blob/main/docs/THREAT_MODEL.md)

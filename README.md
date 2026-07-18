@@ -12,10 +12,13 @@ combines local model reasoning, isolated Python and R execution, literature
 retrieval, deterministic validation, independent model review, and complete run
 provenance in one browser application and A2A 1.0 service.
 
-[Project website](https://kstawiski.github.io/evidence-gated-scientific-agent/) ·
+[Project website][product-site] ·
 [Quick start](#quick-start) ·
+[Local setup guide](docs/LOCAL_SETUP.md) ·
 [Documentation](#documentation) ·
 [Security model](docs/THREAT_MODEL.md)
+
+[product-site]: https://kstawiski.github.io/evidence-gated-scientific-agent/
 
 ## What Evidence Bench delivers
 
@@ -91,16 +94,29 @@ claim peer review, clinical authority, science lock, or submission readiness.
 
 ### Requirements
 
-- Linux with Docker Engine and Docker Compose v2
-- two OpenAI-compatible model endpoints: one Qwen executor and one independent
-  Gemma critic
+- macOS, Linux, or Windows with WSL2
+- Docker Engine/Desktop with Docker Compose v2
+- local Ollama models installed by the setup script, or two existing
+  OpenAI-compatible endpoints: one Qwen executor and one Gemma critic
 - kernel support for the nested namespace isolation used by the worker
 
-### Start the workbench
+### Automatic local setup
 
 ```bash
 git clone https://github.com/kstawiski/evidence-gated-scientific-agent.git
 cd evidence-gated-scientific-agent
+./scripts/local_setup.sh
+```
+
+The installer detects RAM and GPU VRAM, lets you choose an appropriate Qwen and
+vision-capable Gemma pair, installs both through Ollama, creates a secure local
+configuration, starts the released containers, and runs preflight. See the
+[macOS, Linux, and WSL2 tutorial](docs/LOCAL_SETUP.md) for the profile table,
+unattended setup, exact-model overrides, and troubleshooting.
+
+### Existing model endpoints
+
+```bash
 cp .env.example .env
 
 # Configure the Qwen/Gemma endpoints and replace the example credentials.
@@ -124,8 +140,9 @@ The most important settings are documented in [`.env.example`](.env.example):
 | `EVIDENCE_BENCH_DATA_PATH` | persistent workspace and provenance storage |
 | `WEB_BIND_ADDRESS`, `WEB_PUBLISHED_PORT` | WebUI bind address and port |
 
-See the [deployment guide](deploy/README.md) for persistent services, reverse
-proxy guidance, managed-browser isolation, and trusted-network noVNC access.
+See the [local setup tutorial](docs/LOCAL_SETUP.md) for laptop/workstation use or
+the [deployment guide](deploy/README.md) for persistent services, reverse proxy
+guidance, managed-browser isolation, and trusted-network noVNC access.
 
 ## Ways to use Evidence Bench
 
@@ -238,6 +255,7 @@ Bench never requires the model servers to share the application host.
 | [Literature acquisition](docs/LITERATURE_ACQUISITION.md) | PubMed/PMC acquisition and managed-browser import |
 | [Knowledge grounding](docs/knowledge-grounding.md) | immutable library generations, hybrid retrieval, visual indexing |
 | [Threat model](docs/THREAT_MODEL.md) | trust boundaries, browser/network isolation, residual risks |
+| [Local setup](docs/LOCAL_SETUP.md) | automatic Qwen/Gemma installation on macOS, Linux, and WSL2 |
 | [Deployment](deploy/README.md) | environment provisioning and production Compose operation |
 | [Evaluation suite](evals/README.md) | reproducible scientific and transport acceptance cases |
 
@@ -257,6 +275,7 @@ uvx ruff==0.15.21 format --check scientific_agent tests evals deploy skills
 node --check scientific_agent/web/static/app.js
 shellcheck scripts/*.sh browser/*.sh
 docker compose config --quiet
+docker compose -f compose.yaml -f compose.local.yaml config --quiet
 ```
 
 ## Contributing

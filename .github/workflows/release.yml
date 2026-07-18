@@ -75,6 +75,7 @@ jobs:
       - run: node --check scientific_agent/web/static/app.js
       - run: shellcheck scripts/*.sh browser/*.sh
       - run: docker compose config --quiet
+      - run: docker compose -f compose.yaml -f compose.local.yaml config --quiet
       - name: Build all release containers and verify network boundaries
         run: |
           docker compose build

@@ -43,7 +43,7 @@
             <h1>Scientific analysis that has to <em>show its work.</em></h1>
             <p class="hero-lead">Evidence Bench brings local model reasoning, isolated Python and R, literature retrieval, deterministic validation, independent review, and complete provenance into one research workspace.</p>
             <div class="hero-actions">
-              <a class="button button-primary" href="https://github.com/kstawiski/evidence-gated-scientific-agent#quick-start">Deploy Evidence Bench <span aria-hidden="true">→</span></a>
+              <a class="button button-primary" href="https://github.com/kstawiski/evidence-gated-scientific-agent/blob/main/docs/LOCAL_SETUP.md">Run locally <span aria-hidden="true">→</span></a>
               <a class="button button-secondary" href="https://github.com/kstawiski/evidence-gated-scientific-agent">Explore the source</a>
             </div>
             <ul class="hero-facts">
@@ -147,7 +147,7 @@
           <div class="deployment-copy">
             <p class="eyebrow dark"><span></span> Self-hosted deployment</p>
             <h2>Run the complete workbench with Docker Compose.</h2>
-            <p>Bring two OpenAI-compatible model endpoints. Evidence Bench supplies the WebUI, orchestration, confined workers, persistent Chromium, public-web-only egress, storage, and health checks.</p>
+            <p>Run one setup command on macOS, Linux, or WSL2. Evidence Bench detects available memory, helps select Qwen and Gemma, installs both locally, and starts the complete workbench.</p>
             <div class="deployment-notes"><p><i>01</i><span><strong>Your models</strong>Qwen executes. Gemma critiques independently and handles vision.</span></p><p><i>02</i><span><strong>Your data</strong>Persistent state stays in deployment-controlled volumes or host paths.</span></p><p><i>03</i><span><strong>Your network</strong>The safe default binds to loopback and keeps DevTools internal.</span></p></div>
           </div>
           <div class="terminal-card">
@@ -155,14 +155,11 @@
             <pre><code><span>$</span> git clone https://github.com/kstawiski/evidence-gated-scientific-agent.git
 
 <span>$</span> cd evidence-gated-scientific-agent
-<span>$</span> cp .env.example .env
-
-<em># Set model endpoints and credentials</em>
-<span>$</span> docker compose up --build -d
+<span>$</span> ./scripts/local_setup.sh
 
 <span>$</span> curl http://127.0.0.1:8080/healthz
 <mark>{"status":"ok","version":"0.4.1"}</mark></code></pre>
-            <a href="https://github.com/kstawiski/evidence-gated-scientific-agent#quick-start">Read the deployment guide <span aria-hidden="true">→</span></a>
+            <a href="https://github.com/kstawiski/evidence-gated-scientific-agent/blob/main/docs/LOCAL_SETUP.md">Read the local setup tutorial <span aria-hidden="true">→</span></a>
           </div>
         </div>
       </section>
@@ -223,7 +220,7 @@
       <div class="container footer-grid">
         <a class="brand footer-brand" href="#top"><img src="assets/mark.svg" width="36" height="36" alt=""><span>Evidence Bench<small>Evidence-gated scientific AI</small></span></a>
         <div><strong>Product</strong><a href="#workflow">Workflow</a><a href="#capabilities">Capabilities</a><a href="#deployment">Deployment</a></div>
-        <div><strong>Resources</strong><a href="https://github.com/kstawiski/evidence-gated-scientific-agent">GitHub</a><a href="https://github.com/kstawiski/evidence-gated-scientific-agent/tree/main/docs">Documentation</a><a href="https://github.com/kstawiski/evidence-gated-scientific-agent/blob/main/SECURITY.md">Security</a></div>
+        <div><strong>Resources</strong><a href="https://github.com/kstawiski/evidence-gated-scientific-agent">GitHub</a><a href="https://github.com/kstawiski/evidence-gated-scientific-agent/blob/main/docs/LOCAL_SETUP.md">Local setup</a><a href="https://github.com/kstawiski/evidence-gated-scientific-agent/blob/main/SECURITY.md">Security</a></div>
         <div><strong>Project</strong><a href="https://konsta.com.pl">Konrad's CV</a><a href="https://biostat.umed.pl">BTM lab</a></div>
         <p>Built for inspectable scientific work.<br>Licensed under Apache-2.0.</p>
       </div>

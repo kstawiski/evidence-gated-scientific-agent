@@ -172,8 +172,9 @@ case "$profile" in
   *) fail "unsupported profile: $profile" ;;
 esac
 is_positive_integer "$context_tokens" || fail "--context must be a positive integer"
-[ "$context_tokens" -ge 8192 ] && [ "$context_tokens" -le 131072 ] \
-  || fail "--context must be between 8192 and 131072"
+if [ "$context_tokens" -lt 8192 ] || [ "$context_tokens" -gt 131072 ]; then
+  fail "--context must be between 8192 and 131072"
+fi
 [ -z "$ram_override" ] || is_positive_integer "$ram_override" \
   || fail "--ram-gb must be a positive integer"
 [ -z "$vram_override" ] || is_nonnegative_integer "$vram_override" \

@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Evidence Bench is a self-hosted workspace for evidence-gated scientific AI with isolated Python and R, independent review, deterministic validation, and complete provenance.">
+    <meta name="theme-color" content="#102a2c">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="Evidence Bench — Scientific analysis that has to show its work">
+    <meta property="og:description" content="Self-hosted scientific AI with isolated computation, evidence-linked claims, independent review, and complete provenance.">
+    <meta property="og:url" content="https://kstawiski.github.io/evidence-gated-scientific-agent/">
+    <link rel="canonical" href="https://kstawiski.github.io/evidence-gated-scientific-agent/">
+    <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="assets/site.css">
+    <title>Evidence Bench — Evidence-gated scientific AI</title>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <header class="site-header">
+      <div class="container nav-wrap">
+        <a class="brand" href="#top" aria-label="Evidence Bench home">
+          <img src="assets/mark.svg" width="40" height="40" alt="">
+          <span>Evidence Bench</span>
+        </a>
+        <nav aria-label="Primary navigation">
+          <a href="#workflow">Workflow</a>
+          <a href="#capabilities">Capabilities</a>
+          <a href="#deployment">Deployment</a>
+          <a href="#security">Security</a>
+        </nav>
+        <a class="button button-small button-ghost" href="https://github.com/kstawiski/evidence-gated-scientific-agent">GitHub <span aria-hidden="true">↗</span></a>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero" id="top">
+        <div class="hero-glow" aria-hidden="true"></div>
+        <div class="container hero-grid">
+          <div class="hero-copy">
+            <p class="eyebrow"><span></span> Self-hosted · open source · evidence-gated</p>
+            <h1>Scientific analysis that has to <em>show its work.</em></h1>
+            <p class="hero-lead">Evidence Bench brings local model reasoning, isolated Python and R, literature retrieval, deterministic validation, independent review, and complete provenance into one research workspace.</p>
+            <div class="hero-actions">
+              <a class="button button-primary" href="https://github.com/kstawiski/evidence-gated-scientific-agent#quick-start">Deploy Evidence Bench <span aria-hidden="true">→</span></a>
+              <a class="button button-secondary" href="https://github.com/kstawiski/evidence-gated-scientific-agent">Explore the source</a>
+            </div>
+            <ul class="hero-facts">
+              <li><strong>Python + R</strong><span>confined execution</span></li>
+              <li><strong>Qwen + Gemma</strong><span>separate roles</span></li>
+              <li><strong>A2A 1.0</strong><span>agent interface</span></li>
+            </ul>
+          </div>
+
+          <div class="product-frame" role="img" aria-label="Evidence Bench workspace preview">
+            <div class="frame-bar">
+              <span class="frame-mark"><i></i><i></i><i></i></span>
+              <strong>Evidence Bench</strong>
+              <div class="model-pair"><span>Q <small>executor</small></span><i></i><span>G <small>critic</small></span></div>
+              <span class="service-ready"><i></i> service ready</span>
+            </div>
+            <div class="frame-body">
+              <aside>
+                <small>RESEARCH PROJECTS</small>
+                <strong>Workspaces</strong>
+                <div class="workspace active"><i></i><span>Primary analysis<small>RUN COMPLETE</small></span></div>
+                <div class="workspace"><i></i><span>Literature audit<small>READY</small></span></div>
+                <div class="side-lines"><span></span><span></span><span></span></div>
+              </aside>
+              <div class="frame-main">
+                <div class="run-heading"><span><small>AUDITED RUN</small><strong>Validated result is ready</strong></span><b>SUPPORTED</b></div>
+                <div class="progress-rail" aria-hidden="true">
+                  <span class="done"><i>1</i>Plan</span><b></b>
+                  <span class="done"><i>2</i>Research</span><b></b>
+                  <span class="done"><i>3</i>Validate</span><b></b>
+                  <span class="done"><i>4</i>Audit</span>
+                </div>
+                <div class="record-card">
+                  <div><small>EXPLORATORY SCIENTIFIC REPORT</small><h2>Primary outcome analysis</h2></div>
+                  <div class="record-tabs"><span class="selected">Article</span><span>Claims</span><span>Sources</span><span>Artifacts</span></div>
+                  <div class="record-layout">
+                    <div class="article-lines"><strong>Results</strong><span></span><span></span><span class="short"></span><strong>Discussion</strong><span></span><span class="medium"></span></div>
+                    <div class="evidence-card"><small>EVIDENCE RECORD</small><strong>8 / 8</strong><span>checks passed</span><hr><p><i></i> Python + R reconciled</p><p><i></i> Independent audit passed</p><p><i></i> Provenance complete</p></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="proof-strip" aria-label="Product principles">
+        <div class="container proof-grid">
+          <p><i aria-hidden="true">◇</i><span><strong>Evidence before prose</strong>Claims resolve to exact sources or computations.</span></p>
+          <p><i aria-hidden="true">◎</i><span><strong>Review without self-certification</strong>A separate model audits methods and displays.</span></p>
+          <p><i aria-hidden="true">⌁</i><span><strong>Local by design</strong>Models, workspaces, and scientific files stay under your control.</span></p>
+          <p><i aria-hidden="true">□</i><span><strong>One complete record</strong>Inputs, code, results, reviews, and hashes travel together.</span></p>
+        </div>
+      </section>
+
+      <section class="section section-intro" id="workflow">
+        <div class="container">
+          <div class="section-heading split-heading">
+            <div><p class="eyebrow dark"><span></span> Governed workflow</p><h2>From research question to auditable result.</h2></div>
+            <p>Evidence Bench separates generation from acceptance. Models can propose and revise; deterministic policy and an independent critic decide whether the record is supportable.</p>
+          </div>
+
+          <ol class="workflow-grid">
+            <li><span>01</span><div class="workflow-icon">⌁</div><h3>Lock the method</h3><p>Upload files and define the objective. Plan linting and an independent audit must pass before analysis begins.</p></li>
+            <li><span>02</span><div class="workflow-icon">λ</div><h3>Build the evidence</h3><p>Qwen retrieves sources and runs confined Python and R. Every successful artifact is hashed and retained.</p></li>
+            <li><span>03</span><div class="workflow-icon">✓</div><h3>Test every claim</h3><p>Controller code checks statistical consistency, source bindings, reconciliation, figures, tables, and requested outputs.</p></li>
+            <li><span>04</span><div class="workflow-icon">◉</div><h3>Audit independently</h3><p>Gemma reviews the argument and actual rendered displays. Actionable findings return for bounded correction.</p></li>
+          </ol>
+        </div>
+      </section>
+
+      <section class="section section-dark" id="capabilities">
+        <div class="container">
+          <div class="section-heading centered">
+            <p class="eyebrow"><span></span> A scientific workbench, not a chat window</p>
+            <h2>Everything needed to inspect how a result was made.</h2>
+            <p>Use the browser for hands-on work or connect existing agents through REST, A2A, the CLI, or the bundled Codex and Claude skill.</p>
+          </div>
+
+          <div class="feature-grid">
+            <article class="feature feature-wide feature-accent">
+              <div class="feature-copy"><span class="feature-number">01</span><h3>Isolated scientific computing</h3><p>Python and R receive source files read-only and write only to bounded output directories. Network access, resources, processes, and artifact size are controlled outside the model.</p><ul><li>Independent cross-language analysis</li><li>Machine-readable results</li><li>Per-workspace package environments</li></ul></div>
+              <div class="code-card"><div><i></i><i></i><i></i><span>analysis record</span></div><pre><code><b>estimand</b>   treatment − control
+<b>python</b>     <span>successful</span>  sha256: 1fa52e…
+<b>r</b>          <span>successful</span>  sha256: c718bb…
+<b>difference</b> 0.000000  ≤  tolerance
+<b>verdict</b>    <mark>reconciled</mark></code></pre></div>
+            </article>
+
+            <article class="feature"><span class="feature-number">02</span><div class="feature-symbol">§</div><h3>Evidence-linked reporting</h3><p>Computed claims point to exact successful artifacts. Literature claims point to acquired, previewable source records.</p></article>
+            <article class="feature"><span class="feature-number">03</span><div class="feature-symbol">◌</div><h3>Real display review</h3><p>Gemma receives raster figures, OCR geometry, and bounded table previews. Qwen never grades its own visuals.</p></article>
+            <article class="feature"><span class="feature-number">04</span><div class="feature-symbol">⌕</div><h3>Grounded research</h3><p>Typed PubMed acquisition, immutable knowledge snapshots, hybrid retrieval, and managed Chromium preserve source context.</p></article>
+            <article class="feature"><span class="feature-number">05</span><div class="feature-symbol">↯</div><h3>Live provenance</h3><p>Watch phases, tool outcomes, model-visible output, figures, tables, and files appear while the run is active.</p></article>
+            <article class="feature feature-wide feature-interface"><div><span class="feature-number">06</span><h3>Designed to join your research stack</h3><p>One deployment serves human researchers and software agents through stable, authenticated interfaces.</p></div><div class="interface-pills"><span>WebUI</span><span>REST + OpenAPI</span><span>A2A 1.0</span><span>CLI</span><span>Codex skill</span><span>Claude skill</span></div></article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section deployment" id="deployment">
+        <div class="container deployment-grid">
+          <div class="deployment-copy">
+            <p class="eyebrow dark"><span></span> Self-hosted deployment</p>
+            <h2>Run the complete workbench with Docker Compose.</h2>
+            <p>Bring two OpenAI-compatible model endpoints. Evidence Bench supplies the WebUI, orchestration, confined workers, persistent Chromium, public-web-only egress, storage, and health checks.</p>
+            <div class="deployment-notes"><p><i>01</i><span><strong>Your models</strong>Qwen executes. Gemma critiques independently and handles vision.</span></p><p><i>02</i><span><strong>Your data</strong>Persistent state stays in deployment-controlled volumes or host paths.</span></p><p><i>03</i><span><strong>Your network</strong>The safe default binds to loopback and keeps DevTools internal.</span></p></div>
+          </div>
+          <div class="terminal-card">
+            <div class="terminal-bar"><span><i></i><i></i><i></i></span><small>QUICK START</small></div>
+            <pre><code><span>$</span> git clone https://github.com/kstawiski/evidence-gated-scientific-agent.git
+
+<span>$</span> cd evidence-gated-scientific-agent
+<span>$</span> cp .env.example .env
+
+<em># Set model endpoints and credentials</em>
+<span>$</span> docker compose up --build -d
+
+<span>$</span> curl http://127.0.0.1:8080/healthz
+<mark>{"status":"ok","version":"0.4.1"}</mark></code></pre>
+            <a href="https://github.com/kstawiski/evidence-gated-scientific-agent#quick-start">Read the deployment guide <span aria-hidden="true">→</span></a>
+          </div>
+        </div>
+      </section>
+
+      <section class="section section-security" id="security">
+        <div class="container security-grid">
+          <div class="security-badge" aria-hidden="true"><span></span><i>◇</i></div>
+          <div>
+            <p class="eyebrow dark"><span></span> Explicit trust boundaries</p>
+            <h2>Scientific files are not ordinary chat attachments.</h2>
+            <p>Evidence Bench treats uploads, generated code, websites, browser downloads, and model output as untrusted inputs. Isolation and acceptance rules live in controller code and separate services.</p>
+          </div>
+          <ul>
+            <li><i>✓</i>Mutually isolated workspaces</li>
+            <li><i>✓</i>Read-only analysis inputs</li>
+            <li><i>✓</i>Offline Python and R workers</li>
+            <li><i>✓</i>Internal-only browser DevTools</li>
+            <li><i>✓</i>Private-address-denying browser proxy</li>
+            <li><i>✓</i>No chain-of-thought in provenance</li>
+          </ul>
+        </div>
+      </section>
+
+      <section class="section final-cta">
+        <div class="container cta-panel">
+          <div><p class="eyebrow"><span></span> Apache-2.0 open source</p><h2>Make the scientific record the product.</h2><p>Deploy Evidence Bench, inspect the evidence contract, and adapt it to your local models and research environment.</p></div>
+          <div><a class="button button-primary" href="https://github.com/kstawiski/evidence-gated-scientific-agent">View on GitHub <span aria-hidden="true">→</span></a><a class="text-link" href="https://github.com/kstawiski/evidence-gated-scientific-agent/tree/main/docs">Read the technical documentation</a></div>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <div class="container footer-grid">
+        <a class="brand footer-brand" href="#top"><img src="assets/mark.svg" width="36" height="36" alt=""><span>Evidence Bench<small>Evidence-gated scientific AI</small></span></a>
+        <div><strong>Product</strong><a href="#workflow">Workflow</a><a href="#capabilities">Capabilities</a><a href="#deployment">Deployment</a></div>
+        <div><strong>Resources</strong><a href="https://github.com/kstawiski/evidence-gated-scientific-agent">GitHub</a><a href="https://github.com/kstawiski/evidence-gated-scientific-agent/tree/main/docs">Documentation</a><a href="https://github.com/kstawiski/evidence-gated-scientific-agent/blob/main/SECURITY.md">Security</a></div>
+        <p>Built for inspectable scientific work.<br>Licensed under Apache-2.0.</p>
+      </div>
+    </footer>
+  </body>
+</html>

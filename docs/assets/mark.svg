@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title">
+  <title id="title">Evidence Bench</title>
+  <rect width="64" height="64" rx="16" fill="#102a2c"/>
+  <path d="M18 42 32 18l14 24H18Z" fill="none" stroke="#d7ff8a" stroke-width="4" stroke-linejoin="round"/>
+  <circle cx="18" cy="42" r="5" fill="#f4f7ee"/>
+  <circle cx="32" cy="18" r="5" fill="#67d6c1"/>
+  <circle cx="46" cy="42" r="5" fill="#d7ff8a"/>
+</svg>

@@ -626,6 +626,32 @@ def test_known_effect_accepts_live_change_mean_group_summary_shape():
     assert _known_effect_matches_reference(value) is True
 
 
+def test_known_effect_accepts_current_primary_correction_shape():
+    value = {
+        "primary": {
+            "n_treatment": 20,
+            "n_control": 20,
+            "mean_treatment_change": 5.0,
+            "mean_control_change": 0.0,
+            "mean_difference": 5.0,
+            "t_statistic": 10.897247358851683,
+            "degrees_of_freedom": 38.0,
+            "p_value": 2.971749478841818e-13,
+            "ci_95_lower": 4.071144254485707,
+            "ci_95_upper": 5.928855745514293,
+            "pooled_sd": 1.4509525002200232,
+            "hedges_correction_J": 0.9801324503311258,
+            "hedges_g": 3.3775483697174717,
+        },
+        "group_summaries": {
+            "treatment": {"mean_change": 5.0},
+            "control": {"mean_change": 0.0},
+        },
+    }
+
+    assert _known_effect_matches_reference(value) is True
+
+
 def test_known_effect_accepts_exact_live_groups_primary_shape():
     value = {
         "primary": {

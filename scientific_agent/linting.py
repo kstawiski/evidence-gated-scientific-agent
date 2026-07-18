@@ -20,6 +20,7 @@ from .reporting import (
     MIN_REPORTED_FIGURE_DPI,
     TABLE_DELIMITERS,
     caption_has_number_prefix,
+    excessive_internal_blank_band,
     extract_figure_ocr,
     excessive_table_precision,
     figure_annotation_overlap_candidates,
@@ -1439,13 +1440,55 @@ def _figure_ocr_semantic_findings(
 
 
 def _figure_caption_semantic_findings(
-    caption: str, alt_text: str, ocr: dict[str, Any]
+    caption: str,
+    alt_text: str,
+    ocr: dict[str, Any],
+    machine_numbers: dict[str, list[Decimal]],
 ) -> list[tuple[str, str]]:
-    """Reject high-confidence claims about annotations absent from the raster."""
+    """Reject high-confidence caption/alt-text contradictions."""
+
+    narrative = " ".join(f"{caption} {alt_text}".casefold().split())
+    findings: list[tuple[str, str]] = []
+    interval_aliases = (
+        ("ci_95_lower", "ci_95_upper"),
+        ("ci_lower", "ci_upper"),
+        ("confidence_interval_lower", "confidence_interval_upper"),
+    )
+    interval_relations = {
+        lower <= 0 <= upper
+        for lower_key, upper_key in interval_aliases
+        for lower in machine_numbers.get(lower_key, [])
+        for upper in machine_numbers.get(upper_key, [])
+        if lower <= upper
+    }
+    positive_null_claim = any(
+        (
+            re.search(r"\b(?:ci|confidence interval)\b", sentence)
+            and re.search(r"\b(?:zero|null)\b", sentence)
+            and re.search(
+                r"\b(?:cross(?:es|ed|ing)?|includ(?:e|es|ed|ing)|"
+                r"contain(?:s|ed|ing)?)\b",
+                sentence,
+            )
+            and not re.search(
+                r"\b(?:not|never)\b.{0,24}\b(?:cross|include|contain)",
+                sentence,
+            )
+        )
+        for sentence in re.split(r"[.!?;]+", narrative)
+    )
+    if interval_relations == {False} and positive_null_claim:
+        findings.append(
+            (
+                "figure_caption_interval_null_contradiction",
+                "The caption or alt text says the confidence interval crosses or "
+                "contains zero, but the authoritative machine-readable interval "
+                "excludes zero; correct the display description.",
+            )
+        )
 
     if not ocr.get("available"):
-        return []
-    narrative = " ".join(f"{caption} {alt_text}".casefold().split())
+        return findings
     visible = " ".join(str(ocr.get("text", "")).casefold().split())
     r_squared = r"(?:adjusted\s+)?r(?:\s*[- ]?squared|\s*[²2])"
     claims_visible_annotation = re.search(
@@ -1456,15 +1499,15 @@ def _figure_caption_semantic_findings(
         narrative,
     )
     if claims_visible_annotation and not re.search(rf"\b{r_squared}\b", visible):
-        return [
+        findings.append(
             (
                 "figure_caption_claims_missing_annotation",
                 "The caption or alt text says the figure contains an R-squared "
                 "annotation, but no such label is recoverable from the rendered "
                 "raster; correct the caption or add the promised annotation.",
             )
-        ]
-    return []
+        )
+    return findings
 
 
 def _figure_source_semantic_findings(
@@ -1850,14 +1893,23 @@ def validate_report(
                 )[:64_000]
             except OSError:
                 render_stderr = ""
-            if "results might be incorrect" in render_stderr.lower():
+            normalized_render_stderr = render_stderr.lower()
+            if any(
+                warning in normalized_render_stderr
+                for warning in (
+                    "results might be incorrect",
+                    "tight layout not applied",
+                    "constrained_layout not applied",
+                    "constrained layout not applied",
+                )
+            ):
                 findings.append(
                     LintFinding(
                         code="figure_render_warning",
                         location=record.stderr_path,
                         message=(
-                            "The plotting engine reported that layout results might "
-                            "be incorrect; regenerate and inspect the figure."
+                            "The plotting engine reported that figure layout could "
+                            "not be applied correctly; regenerate and inspect the figure."
                         ),
                     )
                 )
@@ -3162,6 +3214,21 @@ def validate_report(
                         )
                     )
                 figure_metadata = inspect_figure(artifact_path)
+                blank_band = excessive_internal_blank_band(artifact_path)
+                if blank_band is not None:
+                    findings.append(
+                        LintFinding(
+                            code="figure_excessive_internal_whitespace",
+                            location=location,
+                            message=(
+                                "The rendered figure contains an extreme internal "
+                                f"blank band spanning {blank_band['gap_fraction']:.1%} "
+                                "of the canvas between visible content regions. Keep "
+                                "annotations inside their axes and regenerate a compact "
+                                "layout."
+                            ),
+                        )
+                    )
                 reported_dpi = figure_metadata.get("dpi")
                 if (
                     isinstance(reported_dpi, (int, float))
@@ -3215,7 +3282,10 @@ def validate_report(
                         LintFinding(code=code, location=location, message=message)
                     )
                 for code, message in _figure_caption_semantic_findings(
-                    display.caption, display.alt_text, figure_ocr
+                    display.caption,
+                    display.alt_text,
+                    figure_ocr,
+                    machine_numbers,
                 ):
                     findings.append(
                         LintFinding(code=code, location=location, message=message)

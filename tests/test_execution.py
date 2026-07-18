@@ -332,6 +332,29 @@ def test_python_static_preflight_rejects_duplicate_category_ticks():
     assert _python_static_violations("ax.set_xticks([0, 1])") == []
 
 
+def test_output_inspection_rejects_nonrectangular_reader_table(tmp_path):
+    executor = _executor(tmp_path)
+    output = tmp_path / "output"
+    tables = output / "tables"
+    tables.mkdir(parents=True)
+    table = tables / "summary.csv"
+    table.write_text(
+        "metric,control,treatment,contrast\nt_statistic,,,,10.897\n",
+        encoding="utf-8",
+    )
+
+    _, violations = executor._inspect_outputs(output)
+
+    assert any("table rows must be rectangular" in item for item in violations)
+
+    table.write_text(
+        "metric,control,treatment,contrast\nt_statistic,,,10.897\n",
+        encoding="utf-8",
+    )
+    _, violations = executor._inspect_outputs(output)
+    assert violations == []
+
+
 def test_prior_reference_preflight_requires_current_successful_execution():
     code = "open('/prior/exec-002/output/results.json').read()"
 

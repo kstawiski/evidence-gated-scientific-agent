@@ -1,0 +1,75 @@
+{
+  "case": "known-effect",
+  "release_candidate": "v0.4.1",
+  "deployment_commit": "b6f8aafbb405db1a1d6d021cf759483244016726",
+  "deployment_image_digest": "sha256:e660c233c24708bc92393becf047e8b4165fb49162487416b722a6329dd46005",
+  "workspace_id": "0c4f49d6-ef1f-4904-9983-52f0e334dcc8",
+  "run_id": "279f162e-024d-42e6-8ee9-b82179968f4c",
+  "started_at": "2026-07-17T23:00:59.672696+00:00",
+  "finished_at": "2026-07-18T00:10:12.942831+00:00",
+  "terminal_status": "requires_human_decision",
+  "evaluator_score_before_live_schema_fix": "12/18",
+  "evaluator_score_after_live_schema_fix": "14/18",
+  "merit_gate": "failed",
+  "productive_behavior": [
+    "The prespecified plan passed independent planning audit and deterministic plan lint without repair.",
+    "Independent Python and R executions recovered the exact planted mean difference, Welch statistic, confidence interval, and Hedges g with clean stderr.",
+    "The task-specific reconciliation recorded both all_pass and reconciliation_passed as true, bound each language artifact by SHA-256, and kept every numerical delta below 1e-6.",
+    "Reader-facing table precision was repaired while the full-precision Python and R JSON artifacts remained immutable.",
+    "After two pathological portrait renders, later repairs produced compact figures with distinct group centers, visible quantitative effect ticks, a visible null, and correct estimate and interval geometry."
+  ],
+  "release_blockers": [
+    "The first figure was 2593x4593 with a 65.4% internal blank band because an effect annotation was placed at an arbitrary data-space y coordinate outside the tickless effect panel; Matplotlib emitted 'Tight layout not applied', but the deployed warning matcher recognized only a different warning phrase.",
+    "A later 2833x8472 replacement had a 78.9% internal blank band despite clean stderr, proving that plotting warnings alone cannot guard canvas occupancy.",
+    "Two report revisions falsely said the confidence interval crossed zero even though the authoritative interval was [4.071144, 5.928856].",
+    "Gemma did not identify either extreme blank-canvas defect or the false interval description; it twice returned a nominal visual pass missing the required annotation-data clearance token.",
+    "A compact, manually acceptable repair was needlessly rejected after OCR hallucinated the low-confidence fragment 'ole' from colored points and a black error bar and treated it as annotation/data overlap.",
+    "The final repair wrote a four-column CSV header but five fields in multiple inferential rows. Deterministic validation correctly rejected the nonrectangular table after the fourth and final repair, leaving the run at requires_human_decision without accepted display registration or independent review.",
+    "The evaluator initially failed the exact Python/R and effect-size checks because it accepted hedges_correction_J only under effect_size, not the deployed primary.hedges_correction_J path. The immutable artifacts both match the exact reference after this schema correction, improving the score from 12/18 to 14/18 without changing the four genuine terminal failures."
+  ],
+  "terminal_artifacts": [
+    {
+      "path": "computations/attempt-0/exec-001/output/data/python_analysis.json",
+      "sha256": "5d179f089862fba1c6387244a86994e2a1659c116bf5a553842233e3c3ac896d"
+    },
+    {
+      "path": "computations/attempt-0/exec-002/output/data/r_analysis.json",
+      "sha256": "3f1ec179a5b7511d1b5d4cab6585d947c4bc964afcda4cdfd73755cdbe28907c"
+    },
+    {
+      "path": "computations/attempt-0/exec-004/output/data/reconciliation.json",
+      "sha256": "027feee9bad984e7904172f63e1c039eb1335ff0a6f77bbbbdff3f3d17c86c1e"
+    },
+    {
+      "path": "computations/attempt-4/exec-001/output/figures/primary_analysis.png",
+      "sha256": "cf6dd13e3dcfeb23c72f90ec1886f7668ec1e2ddf49fc94eb9ac88b9e74068a8",
+      "width": 2833,
+      "height": 1494
+    },
+    {
+      "path": "computations/attempt-4/exec-001/output/tables/summary_table.csv",
+      "sha256": "bf5da525e43e1fd3261028c0745e153345e54807d01d3c0f6107b8f9474bbb40"
+    },
+    {
+      "path": "attempts/attempt-4/scientific_report.json",
+      "sha256": "70ee67d10d1f765902f7f2f94dd570088e87e29e77eef1ba58b021bdbe9c4350"
+    },
+    {
+      "path": "attempts/attempt-4/deterministic_validation.json",
+      "sha256": "94cd2f618d4930d32e69830c554e4127465860e9b3fc7f07fcac2a9330cb036e"
+    },
+    {
+      "path": "gemma_display_audit.json",
+      "sha256": "4c63d7e37cb46c957ce49d8f9ea195db561912fd2a582b9f648f93776ca84862"
+    }
+  ],
+  "implemented_repairs": [
+    "Deterministic figure validation now treats tight-layout and constrained-layout failure variants as blocking, and generation guidance keeps annotations in axes-fraction coordinates or bounded point offsets.",
+    "A bounded raster-geometry check rejects an extreme internal blank band separating visible content regions even when the plotting engine emits no warning.",
+    "Figure captions and alt text are checked against authoritative machine-readable confidence-interval bounds for false zero/null-crossing claims.",
+    "Annotation/data overlap blocking now requires high-confidence OCR, preventing the observed 73%-confidence point-cluster hallucination while preserving ambiguous cases for Gemma review.",
+    "CSV/TSV files under output/tables are strictly parsed during post-execution inspection; nonempty headers and rectangular rows are required before an artifact can become successful evidence.",
+    "The known-effect evaluator accepts the deployed primary.hedges_correction_J schema and retains exact reference-value checks."
+  ],
+  "disposition": "Rejected at requires_human_decision. The statistical computation and reconciliation were exact, but display generation repeatedly produced pathological layouts, the report misstated interval/null geometry, a low-confidence OCR false positive consumed a repair, and the final reader table was malformed. Each observed defect is now represented by deterministic regression coverage or stricter generation/output validation."
+}

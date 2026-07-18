@@ -376,6 +376,7 @@ def _known_effect_matches_reference(value: dict) -> bool:
         (
             (
                 "primary.hedges_g_correction_factor_J",
+                "primary.hedges_correction_J",
                 "primary.hedges_g.j_correction_factor",
                 "effect_size.hedges_g_correction_factor_J",
                 "effect_size.hedges_correction_J",
@@ -384,6 +385,7 @@ def _known_effect_matches_reference(value: dict) -> bool:
             (
                 "hedges_g_correction_factor_J",
                 "hedges_g_correction_J",
+                "hedges_correction_J",
                 "j_correction",
                 "J_correction",
             ),

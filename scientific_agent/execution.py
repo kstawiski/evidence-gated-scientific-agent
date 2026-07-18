@@ -782,6 +782,18 @@ class AnalysisExecutor:
             if info.st_size > self.settings.max_file_bytes:
                 violations.append(f"output file exceeds per-file limit: {path}")
                 continue
+            relative = path.relative_to(output_dir)
+            if (
+                relative.parts
+                and relative.parts[0].casefold() == "tables"
+                and path.suffix.casefold() in {".csv", ".tsv"}
+            ):
+                from .reporting import read_table_preview
+
+                try:
+                    read_table_preview(path)
+                except ValueError as exc:
+                    violations.append(f"invalid reader table {path}: {exc}")
             artifacts.append(_artifact(path, "sandbox-generated analysis artifact"))
         if total_bytes > self.settings.max_output_bytes:
             violations.append(

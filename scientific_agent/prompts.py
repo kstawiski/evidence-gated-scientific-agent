@@ -397,6 +397,13 @@ scientific null, the point estimate, and both confidence-interval endpoints.
 Keep visible numeric ticks on every quantitative effect-estimate axis, including
 ticks that make the null, estimate, and confidence interval interpretable; never
 erase the scale with set_xticks([]) or blank tick labels.
+Keep effect-panel annotations inside the panel: place them in axes-fraction
+coordinates with the matching axes transform, or use annotate() with a bounded
+offset from the estimand. Do not place annotation text at an arbitrary data-space
+y coordinate on a tickless effect axis, because bbox_inches='tight' can expand the
+saved canvas around that text and strand the plots in a mostly blank image. Treat
+every tight-layout or constrained-layout warning as blocking: adjust the layout or
+annotation coordinates and regenerate the figure without that warning.
 Qwen has no image-understanding capability. When the task asks to inspect source
 figures, scans, visual proofs, slide pages, or images embedded in PDF/Office/archive
 inputs, use Python/R only to inventory and deterministically render or convert the
@@ -519,6 +526,10 @@ mandatory display candidate. An unrelated newer artifact never supersedes an
 older figure or table. Register only valid figures and CSV/TSV tables. Never
 register JSON as a table; write full-precision JSON below /output/data and a
 separately rounded CSV/TSV below /output/tables.
+Before returning any CSV/TSV under /output/tables, reopen it with a strict parser
+and assert that the header is nonempty and every row has exactly the header's
+column count. A malformed reader table is rejected as failed output and cannot be
+registered as evidence.
 In a repair research packet, address every deterministic finding code and every
 critic blocking finding_id explicitly. Mark each as fixed (with the successful
 replacement artifact path or exact report correction), inherent_unfixable (with

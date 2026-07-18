@@ -6,6 +6,7 @@ import csv
 from functools import lru_cache
 import io
 import json
+import math
 import mimetypes
 import os
 import re
@@ -153,6 +154,77 @@ def inspect_figure(path: Path) -> dict[str, Any]:
         "bytes": size,
         "dpi": dpi,
     }
+
+
+@lru_cache(maxsize=256)
+def _excessive_internal_blank_band_cached(
+    path_text: str, size: int, mtime_ns: int
+) -> dict[str, Any] | None:
+    """Locate an extreme blank band separating visible figure content."""
+
+    del size, mtime_ns
+    try:
+        with Image.open(path_text) as source:
+            source.thumbnail((512, 512), Image.Resampling.BILINEAR)
+            if "A" in source.getbands():
+                foreground = source.convert("RGBA")
+                background = Image.new("RGBA", foreground.size, "white")
+                background.alpha_composite(foreground)
+                image = background.convert("RGB")
+            else:
+                image = source.convert("RGB")
+    except (OSError, ValueError, Image.DecompressionBombError):
+        return None
+    width, height = image.size
+    if width < 32 or height < 32:
+        return None
+    pixels = image.load()
+    minimum_nonwhite = max(2, math.ceil(width * 0.01))
+    content_rows = []
+    for y in range(height):
+        nonwhite = sum(1 for x in range(width) if min(pixels[x, y]) < 245)
+        content_rows.append(nonwhite >= minimum_nonwhite)
+    try:
+        first = content_rows.index(True)
+        last = len(content_rows) - 1 - content_rows[::-1].index(True)
+    except ValueError:
+        return None
+    longest_start = longest_end = first
+    cursor = first
+    while cursor <= last:
+        if content_rows[cursor]:
+            cursor += 1
+            continue
+        start = cursor
+        while cursor <= last and not content_rows[cursor]:
+            cursor += 1
+        if cursor - start > longest_end - longest_start:
+            longest_start, longest_end = start, cursor
+    gap_rows = longest_end - longest_start
+    content_above = sum(content_rows[first:longest_start])
+    content_below = sum(content_rows[longest_end : last + 1])
+    if (
+        gap_rows < max(32, math.ceil(height * 0.45))
+        or content_above < 2
+        or content_below < 2
+    ):
+        return None
+    return {
+        "gap_fraction": round(gap_rows / height, 4),
+        "gap_start_fraction": round(longest_start / height, 4),
+        "gap_end_fraction": round(longest_end / height, 4),
+        "sample_width": width,
+        "sample_height": height,
+    }
+
+
+def excessive_internal_blank_band(path: Path) -> dict[str, Any] | None:
+    """Return geometry for a clearly excessive blank band, if present."""
+
+    info = path.stat()
+    return _excessive_internal_blank_band_cached(
+        str(path), info.st_size, info.st_mtime_ns
+    )
 
 
 def _parse_tesseract_tsv(raw: bytes) -> dict[str, Any]:
@@ -553,7 +625,7 @@ def figure_annotation_overlap_candidates(
         with Image.open(path) as image:
             raster = image.convert("RGB")
             for word in horizontal:
-                if word["height"] < minimum_height:
+                if word["confidence"] < 80 or word["height"] < minimum_height:
                     continue
                 sample = raster.crop(
                     (word["left"], word["top"], word["right"], word["bottom"])

@@ -326,6 +326,13 @@ def test_colored_mark_crossing_annotation_is_a_deterministic_candidate(
     assert candidates[0]["text"] == "4.071"
     assert candidates[0]["height_vs_median"] == 3.0
     assert candidates[0]["chromatic_pixel_fraction"] >= 0.02
+    assert len(candidates[0]["box_fraction"]) == 4
+
+    ocr["words"][-1]["confidence"] = 73
+    assert (
+        figure_annotation_overlap_candidates(figure, ocr, width=640, height=400) == []
+    )
+    ocr["words"][-1]["confidence"] = 82
 
     monkeypatch.setattr(
         "scientific_agent.linting.extract_figure_ocr", lambda _path: ocr
@@ -506,6 +513,52 @@ def test_reported_low_figure_dpi_is_blocking(tmp_path: Path):
     )
     validation = validate_report(report, computation=computation)
     assert "figure_dpi_below_minimum" not in {
+        finding.code for finding in validation.findings
+    }
+
+
+def test_extreme_internal_figure_whitespace_is_blocking(tmp_path: Path):
+    report, computation = _fixture(tmp_path)
+    figure = Path(report.displays[0].artifact_path)
+    image = Image.new("RGB", (600, 1800), color="white")
+    draw = ImageDraw.Draw(image)
+    draw.rectangle((50, 20, 550, 90), fill="black")
+    draw.rectangle((40, 1450, 560, 1750), outline="black", width=12)
+    image.save(figure, dpi=(300, 300))
+    computation.artifacts[0] = computation.artifacts[0].model_copy(
+        update={"sha256": sha256_file(figure)}
+    )
+
+    validation = validate_report(report, computation=computation)
+
+    assert "figure_excessive_internal_whitespace" in {
+        finding.code for finding in validation.findings
+    }
+
+
+def test_figure_alt_text_cannot_claim_nonnull_interval_crosses_zero(tmp_path: Path):
+    report, computation = _fixture(tmp_path)
+    figure = report.displays[0]
+    figure.alt_text = (
+        "Effect plot with a 95% confidence interval crossing the zero reference line."
+    )
+    _add_machine_result(
+        computation,
+        tmp_path / "computations" / "exec-001" / "output" / "analysis.json",
+        '{"primary":{"ci_95_lower":4.071144,"ci_95_upper":5.928856}}\n',
+    )
+
+    validation = validate_report(report, computation=computation)
+
+    assert "figure_caption_interval_null_contradiction" in {
+        finding.code for finding in validation.findings
+    }
+
+    figure.alt_text = (
+        "Effect plot with a 95% confidence interval that does not cross zero."
+    )
+    validation = validate_report(report, computation=computation)
+    assert "figure_caption_interval_null_contradiction" not in {
         finding.code for finding in validation.findings
     }
 
@@ -742,14 +795,27 @@ def test_latest_machine_result_supersedes_same_logical_repair_output(tmp_path: P
     assert "table_machine_result_contradiction" not in codes
 
 
-def test_plotting_engine_layout_warning_is_blocking(tmp_path: Path):
+@pytest.mark.parametrize(
+    "warning",
+    [
+        (
+            "Figure includes Axes that are not compatible with tight_layout, "
+            "so results might be incorrect.\n"
+        ),
+        (
+            "UserWarning: Tight layout not applied. The bottom and top margins "
+            "cannot be made large enough to accommodate all Axes decorations.\n"
+        ),
+        (
+            "UserWarning: constrained_layout not applied because axes sizes "
+            "collapsed to zero.\n"
+        ),
+    ],
+)
+def test_plotting_engine_layout_warning_is_blocking(tmp_path: Path, warning: str):
     report, computation = _fixture(tmp_path)
     stderr = tmp_path / "stderr.txt"
-    stderr.write_text(
-        "Figure includes Axes that are not compatible with tight_layout, "
-        "so results might be incorrect.\n",
-        encoding="utf-8",
-    )
+    stderr.write_text(warning, encoding="utf-8")
     computation.records = [
         ComputationRecord(
             execution_id="exec-001",

@@ -169,9 +169,19 @@ def test_local_tutorial_is_linked_from_product_surfaces():
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     site = (ROOT / "docs" / "index.html").read_text(encoding="utf-8")
     tutorial = (ROOT / "docs" / "LOCAL_SETUP.md").read_text(encoding="utf-8")
+    deployment = (ROOT / "deploy" / "README.md").read_text(encoding="utf-8")
+    service = (ROOT / "deploy" / "evidence-bench-compose.service.example").read_text(
+        encoding="utf-8"
+    )
 
     assert "docs/LOCAL_SETUP.md" in readme
     assert "docs/LOCAL_SETUP.md" in site
+    assert "deploy/README.md" in site
+    assert "not peer review, clinical authority" in site
     assert "./scripts/local_setup.sh" in tutorial
     assert "./scripts/local_run.sh" in tutorial
     assert "macOS" in tutorial and "Linux" in tutorial and "WSL2" in tutorial
+    assert "/etc/systemd/system/evidence-bench.service" in deployment
+    assert "~/.config/systemd/user/evidence-bench-qwen-tunnel.service" in deployment
+    assert "-f compose.yaml -f compose.local.yaml" in service
+    assert "--no-build" in service

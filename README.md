@@ -10,7 +10,7 @@
 Evidence Bench is a self-hosted workspace for evidence-gated scientific AI. It
 combines local model reasoning, isolated Python and R execution, literature
 retrieval, deterministic validation, independent model review, and complete run
-provenance in one browser application and A2A 1.0 service.
+provenance in one browser application and an Agent2Agent (A2A) 1.0 service.
 
 [Project website][product-site] ·
 [Quick start](#quick-start) ·
@@ -34,8 +34,8 @@ provenance in one browser application and A2A 1.0 service.
 - **Real scientific computing.** Python and R run in confined workers with
   read-only inputs, offline execution, resource limits, and append-only outputs.
 - **Grounded literature work.** Typed PubMed acquisition, an instance-local
-  knowledge library, managed Chromium research, and optional MCP connections
-  preserve the exact evidence used by a report.
+  knowledge library, managed Chromium research, and optional Model Context
+  Protocol (MCP) connections preserve the exact evidence used by a report.
 - **Live, inspectable progress.** The WebUI streams phases, bounded tool events,
   visible model output, generated files, figures, and tables without exposing
   chain-of-thought or credentials.
@@ -98,7 +98,9 @@ claim peer review, clinical authority, science lock, or submission readiness.
 - Docker Engine/Desktop with Docker Compose v2
 - local Ollama models installed by the setup script, or two existing
   OpenAI-compatible endpoints: one Qwen executor and one Gemma critic
-- kernel support for the nested namespace isolation used by the worker
+- Linux namespace support for the confined Python/R workers (Docker Desktop
+  provides it; hardened native-Linux hosts may need the troubleshooting steps in
+  the [local setup guide](docs/LOCAL_SETUP.md#the-sandbox-or-another-service-is-unhealthy))
 
 ### Automatic local setup
 
@@ -114,7 +116,10 @@ configuration, starts the released containers, and runs preflight. See the
 [macOS, Linux, and WSL2 tutorial](docs/LOCAL_SETUP.md) for the profile table,
 unattended setup, exact-model overrides, and troubleshooting.
 
-### Existing model endpoints
+### Existing model endpoints or a persistent server
+
+The base Compose configuration builds the checked-out source. After configuring
+the model endpoints and replacing every example credential, developers can run:
 
 ```bash
 cp .env.example .env
@@ -125,7 +130,7 @@ docker compose up --build -d
 curl http://127.0.0.1:8080/healthz
 ```
 
-Open <http://127.0.0.1:8080>. The default Compose profile binds the WebUI to
+Open <http://127.0.0.1:8080>. The base Compose configuration binds the WebUI to
 loopback. Keep it private, or place it behind an authenticated TLS reverse proxy
 before exposing it beyond a trusted network.
 
@@ -140,9 +145,10 @@ The most important settings are documented in [`.env.example`](.env.example):
 | `EVIDENCE_BENCH_DATA_PATH` | persistent workspace and provenance storage |
 | `WEB_BIND_ADDRESS`, `WEB_PUBLISHED_PORT` | WebUI bind address and port |
 
-See the [local setup tutorial](docs/LOCAL_SETUP.md) for laptop/workstation use or
-the [deployment guide](deploy/README.md) for persistent services, reverse proxy
-guidance, managed-browser isolation, and trusted-network noVNC access.
+Use the [local setup tutorial](docs/LOCAL_SETUP.md) for a laptop or workstation.
+For released images, durable storage, upgrades, rollback, TLS termination, and
+trusted-network browser access, follow the end-to-end
+[persistent deployment guide](deploy/README.md).
 
 ## Ways to use Evidence Bench
 

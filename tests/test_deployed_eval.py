@@ -662,7 +662,7 @@ def test_known_effect_accepts_exact_live_groups_primary_shape():
             "degrees_of_freedom": 38.0,
             "p_value": 2.971749478841818e-13,
             "hedges_g": 3.3775483697174717,
-            "j_correction": 0.9801324503311258,
+            "j_correction_factor": 0.9801324503311258,
             "pooled_sd": 1.4509525002200232,
         },
         "groups": {
@@ -678,7 +678,7 @@ def test_reconciliation_delta_accepts_typed_comparison_records():
     artifact = {
         "comparisons": [
             {
-                "metric": "mean_difference",
+                "metric": "point_estimate",
                 "absolute_difference": 0.0,
                 "passed": True,
             },
@@ -691,7 +691,12 @@ def test_reconciliation_delta_accepts_typed_comparison_records():
         "reconciliation_passed": True,
     }
 
-    assert _reconciliation_delta(artifact, "mean_diff", "mean_difference") == 0.0
+    assert (
+        _reconciliation_delta(
+            artifact, "mean_diff", "mean_difference", "point_estimate"
+        )
+        == 0.0
+    )
     assert (
         _reconciliation_delta(artifact, "t_statistic", "welch_t_statistic") == 1.8e-14
     )

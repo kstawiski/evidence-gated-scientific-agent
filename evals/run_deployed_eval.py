@@ -607,14 +607,24 @@ def score(
             checks["cross_language_reconciled"] = bool(
                 isinstance(reconciliation, dict)
                 and _reconciliation_delta(
-                    reconciliation, "mean_diff", "mean_difference"
+                    reconciliation,
+                    "mean_diff",
+                    "mean_difference",
+                    "primary.point_estimate",
                 )
                 <= 1e-6
                 and _reconciliation_delta(
-                    reconciliation, "t_stat", "t_statistic", "welch_t_statistic"
+                    reconciliation,
+                    "t_stat",
+                    "t_statistic",
+                    "welch_t_statistic",
+                    "primary.t_statistic",
                 )
                 <= 1e-6
-                and _reconciliation_delta(reconciliation, "hedges_g") <= 1e-6
+                and _reconciliation_delta(
+                    reconciliation, "hedges_g", "effect_size.hedges_g"
+                )
+                <= 1e-6
                 and reconciliation.get("reconciliation_passed") is True
             )
             displays = (detail.get("display_manifest") or {}).get("displays", [])

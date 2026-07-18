@@ -4408,6 +4408,7 @@ async def run_scientific_task(
         required_display_kinds=required_display_kinds,
         controller_artifacts=controller_artifacts,
         controller_dates=controller_dates,
+        task=planning.master_plan.task,
     )
     if validation.passed:
         report_progress(
@@ -4551,6 +4552,7 @@ async def run_scientific_task(
             required_display_kinds=required_display_kinds,
             controller_artifacts=controller_artifacts,
             controller_dates=controller_dates,
+            task=planning.master_plan.task,
         )
         if validation.passed:
             report_progress(

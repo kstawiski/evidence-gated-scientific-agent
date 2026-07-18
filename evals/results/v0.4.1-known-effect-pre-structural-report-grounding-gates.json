@@ -1,0 +1,81 @@
+{
+  "case": "known-effect",
+  "release_candidate": "v0.4.1",
+  "deployment_commit": "755830b392cafe6963de6d59fdefd42458d5448c",
+  "deployment_image_digest": "sha256:fe059cb17ba009e084dfe9007fbb8e5e77c83a01d174ef52b876be00bdc3b26b",
+  "workspace_id": "170b89b1-92e8-4187-9c41-24dc6929da3b",
+  "run_id": "290eef90-e1f0-445b-82fa-9604097b0e0f",
+  "started_at": "2026-07-18T00:25:47.760666+00:00",
+  "finished_at": "2026-07-18T01:08:00.735385+00:00",
+  "terminal_status": "supported",
+  "evaluator_score_before_live_schema_fix": "17/18",
+  "evaluator_score_after_live_schema_fix": "18/18",
+  "merit_gate": "failed",
+  "productive_behavior": [
+    "The fresh deployed run passed independent plan review, recovered the exact planted effect independently in Python and R, and bound both language artifacts into a reconciliation with all_pass and reconciliation_passed true.",
+    "The static figure gate rejected two null-clipping implementations before execution; a corrected compact 2970x1469 raster then passed deterministic geometry/OCR checks and manual visual inspection.",
+    "The strict post-execution reader-table parser accepted a rectangular 13-column CSV with three rows, and the display manifest registered both final reader outputs.",
+    "Deterministic report validation repaired vague robustness language and PubMed acquisition metadata before Gemma returned report and multimodal display passes.",
+    "The immutable run rescored 18/18 after the evaluator accepted its fully qualified reconciliation metric names."
+  ],
+  "release_blockers": [
+    "The final report described a single-site structure even though the immutable input profile and diagnostic site balance showed two distinct sites, A and B, in both groups.",
+    "The report classified the unspecified allocation and sampling design as observational despite neither the task nor controller profile establishing that design.",
+    "The abstract promoted cross-language numerical agreement into confirmation of implementation accuracy; agreement establishes checked reproducibility, not correctness or validity.",
+    "Claim 1 cited diagnostics.json for 40 rows, 5 columns, and n=20 per arm, but that artifact contained PASS labels and four site counts of 10 rather than those explicit structural values. The separate Python result recorded six columns after adding the derived change field, underscoring the source mismatch.",
+    "Deterministic validation and both Gemma audits returned pass, so the run is rejected by the manual merit gate despite terminal supported and evaluator 18/18.",
+    "The evaluator initially missed the otherwise valid reconciliation because comparisons used primary.point_estimate, primary.t_statistic, and effect_size.hedges_g rather than its short aliases."
+  ],
+  "terminal_artifacts": [
+    {
+      "path": "computations/attempt-0/exec-001/output/data/python_results.json",
+      "sha256": "824e758f872bb82faa359954f003477a2000c90ea506a0ac04a1e3ff78d2acfb"
+    },
+    {
+      "path": "computations/attempt-0/exec-002/output/data/r_results.json",
+      "sha256": "ded1788890af70d16ea63abd296c2087da8d7844e2e0f8d1f158431017f8affe"
+    },
+    {
+      "path": "computations/attempt-0/exec-005/output/data/reconciliation.json",
+      "sha256": "8779212eac0c7489ed7989df23022831788fc95fd7d5d049df8adb74faa85e62"
+    },
+    {
+      "path": "computations/attempt-0/exec-005/output/figures/primary_contrast.png",
+      "sha256": "ba5c9ce958c046c1a37f2cfdb89f1d69417dc4572a28de5edd03e821037f012b",
+      "width": 2970,
+      "height": 1469
+    },
+    {
+      "path": "computations/attempt-0/exec-005/output/tables/summary_statistics.csv",
+      "sha256": "7be657671fac8986b9bbd9aaa9e6230d34ad7a102ec3ec6210864f6c880a9143"
+    },
+    {
+      "path": "attempts/attempt-2/scientific_report.json",
+      "sha256": "56f6ddbdabcd002b18d037cfa406b2ac7bdef7099a7810f50264fd72c4ae25ad"
+    },
+    {
+      "path": "deterministic_validation.json",
+      "sha256": "49fb8eb3f7a3eeae5cf509025b5759003751abf57b629f033cc9ebbb65639151"
+    },
+    {
+      "path": "gemma_review.json",
+      "sha256": "4d8a4dd0ee17bac8dde43d12dfa1b055f88321e5ef358edc39b4b2abe488a33e"
+    },
+    {
+      "path": "gemma_display_audit.json",
+      "sha256": "376cde87ed5c89d369f41212bbdb7bb63253c4445b285f1edd8cda221f14d4ec"
+    },
+    {
+      "path": "report.md",
+      "sha256": "fcd86aba11371a8ed68829a784a2eac003ac55759f29755fa9aa03045eaddbac"
+    }
+  ],
+  "implemented_repairs": [
+    "The report validator now receives the locked TaskSpec and rejects design classifications not established by the task.",
+    "A controller-profile gate rejects single-site or single-center language when a complete site-like column has multiple distinct values.",
+    "Cross-language agreement cannot be described as confirmation of implementation accuracy, correctness, or validity.",
+    "Explicit row, column, subject, and n= sample counts in a computed claim must occur in a directly cited machine-readable artifact.",
+    "The known-effect evaluator accepts fully qualified reconciliation metric names while retaining the same exact tolerance and required top-level verdict."
+  ],
+  "disposition": "Rejected despite terminal supported and immutable 18/18 rescore. The computation, reconciliation, table, and figure are acceptable, but the final narrative contradicts the controller-owned site profile, invents an observational design, overstates cross-language agreement, and attaches structural counts to an artifact that does not contain them. These defects now have deterministic regression coverage."
+}

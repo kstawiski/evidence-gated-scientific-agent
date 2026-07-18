@@ -697,6 +697,48 @@ def test_reconciliation_delta_accepts_typed_comparison_records():
     )
 
 
+def test_reconciliation_delta_accepts_fully_qualified_metric_names():
+    artifact = {
+        "comparisons": [
+            {
+                "metric": "primary.point_estimate",
+                "absolute_difference": 0.0,
+                "passed": True,
+            },
+            {
+                "metric": "primary.t_statistic",
+                "absolute_difference": 1.8e-14,
+                "passed": True,
+            },
+            {
+                "metric": "effect_size.hedges_g",
+                "absolute_difference": 1.8e-15,
+                "passed": True,
+            },
+        ],
+        "reconciliation_passed": True,
+    }
+
+    assert (
+        _reconciliation_delta(
+            artifact, "mean_diff", "mean_difference", "primary.point_estimate"
+        )
+        == 0.0
+    )
+    assert (
+        _reconciliation_delta(
+            artifact,
+            "t_statistic",
+            "welch_t_statistic",
+            "primary.t_statistic",
+        )
+        == 1.8e-14
+    )
+    assert (
+        _reconciliation_delta(artifact, "hedges_g", "effect_size.hedges_g") == 1.8e-15
+    )
+
+
 def test_cancelled_run_scores_cleanly_without_requesting_final_artifacts():
     class NoDownloads:
         @staticmethod

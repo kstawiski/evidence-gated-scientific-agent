@@ -542,6 +542,27 @@ _UNQUALIFIED_RESULT_ROBUSTNESS = re.compile(
     r"estimate|finding|result|separation)s?\b",
     re.IGNORECASE,
 )
+_CROSS_LANGUAGE_ACCURACY_OVERCLAIM = re.compile(
+    r"\b(?:cross[- ]language|python\s*(?:and|/|[-–])\s*r|"
+    r"r\s*(?:and|/|[-–])\s*python)\b[^.!?]{0,140}"
+    r"\bconfirm\w*\b[^.!?]{0,60}\b(?:accuracy|correctness|validity)\b|"
+    r"\b(?:accuracy|correctness|validity)\b[^.!?]{0,60}\bconfirm\w*\b"
+    r"[^.!?]{0,140}\b(?:cross[- ]language|python\s*(?:and|/|[-–])\s*r|"
+    r"r\s*(?:and|/|[-–])\s*python)\b",
+    re.IGNORECASE,
+)
+_SINGLE_SITE_ASSERTION = re.compile(
+    r"\b(?:single|one)[- ](?:site|center|centre)\b", re.IGNORECASE
+)
+_SITE_COLUMN = re.compile(
+    r"(?:^|[_\s-])(?:site|center|centre)(?:$|[_\s-])", re.IGNORECASE
+)
+_STRUCTURAL_COUNT = re.compile(
+    r"(?<![\w.])(?P<number>\d+)\s+"
+    r"(?P<label>rows?|records?|subjects?|columns?)\b|"
+    r"\bn\s*=\s*(?P<n_number>\d+)\b",
+    re.IGNORECASE,
+)
 _GROUP_MEAN_UNIFORMITY_OVERCLAIM = re.compile(
     r"\b(?:group|condition|arm)\b.{0,100}\b"
     r"(?:show(?:s|ed|ing)?|exhibit(?:s|ed|ing)?)\b.{0,30}\buniform\b"
@@ -740,6 +761,40 @@ def _citation_correspondence_numbers(text: str) -> set[str]:
             continue
         values.add(normalized + ("%" if match.group("percent") else ""))
     return values
+
+
+def _computed_structural_counts(text: str) -> list[tuple[str, str]]:
+    """Return explicit row/column/sample counts that need direct artifact support."""
+
+    counts: list[tuple[str, str]] = []
+    for match in _STRUCTURAL_COUNT.finditer(text):
+        raw = match.group("number") or match.group("n_number")
+        label = match.group("label") or "n"
+        try:
+            normalized = format(Decimal(raw).normalize(), "f")
+        except InvalidOperation:
+            continue
+        counts.append((label.casefold(), normalized))
+    return counts
+
+
+def _asserted_report_designs(text: str) -> set[str]:
+    """Find positive design classifications while ignoring explicit uncertainty."""
+
+    asserted: set[str] = set()
+    uncertainty = re.compile(
+        r"(?:\bnot\s+(?:an?\s+)?|\bunknown\s+whether\s+|"
+        r"\bunspecified\s+whether\s+|\bcannot\s+(?:be\s+)?determin\w*\s+"
+        r"(?:whether\s+)?|\bno\s+evidence\s+(?:of|that)\s+)$",
+        re.IGNORECASE,
+    )
+    for design, pattern in _TASK_DESIGN_CLASSIFICATION.items():
+        for match in pattern.finditer(text):
+            prefix = text[max(0, match.start() - 60) : match.start()]
+            if uncertainty.search(prefix):
+                continue
+            asserted.add(design)
+    return asserted
 
 
 def _equation_operand(value: str) -> str:
@@ -1715,6 +1770,7 @@ def validate_report(
     required_display_kinds: tuple[str, ...] = (),
     controller_artifacts: tuple[ArtifactRef, ...] = (),
     controller_dates: tuple[str, ...] = (),
+    task: TaskSpec | None = None,
 ) -> DeterministicValidation:
     findings: list[LintFinding] = []
     valid_reconciliation_paths: set[str] = set()
@@ -2102,6 +2158,43 @@ def validate_report(
         )
     )
     report_text = " ".join(report_text.split())
+    if task is not None:
+        task_design_text = " ".join([task.objective, *task.constraints])
+        for design in sorted(_asserted_report_designs(report_text)):
+            if _TASK_DESIGN_CLASSIFICATION[design].search(task_design_text):
+                continue
+            findings.append(
+                LintFinding(
+                    code="unsupported_report_design_classification",
+                    location="report",
+                    message=(
+                        f"The report classifies the input as {design}, but the user "
+                        "task and controller profile do not establish that design. "
+                        "State that allocation and sampling design are unspecified."
+                    ),
+                )
+            )
+        multi_site_columns = [
+            f"{profile.path}:{column.name} ({column.distinct_non_missing})"
+            for profile in (task.input_profile.files if task.input_profile else [])
+            if profile.inspection_status == "complete"
+            for column in profile.columns
+            if _SITE_COLUMN.search(column.name) and column.distinct_non_missing > 1
+        ]
+        if multi_site_columns and _SINGLE_SITE_ASSERTION.search(report_text):
+            findings.append(
+                LintFinding(
+                    code="single_site_claim_contradicts_input_profile",
+                    location="report",
+                    message=(
+                        "The report describes a single-site or single-center input, "
+                        "but the immutable controller profile records multiple "
+                        "distinct site values: "
+                        + ", ".join(multi_site_columns)
+                        + ". Describe the observed site structure exactly."
+                    ),
+                )
+            )
     machine_numbers = _machine_json_numbers(computation)
     findings.extend(
         _reported_degrees_of_freedom_findings(report.results, machine_numbers)
@@ -2226,6 +2319,19 @@ def validate_report(
                 message=(
                     "Do not summarize a result as robust. State the exact observed "
                     "reproducibility or sensitivity evidence and its scope instead."
+                ),
+            )
+        )
+    if _CROSS_LANGUAGE_ACCURACY_OVERCLAIM.search(report_text):
+        findings.append(
+            LintFinding(
+                code="cross_language_agreement_accuracy_overclaim",
+                location="report",
+                message=(
+                    "Cross-language numerical agreement establishes reproducibility "
+                    "between the checked implementations, not implementation "
+                    "accuracy, correctness, or validity. State the observed agreement "
+                    "and tolerance without the stronger claim."
                 ),
             )
         )
@@ -3592,6 +3698,28 @@ def validate_report(
                                 "A named diagnostic must occur in a directly cited "
                                 "machine-readable computation artifact. Missing: "
                                 + ", ".join(missing_diagnostics)
+                            ),
+                        )
+                    )
+                artifact_numbers = {
+                    number
+                    for artifact_text in artifact_texts
+                    for number in _citation_correspondence_numbers(artifact_text)
+                }
+                missing_structural_counts = [
+                    f"{label}={number}"
+                    for label, number in _computed_structural_counts(claim.text)
+                    if number not in artifact_numbers
+                ]
+                if artifact_texts and missing_structural_counts:
+                    findings.append(
+                        LintFinding(
+                            code="computed_structural_count_not_in_artifact",
+                            location=location,
+                            message=(
+                                "Explicit row, column, subject, or sample counts must "
+                                "occur in a directly cited machine-readable artifact. "
+                                "Missing: " + ", ".join(missing_structural_counts)
                             ),
                         )
                     )

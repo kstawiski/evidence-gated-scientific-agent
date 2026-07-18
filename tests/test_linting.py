@@ -1424,6 +1424,59 @@ def test_report_validator_rejects_unknown_design_and_domain_overreach():
     }
 
 
+def test_report_validator_rejects_design_site_and_reconciliation_overclaims():
+    input_profile = InputProfile(
+        total_files=1,
+        profiled_files=1,
+        files=[
+            InputFileProfile(
+                path="/workspace/study.csv",
+                sha256="a" * 64,
+                bytes=100,
+                detected_format="csv",
+                media_type="text/csv",
+                inspection_status="complete",
+                rows_observed=40,
+                rows_total=40,
+                columns=[
+                    InputColumnProfile(
+                        name="site",
+                        inferred_types=["string"],
+                        non_missing_count=40,
+                        missing_count=0,
+                        missing_fraction=0.0,
+                        distinct_non_missing=2,
+                        distinct_count_capped=False,
+                    )
+                ],
+            )
+        ],
+    )
+    report_task = task().model_copy(
+        update={
+            "objective": "Analyze an uploaded two-group pre/post study.",
+            "input_profile": input_profile,
+        }
+    )
+    report = article_report(
+        executive_summary=(
+            "Cross-language reconciliation confirmed implementation accuracy."
+        ),
+        discussion=(
+            "The observational design and single-site structure constrain "
+            "generalizability."
+        ),
+    )
+
+    validation = validate_report(report, task=report_task)
+
+    assert {finding.code for finding in validation.findings} >= {
+        "unsupported_report_design_classification",
+        "single_site_claim_contradicts_input_profile",
+        "cross_language_agreement_accuracy_overclaim",
+    }
+
+
 def test_report_validator_requires_each_locked_computation_language(tmp_path):
     output = tmp_path / "summary.csv"
     output.write_text("estimate\n5\n", encoding="utf-8")
@@ -2016,6 +2069,82 @@ def test_computed_diagnostic_must_exist_in_cited_artifact(tmp_path):
     assert "computed_diagnostic_not_in_artifact" in {
         finding.code for finding in validation.findings
     }
+
+
+def test_computed_structural_counts_must_exist_in_cited_artifact(tmp_path):
+    result_path = tmp_path / "diagnostics.json"
+    result_path.write_text(
+        json.dumps(
+            {
+                "schema_check": "PASS",
+                "missingness_check": "PASS",
+                "duplicate_subject_check": "PASS",
+                "outlier_check": "0 outliers detected by IQR method",
+                "site_balance": {
+                    "treatment_A": 10,
+                    "treatment_B": 10,
+                    "control_A": 10,
+                    "control_B": 10,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    artifact = ArtifactRef(
+        path=str(result_path),
+        sha256=sha256_file(result_path),
+        description="sandbox-generated analysis artifact",
+    )
+    computation = ComputationEvidence(
+        records=[
+            ComputationRecord(
+                execution_id="exec-001",
+                language="python",
+                code_sha256="a" * 64,
+                started_at="2026-07-18T00:00:00Z",
+                duration_seconds=1,
+                exit_code=0,
+                status="succeeded",
+                stdout_path=str(tmp_path / "stdout.txt"),
+                stderr_path=str(tmp_path / "stderr.txt"),
+                artifacts=[artifact],
+            )
+        ],
+        artifacts=[artifact],
+    )
+    report = article_report(
+        claims=[
+            ClaimRecord(
+                claim_id="structure",
+                text="The input had 40 rows and 5 columns with n=20 per arm.",
+                claim_type="computed",
+                evidence_refs=["diagnostics"],
+                status=EvidenceStatus.SUPPORTED,
+            )
+        ],
+        sources=[
+            SourceRecord(
+                source_id="diagnostics",
+                title="Diagnostics",
+                artifact_path=str(result_path),
+                source_type="other",
+                retrieved_at="2026-07-18T00:00:00Z",
+                supporting_passage="Structural diagnostics passed.",
+            )
+        ],
+    )
+
+    validation = validate_report(report, computation=computation)
+
+    findings = [
+        finding
+        for finding in validation.findings
+        if finding.code == "computed_structural_count_not_in_artifact"
+    ]
+    assert len(findings) == 1
+    assert "rows=40" in findings[0].message
+    assert "columns=5" in findings[0].message
+    assert "n=20" in findings[0].message
 
 
 def test_t_df_and_p_value_must_be_arithmetically_consistent(tmp_path):

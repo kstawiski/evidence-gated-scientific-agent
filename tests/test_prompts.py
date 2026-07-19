@@ -96,6 +96,10 @@ def test_researcher_uses_safe_survival_api_and_endpoint_semantics():
         "A minimum covariate-level Schoenfeld p-value is not a global PH" in RESEARCHER
     )
     assert "Treat time origin as unknown" in RESEARCHER
+    assert "median_survival_time_` (with the trailing underscore)" in RESEARCHER
+    assert "`float(kmf.predict(time_value))`" in RESEARCHER
+    assert "Never copy raw `confidence_intervals_`" in RESEARCHER
+    assert "preserve literal raw labels such as `T=0`" in RESEARCHER
 
 
 def test_planners_do_not_invent_input_names_or_qwen_visual_audits():

@@ -567,7 +567,9 @@ def test_tool_order_gate_allows_broader_zero_hit_search_and_lifts_after_code():
     assert gate.before_tool("search_pubmed", successful) is None
 
 
-def test_tool_order_gate_requires_current_child_computation_not_inherited_evidence():
+def test_tool_order_gate_requires_current_child_computation_not_inherited_evidence(
+    tmp_path,
+):
     gate = ScientificToolOrderGate(frozenset(), require_current_computation=True)
     gate.record_result("search_pubmed", {"articles": [{"pmid": "1"}]})
     inherited = ComputationEvidence(successful_calls=1)
@@ -579,8 +581,87 @@ def test_tool_order_gate_requires_current_child_computation_not_inherited_eviden
     assert denied is not None
     assert denied["error"] == "REQUIRED_COMPUTATION_PENDING"
     assert denied["current_computation_required"] is True
-    current = ComputationEvidence(successful_calls=1)
+    result = tmp_path / "survival.json"
+    result.write_text('{"hazard_ratio": 1.2}\n', encoding="utf-8")
+    current = ComputationEvidence(
+        records=[
+            ComputationRecord(
+                execution_id="exec-current",
+                language="python",
+                code_sha256="c" * 64,
+                started_at="2026-07-19T00:00:00+00:00",
+                duration_seconds=1,
+                exit_code=0,
+                status="succeeded",
+                stdout_path=str(tmp_path / "stdout"),
+                stderr_path=str(tmp_path / "stderr"),
+                artifacts=[
+                    ArtifactRef(
+                        path=str(result),
+                        description="sandbox-generated analysis artifact",
+                    )
+                ],
+            )
+        ]
+    )
     assert gate.before_tool("search_pubmed", current, existing=inherited) is None
+
+
+def test_survival_code_preflight_rejects_known_invalid_or_ungrounded_patterns():
+    gate = ScientificToolOrderGate(
+        frozenset(),
+        survival_task=True,
+        ungrounded_categorical_columns=frozenset({"Gender", "T"}),
+    )
+    code = """
+from lifelines import CoxPHFitter
+labels = df['Gender'].map({1: 'Male', 2: 'Female'})
+stage = df['T'].map({0: 'Ta', 1: 'T1'})
+model = CoxPHFitter(penalizer=0.1)
+median = kmf.median_survival_time
+at_one = kmf.predict([1.0])[0]
+limits = model.confidence_intervals_
+"""
+
+    denied = gate.before_tool(
+        "run_python_analysis",
+        ComputationEvidence(),
+        arguments={"code": code},
+    )
+
+    assert denied is not None
+    assert denied["error"] == "SCIENTIFIC_CODE_PREFLIGHT_FAILED"
+    joined = " ".join(denied["issues"])
+    assert "median_survival_time_" in joined
+    assert "receive a scalar" in joined
+    assert "coefficient-scale" in joined
+    assert "do not authorize a penalized Cox" in joined
+    assert "Gender has no complete input-profile codebook" in joined
+    assert "T has no complete input-profile codebook" in joined
+
+
+def test_survival_code_preflight_accepts_raw_labels_and_safe_lifelines_api():
+    gate = ScientificToolOrderGate(
+        frozenset(),
+        survival_task=True,
+        ungrounded_categorical_columns=frozenset({"T"}),
+    )
+    code = """
+raw_stage = df['T'].map({0: 'T=0', 1: 'T=1'})
+median = kmf.median_survival_time_
+at_one = float(kmf.predict(1.0))
+limits = model.summary[['exp(coef) lower 95%', 'exp(coef) upper 95%']]
+coefficient_limits_on_ratio_scale = np.exp(model.confidence_intervals_)
+"""
+
+    assert (
+        gate.before_tool(
+            "run_python_analysis",
+            ComputationEvidence(),
+            arguments={"code": code},
+        )
+        is None
+    )
 
 
 def test_simple_tool_order_gate_caps_post_computation_pubmed_attempts():
@@ -1465,7 +1546,7 @@ def test_research_failure_packet_preserves_bounded_retrieval_evidence(tmp_path):
     assert len(packet.encode("utf-8")) < 80 * 1024
 
 
-def test_research_budget_exhaustion_can_continue_only_with_existing_evidence():
+def test_research_budget_exhaustion_can_continue_only_with_existing_evidence(tmp_path):
     assert _can_continue_after_research_error(
         repairing=True,
         computation=ComputationEvidence(),
@@ -1487,9 +1568,61 @@ def test_research_budget_exhaustion_can_continue_only_with_existing_evidence():
         retrieval=RetrievalEvidence(successful_calls=2),
         require_current_computation=True,
     )
+    intake = tmp_path / "data_structure.json"
+    intake.write_text('{"n_total": 2879, "rfs_events": 1352}\n', encoding="utf-8")
+    intake_only = ComputationEvidence(
+        records=[
+            ComputationRecord(
+                execution_id="exec-intake",
+                language="python",
+                code_sha256="e" * 64,
+                started_at="2026-07-19T00:00:00+00:00",
+                duration_seconds=1,
+                exit_code=0,
+                status="succeeded",
+                stdout_path=str(tmp_path / "stdout-intake"),
+                stderr_path=str(tmp_path / "stderr-intake"),
+                artifacts=[
+                    ArtifactRef(
+                        path=str(intake),
+                        description="sandbox-generated analysis artifact",
+                    )
+                ],
+            )
+        ]
+    )
+    assert not _can_continue_after_research_error(
+        repairing=True,
+        computation=intake_only,
+        retrieval=RetrievalEvidence(successful_calls=1),
+        require_current_computation=True,
+    )
+    result = tmp_path / "result.json"
+    result.write_text('{"hazard_ratio": 1.2}\n', encoding="utf-8")
+    reportable = ComputationEvidence(
+        records=[
+            ComputationRecord(
+                execution_id="exec-result",
+                language="python",
+                code_sha256="d" * 64,
+                started_at="2026-07-19T00:00:00+00:00",
+                duration_seconds=1,
+                exit_code=0,
+                status="succeeded",
+                stdout_path=str(tmp_path / "stdout"),
+                stderr_path=str(tmp_path / "stderr"),
+                artifacts=[
+                    ArtifactRef(
+                        path=str(result),
+                        description="sandbox-generated analysis artifact",
+                    )
+                ],
+            )
+        ]
+    )
     assert _can_continue_after_research_error(
         repairing=True,
-        computation=ComputationEvidence(successful_calls=1),
+        computation=reportable,
         retrieval=RetrievalEvidence(),
         require_current_computation=True,
     )

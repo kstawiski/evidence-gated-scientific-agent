@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import ast
 import hashlib
 import json
 import os
@@ -26,7 +27,11 @@ from .execution import build_analysis_tools, create_analysis_executor
 from .environment import EnvironmentManager, build_environment_tools
 from .input_inspection import build_input_profile
 from .knowledge import KnowledgeLibrary, build_knowledge_tools, chunk_text
-from .linting import reconciliation_verdict, validate_report
+from .linting import (
+    is_meaningful_machine_result,
+    reconciliation_verdict,
+    validate_report,
+)
 from .literature import (
     LiteratureAcquirer,
     RemotePdfTextExtractor,
@@ -282,6 +287,166 @@ class ResearchBudgetExceeded(RuntimeError):
     """A deterministic ADK research budget was exhausted."""
 
 
+def _has_reportable_computation_result(evidence: ComputationEvidence) -> bool:
+    """Distinguish a requested result from a successful intake/debug probe."""
+
+    for record in evidence.records:
+        if record.status != "succeeded":
+            continue
+        for artifact in record.artifacts:
+            if artifact.description != "sandbox-generated analysis artifact":
+                continue
+            path = Path(artifact.path)
+            if path.suffix.casefold() == ".json" and is_meaningful_machine_result(path):
+                return True
+            if path.suffix.casefold() in {
+                ".csv",
+                ".tsv",
+                ".png",
+                ".jpg",
+                ".jpeg",
+                ".webp",
+            }:
+                try:
+                    if path.is_file() and path.stat().st_size > 0:
+                        return True
+                except OSError:
+                    continue
+    return False
+
+
+def _subscript_string(node: ast.AST) -> str | None:
+    if not isinstance(node, ast.Subscript):
+        return None
+    value = node.slice
+    if isinstance(value, ast.Constant) and isinstance(value.value, str):
+        return value.value
+    return None
+
+
+def _raw_category_label(column: str, key: object, value: str) -> bool:
+    raw = str(key).strip().casefold()
+    normalized = " ".join(value.strip().casefold().split())
+    column_name = " ".join(column.strip().casefold().split())
+    return normalized in {raw, f"{column_name}={raw}", f"{column_name} = {raw}"}
+
+
+def _python_scientific_preflight(
+    code: str,
+    *,
+    survival_task: bool,
+    ungrounded_categorical_columns: frozenset[str],
+    allow_penalized_cox: bool,
+) -> list[str]:
+    """Reject a small set of high-confidence generated-analysis defects."""
+
+    try:
+        tree = ast.parse(code)
+    except SyntaxError as exc:
+        return [f"Python does not parse: {exc.msg} (line {exc.lineno})"]
+    parents = {
+        child: parent
+        for parent in ast.walk(tree)
+        for child in ast.iter_child_nodes(parent)
+    }
+    issues: list[str] = []
+    if survival_task and any(
+        isinstance(node, ast.Attribute) and node.attr == "median_survival_time"
+        for node in ast.walk(tree)
+    ):
+        issues.append("lifelines uses median_survival_time_ with a trailing underscore")
+    if survival_task and any(
+        isinstance(node, ast.Subscript)
+        and isinstance(node.value, ast.Call)
+        and isinstance(node.value.func, ast.Attribute)
+        and node.value.func.attr == "predict"
+        and bool(node.value.args)
+        and isinstance(node.value.args[0], (ast.List, ast.Tuple))
+        for node in ast.walk(tree)
+    ):
+        issues.append(
+            "KaplanMeierFitter.predict should receive a scalar and be converted "
+            "with float(...), not indexed from a list-valued call"
+        )
+    raw_coefficient_limits = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Attribute) or node.attr != "confidence_intervals_":
+            continue
+        parent = parents.get(node)
+        directly_exponentiated = (
+            isinstance(parent, ast.Call)
+            and node in parent.args
+            and (
+                (isinstance(parent.func, ast.Attribute) and parent.func.attr == "exp")
+                or (isinstance(parent.func, ast.Name) and parent.func.id == "exp")
+            )
+        )
+        if not directly_exponentiated:
+            raw_coefficient_limits.append(node)
+    if survival_task and raw_coefficient_limits:
+        issues.append(
+            "raw CoxPHFitter.confidence_intervals_ are coefficient-scale limits; "
+            "use the exponentiated confidence-limit columns in CoxPHFitter.summary"
+        )
+    if survival_task and not allow_penalized_cox:
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            name = (
+                node.func.id
+                if isinstance(node.func, ast.Name)
+                else node.func.attr
+                if isinstance(node.func, ast.Attribute)
+                else ""
+            )
+            if name != "CoxPHFitter":
+                continue
+            penalizer = next(
+                (item.value for item in node.keywords if item.arg == "penalizer"),
+                None,
+            )
+            if penalizer is None or (
+                isinstance(penalizer, ast.Constant) and penalizer.value == 0
+            ):
+                continue
+            issues.append(
+                "the locked methods do not authorize a penalized Cox model; fit "
+                "the unpenalized model or repair the plan with a stated rationale"
+            )
+            break
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Attribute):
+            continue
+        if (
+            node.func.attr != "map"
+            or not node.args
+            or not isinstance(node.args[0], ast.Dict)
+        ):
+            continue
+        column = _subscript_string(node.func.value)
+        if column not in ungrounded_categorical_columns:
+            continue
+        mapping = node.args[0]
+        unsupported = []
+        for key_node, value_node in zip(mapping.keys, mapping.values, strict=True):
+            if not isinstance(key_node, ast.Constant) or not isinstance(
+                value_node, ast.Constant
+            ):
+                continue
+            key = key_node.value
+            value = value_node.value
+            if isinstance(key, bool) or not isinstance(key, (int, float)):
+                continue
+            if isinstance(value, str) and not _raw_category_label(column, key, value):
+                unsupported.append(f"{key!r}->{value!r}")
+        if unsupported:
+            issues.append(
+                f"{column} has no complete input-profile codebook; preserve raw "
+                f"labels instead of unsupported semantic recoding ({', '.join(unsupported)})"
+            )
+    return issues
+
+
 @dataclass
 class ScientificToolOrderGate:
     """Reserve analysis capacity before optional repeated literature retrieval."""
@@ -289,6 +454,9 @@ class ScientificToolOrderGate:
     required_languages: frozenset[str]
     require_reconciliation: bool = False
     require_current_computation: bool = False
+    survival_task: bool = False
+    ungrounded_categorical_columns: frozenset[str] = frozenset()
+    allow_penalized_cox: bool = False
     max_pubmed_search_attempts: int | None = None
     max_pubmed_acquisition_attempts: int | None = None
     pubmed_search_attempts: int = 0
@@ -348,7 +516,24 @@ class ScientificToolOrderGate:
         tool_name: str,
         current: ComputationEvidence,
         existing: ComputationEvidence | None = None,
+        arguments: dict | None = None,
     ) -> dict | None:
+        if tool_name == "run_python_analysis" and isinstance(arguments, dict):
+            code = arguments.get("code")
+            if isinstance(code, str):
+                issues = _python_scientific_preflight(
+                    code,
+                    survival_task=self.survival_task,
+                    ungrounded_categorical_columns=self.ungrounded_categorical_columns,
+                    allow_penalized_cox=self.allow_penalized_cox,
+                )
+                if issues:
+                    return {
+                        "status": "policy_denied",
+                        "error": "SCIENTIFIC_CODE_PREFLIGHT_FAILED",
+                        "reason": "Correct every high-confidence issue before execution.",
+                        "issues": issues,
+                    }
         if (
             tool_name == "search_pubmed"
             and self.max_pubmed_search_attempts is not None
@@ -364,8 +549,8 @@ class ScientificToolOrderGate:
                 tool_name, self.max_pubmed_acquisition_attempts
             )
         missing, reconciliation = self.missing_requirements(current, existing)
-        current_computation_pending = (
-            self.require_current_computation and current.successful_calls == 0
+        current_computation_pending = self.require_current_computation and not (
+            _has_reportable_computation_result(current)
         )
         if not missing and not reconciliation and not current_computation_pending:
             return None
@@ -2404,7 +2589,9 @@ def _can_continue_after_research_error(
 ) -> bool:
     """Allow reporting when existing controller evidence can still be gated."""
 
-    if require_current_computation and computation.successful_calls == 0:
+    if require_current_computation and not _has_reportable_computation_result(
+        computation
+    ):
         return False
     return bool(
         repairing or computation.successful_calls > 0 or retrieval.successful_calls > 0
@@ -2924,6 +3111,28 @@ async def _produce_report(
         repairing=repairing,
         revision_request=revision_request,
     )
+    task_and_method_text = " ".join(
+        [
+            planning.master_plan.task.objective,
+            planning.master_plan.plan.objective,
+            *(
+                method
+                for step in planning.master_plan.plan.steps
+                for method in step.methods
+            ),
+        ]
+    )
+    input_profile = planning.master_plan.task.input_profile
+    ungrounded_categorical_columns = frozenset(
+        column.name
+        for source in (input_profile.files if input_profile is not None else [])
+        for column in source.columns
+        if not column.candidate_role_labels_complete
+        and column.distinct_non_missing is not None
+        and column.distinct_non_missing <= 20
+        and "integer" in column.inferred_types
+        and not re.search(r"\b0\s*[-=:]|\b1\s*[-=:]", column.name)
+    )
     tool_order = ScientificToolOrderGate(
         required_languages=(
             frozenset(planning.master_plan.task.required_computation_languages)
@@ -2935,6 +3144,13 @@ async def _produce_report(
             and _requires_cross_language_reconciliation(planning.master_plan.task)
         ),
         require_current_computation=require_current_computation,
+        survival_task=bool(_SURVIVAL_REQUEST.search(task_and_method_text)),
+        ungrounded_categorical_columns=ungrounded_categorical_columns,
+        allow_penalized_cox=any(
+            "penaliz" in method.casefold()
+            for step in planning.master_plan.plan.steps
+            for method in step.methods
+        ),
         max_pubmed_search_attempts=3 if simple_mode else None,
         max_pubmed_acquisition_attempts=3 if simple_mode else None,
     )
@@ -2946,14 +3162,16 @@ async def _produce_report(
             name,
             executor.evidence() if executor is not None else ComputationEvidence(),
             existing_computation,
+            args,
         )
         if order_response is not None:
             if activity is not None:
+                issue = order_response.get("error", "scientific gate denied the call")
                 activity(
                     "tool_policy",
                     "Qwen",
                     "research",
-                    f"{name}: deferred until required computations succeed",
+                    f"{name}: {issue}",
                     None,
                 )
             return order_response
@@ -3184,7 +3402,7 @@ async def _produce_report(
                 if (
                     require_current_computation
                     and executor is not None
-                    and executor.evidence().successful_calls == 0
+                    and not _has_reportable_computation_result(executor.evidence())
                 ):
                     raise RuntimeError(
                         "research turn returned without the required current-run "
@@ -3201,7 +3419,7 @@ async def _produce_report(
                 )
                 if (
                     require_current_computation
-                    and current_computation.successful_calls == 0
+                    and not _has_reportable_computation_result(current_computation)
                 ):
                     current_retrieval = policy.retrieval_evidence()
                     ledger.append(
@@ -3239,9 +3457,8 @@ async def _produce_report(
                             ),
                             cancel_event=cancel_event,
                         )
-                        if (
-                            executor is None
-                            or executor.evidence().successful_calls == 0
+                        if executor is None or not _has_reportable_computation_result(
+                            executor.evidence()
                         ):
                             raise RuntimeError(
                                 "research continuation returned without the required "
@@ -3286,7 +3503,7 @@ async def _produce_report(
     if (
         research_error is None
         and require_current_computation
-        and computation.successful_calls == 0
+        and not _has_reportable_computation_result(computation)
     ):
         research_error = RuntimeError(
             "research completed without the required current-run computation"

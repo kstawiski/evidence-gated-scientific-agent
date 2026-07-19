@@ -230,6 +230,67 @@ def test_plan_linter_accepts_common_explicit_prohibition_verbs(method):
     }
 
 
+def test_survival_plan_requires_grounded_time_origin_before_estimation():
+    survival_task = task().model_copy(
+        update={"objective": "Add survival and competing-risk analyses."}
+    )
+    plan = good_plan().model_copy(
+        update={
+            "objective": "Estimate recurrence-free survival.",
+            "assumptions": ["The time origin is consistent across records."],
+        }
+    )
+    plan.steps[0].methods = [
+        "Define the time origin and then fit Kaplan-Meier and Cox models."
+    ]
+
+    report = lint_plan(survival_task, plan)
+
+    assert "survival_time_origin_not_grounded" in {
+        finding.code for finding in report.findings
+    }
+
+
+def test_survival_plan_accepts_source_codebook_checkpoint_for_time_origin():
+    survival_task = task().model_copy(
+        update={"objective": "Add survival and competing-risk analyses."}
+    )
+    plan = good_plan().model_copy(
+        update={"objective": "Estimate recurrence-free survival."}
+    )
+    plan.steps[0].methods = [
+        "Verify the time origin from the uploaded workbook codebook before any "
+        "Kaplan-Meier or Cox estimation."
+    ]
+
+    report = lint_plan(survival_task, plan)
+
+    assert "survival_time_origin_not_grounded" not in {
+        finding.code for finding in report.findings
+    }
+
+
+def test_survival_plan_accepts_explicit_nonestimability_when_origin_stays_unknown():
+    survival_task = task().model_copy(
+        update={"objective": "Add survival and competing-risk analyses."}
+    )
+    plan = good_plan().model_copy(
+        update={"objective": "Assess recurrence-free survival feasibility."}
+    )
+    plan.steps[0].methods = [
+        "Keep the time origin unknown when it is not provided by the data."
+    ]
+    plan.steps[0].stop_conditions = [
+        "Stop and do not estimate survival if the time origin remains unknown."
+    ]
+
+    report = lint_plan(survival_task, plan)
+
+    assert "survival_time_origin_not_grounded" not in {
+        finding.code for finding in report.findings
+    }
+
+
 def test_plan_linter_rejects_role_mapping_keys_absent_from_input_profile():
     profiled_task = task().model_copy(
         update={

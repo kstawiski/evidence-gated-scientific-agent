@@ -382,7 +382,17 @@ When using lifelines, import `logrank_test` and `proportional_hazard_test` from
 is actually needed, and otherwise fit an explicitly encoded data frame. Rename the
 duration and event columns to unique names such as `duration` and `event`; never
 rename them to a source covariate name such as `T`. Use one-hot categorical terms
-with an explicit omitted reference category. Do not label the median observed event
+with an explicit omitted reference category. In current lifelines releases, read
+`KaplanMeierFitter.median_survival_time_` (with the trailing underscore), and obtain
+a scalar estimate with `float(kmf.predict(time_value))`; do not index
+`kmf.predict([time_value])[0]`. For Cox output, use the already exponentiated
+`exp(coef)`, `exp(coef) lower 95%`, and `exp(coef) upper 95%` columns from
+`CoxPHFitter.summary`, or explicitly apply `numpy.exp` to every coefficient-scale
+limit. Never copy raw `confidence_intervals_` values into hazard-ratio fields.
+When the input profile does not provide complete category labels and no exact
+uploaded codebook establishes them, preserve literal raw labels such as `T=0` and
+`BCG=1`; never invent clinical meanings such as stage names, treatment status, sex,
+or size thresholds from numeric order. Do not label the median observed event
 or censoring time as median follow-up; use reverse Kaplan-Meier or name the quantity
 literally. Treat time origin as unknown unless the uploaded data or an acquired
 source defines it. A minimum covariate-level Schoenfeld p-value is not a global PH

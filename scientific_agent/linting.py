@@ -240,6 +240,12 @@ def _strict_machine_json(path: Path) -> Any | None:
     return document if _contains_machine_result(document) else None
 
 
+def is_meaningful_machine_result(path: Path) -> bool:
+    """Return whether a generated JSON contains a substantive result or stop record."""
+
+    return _strict_machine_json(path) is not None
+
+
 def _machine_result_corresponds_to_claim(document: Any, claim_text: str) -> bool:
     machine_text = json.dumps(document, sort_keys=True).replace("_", " ")
     if _citation_correspondence_terms(machine_text) & _citation_correspondence_terms(
@@ -800,6 +806,37 @@ _SEMANTIC_ROLE_NAMES = {
     "unexposed",
 }
 
+_SURVIVAL_PLAN_REQUEST = re.compile(
+    r"\b(?:survival|cox|kaplan[ -]meier|competing[ -]risk|fine[ -]gray|"
+    r"cumulative incidence|cause[ -]specific)\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_TIME_ORIGIN = re.compile(
+    r"\b(?:time origin|time[- ]zero|follow-up (?:begins|starts))\b"
+    r".{0,100}\b(?:diagnos\w*|surg\w*|resection|randomi[sz]\w*|enrol\w*|"
+    r"treatment (?:start|initiat\w*)|index date|baseline visit)\b",
+    re.IGNORECASE,
+)
+_TIME_ORIGIN_SOURCE_CHECK = re.compile(
+    r"\b(?:verify|confirm|establish|inspect|retrieve|acquire|consult)\w*\b"
+    r".{0,100}\btime origin\b.{0,100}"
+    r"\b(?:source|article|codebook|metadata|workbook|uploaded (?:data|input))\b"
+    r"|\btime origin\b.{0,100}"
+    r"\b(?:source|article|codebook|metadata|workbook|uploaded (?:data|input))\b"
+    r".{0,100}\b(?:verify|confirm|establish|inspect|retrieve|acquire|consult)\w*\b",
+    re.IGNORECASE,
+)
+_UNKNOWN_TIME_ORIGIN = re.compile(
+    r"\btime origin\b.{0,60}\b(?:unknown|unavailable|undocumented|"
+    r"not (?:defined|provided|established|identified))\b",
+    re.IGNORECASE,
+)
+_STOP_BEFORE_SURVIVAL_ESTIMATION = re.compile(
+    r"\b(?:stop|halt|do not|must not|no)\b.{0,100}"
+    r"\b(?:estimat|fit|model|kaplan|cox|survival)\w*\b",
+    re.IGNORECASE,
+)
+
 
 def _has_arbitrary_semantic_arm_mapping(text: str) -> bool:
     """Reject affirmative arm inference without spanning safety clauses."""
@@ -1211,6 +1248,38 @@ def lint_plan(
             ]
         )
     plan_text = " ".join(plan_text_parts)
+    task_text = " ".join([task.objective, *task.constraints])
+    if _SURVIVAL_PLAN_REQUEST.search(task_text) and not _EXPLICIT_TIME_ORIGIN.search(
+        task_text
+    ):
+        source_check = any(
+            _TIME_ORIGIN_SOURCE_CHECK.search(method)
+            for step in plan.steps
+            for method in step.methods
+        )
+        unknown_and_stopped = any(
+            _UNKNOWN_TIME_ORIGIN.search(method)
+            and any(
+                _STOP_BEFORE_SURVIVAL_ESTIMATION.search(stop)
+                for stop in step.stop_conditions
+            )
+            for step in plan.steps
+            for method in step.methods
+        )
+        if not source_check and not unknown_and_stopped:
+            findings.append(
+                LintFinding(
+                    code="survival_time_origin_not_grounded",
+                    location="plan",
+                    message=(
+                        "The task/input profile does not establish a time origin. "
+                        "Before survival estimation, the plan must verify it from "
+                        "an exact uploaded/source codebook or explicitly keep it "
+                        "unknown and stop estimation if it remains unavailable; "
+                        "assuming only that it is consistent is insufficient."
+                    ),
+                )
+            )
     observed_role_columns = [
         (source.path, column.name, set(column.candidate_role_labels))
         for source in (task.input_profile.files if task.input_profile else [])
@@ -1271,7 +1340,7 @@ def lint_plan(
                 ),
             )
         )
-    task_design_text = " ".join([task.objective, *task.constraints])
+    task_design_text = task_text
     asserted_designs = {
         (
             "randomized"

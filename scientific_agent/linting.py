@@ -777,7 +777,9 @@ _SEMANTIC_MAPPING_PROHIBITION = re.compile(
     r"\b(?:never|must\s+not|do\s+not|cannot|can't)\s+"
     r"(?:\w+\s+){0,3}(?:assign|map|designat|classif|infer)\w*\b"
     r"|\bwithout\s+(?:\w+\s+){0,3}"
-    r"(?:assign|map|designat|classif|infer)\w*\b",
+    r"(?:assign|map|designat|classif|infer)\w*\b"
+    r"|\b(?:strictly\s+)?(?:prohibit|forbid|ban|prevent)\w*\b"
+    r"(?:\s+\w+){0,4}\s+(?:assign|map|designat|classif|infer)\w*\b",
     re.IGNORECASE,
 )
 _ASSUMPTION_DIAGNOSTIC = re.compile(

@@ -2,6 +2,7 @@ import builtins
 import json
 import zipfile
 
+import pytest
 from PIL import Image
 
 from scientific_agent.linting import (
@@ -197,6 +198,30 @@ def test_plan_linter_accepts_explicit_prohibition_on_order_based_arm_assignment(
     plan.steps[0].methods = [
         "Never assign control or treatment according to category order."
     ]
+
+    report = lint_plan(task(), plan)
+
+    assert "arbitrary_semantic_arm_mapping" not in {
+        finding.code for finding in report.findings
+    }
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        "Fit Cox models with explicit reference levels and strictly prohibit "
+        "inference of semantic identity from lexical, numeric, row, or category "
+        "order.",
+        "Fit Cox models with explicit reference levels and strictly ban all "
+        "heuristic inference from lexical or category order.",
+        "Execution halts before reference assignment, preventing inference from "
+        "lexical or numeric order.",
+        "Forbid semantic mapping according to alphabetical category order.",
+    ],
+)
+def test_plan_linter_accepts_common_explicit_prohibition_verbs(method):
+    plan = good_plan()
+    plan.steps[0].methods = [method]
 
     report = lint_plan(task(), plan)
 

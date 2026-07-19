@@ -2906,6 +2906,23 @@ def test_competing_risk_record_accepts_formal_result_or_reasoned_non_estimabilit
         {"fine_gray": {"subdistribution_hazard_ratio": 1.2}}
     )
     assert not _contains_competing_risk_result(
+        {
+            "cumulative_incidence": {
+                "event_of_interest": "progression",
+                "incidence": 4.2,
+            }
+        }
+    )
+    assert not _contains_competing_risk_result(
+        {
+            "fine_gray": {
+                "event_of_interest": "progression",
+                "competing_event": "death before progression",
+                "subdistribution_hazard_ratio": 0.0,
+            }
+        }
+    )
+    assert not _contains_competing_risk_result(
         {"competing_risk_analysis": {"estimable": False, "reason": "TBD"}}
     )
 

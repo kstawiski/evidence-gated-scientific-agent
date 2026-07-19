@@ -682,6 +682,32 @@ KaplanMeierFitter().fit(df['RFS_time'], df['RFS_event'])
     assert denied is not None
     assert denied["error"] == "SCIENTIFIC_CODE_PREFLIGHT_FAILED"
     assert "defines the time origin" in " ".join(denied["issues"])
+    assert "External retrieval" in " ".join(denied["issues"])
+
+
+def test_survival_code_preflight_denies_manual_cif_without_time_origin():
+    gate = ScientificToolOrderGate(frozenset(), survival_task=True)
+    code = """
+def compute_cif(times, events, event_of_interest):
+    at_risk = len(times)
+    cif = np.zeros(len(times))
+    cumulative_incidence = 0.0
+    for index, _ in enumerate(times):
+        cumulative_incidence += (events[index] == event_of_interest) / at_risk
+        cif[index] = cumulative_incidence
+        at_risk -= 1
+    return cif
+"""
+
+    denied = gate.before_tool(
+        "run_python_analysis",
+        ComputationEvidence(),
+        arguments={"code": code},
+    )
+
+    assert denied is not None
+    assert denied["error"] == "SCIENTIFIC_CODE_PREFLIGHT_FAILED"
+    assert "immutable input manifest" in " ".join(denied["issues"])
 
 
 def test_survival_code_preflight_accepts_source_grounded_time_origin():
@@ -768,6 +794,19 @@ def test_r_survival_code_preflight_requires_controller_grounded_time_origin():
     assert denied is not None
     assert denied["error"] == "SCIENTIFIC_CODE_PREFLIGHT_FAILED"
     assert "defines the time origin" in " ".join(denied["issues"])
+
+
+def test_r_survival_code_preflight_denies_manual_cif_without_time_origin():
+    gate = ScientificToolOrderGate(frozenset(), survival_task=True)
+
+    denied = gate.before_tool(
+        "run_r_analysis",
+        ComputationEvidence(),
+        arguments={"code": "cif <- numeric(length(times)); at_risk <- length(times)"},
+    )
+
+    assert denied is not None
+    assert denied["error"] == "SCIENTIFIC_CODE_PREFLIGHT_FAILED"
 
 
 def test_survival_code_preflight_rejects_direct_semantic_indicators_and_origin():

@@ -406,8 +406,13 @@ uploaded codebook establishes them, preserve literal raw labels such as `T=0` an
 `BCG=1`; never invent clinical meanings such as stage names, treatment status, sex,
 or size thresholds from numeric order. Do not label the median observed event
 or censoring time as median follow-up; use reverse Kaplan-Meier or name the quantity
-literally. Treat time origin as unknown unless the uploaded data or an acquired
-source defines it. A minimum covariate-level Schoenfeld p-value is not a global PH
+literally. Treat time origin as unknown unless the task text or an uploaded source
+file in the immutable input manifest defines it exactly. External retrieval,
+including acquired articles, PubMed or web results, knowledge snippets, browser
+content, and unrelated workspace references, cannot establish the cohort's time
+origin. If the immutable inputs do not define it, report the survival analysis as
+not estimable; do not keep searching or retrying estimation.
+A minimum covariate-level Schoenfeld p-value is not a global PH
 test. Do not catch a model/diagnostic exception and then emit an apparently complete
 result: either correct the call or record that component as failed and keep all
 claims unsupported.

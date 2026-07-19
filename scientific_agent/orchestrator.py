@@ -487,26 +487,44 @@ _PYTHON_SURVIVAL_ESTIMATION_CALLS = {
     "logrank_test",
     "multivariate_logrank_test",
 }
+_PYTHON_MANUAL_SURVIVAL_IDENTIFIER = re.compile(
+    r"(?:^|_)(?:at_risk|cif|cum_inc|cumulative_incidence|kaplan_meier|"
+    r"risk_set|survival_function|survival_probability|cause_specific_hazard|"
+    r"subdistribution_hazard)(?:_|$)",
+    re.IGNORECASE,
+)
 _R_SURVIVAL_ESTIMATION = re.compile(
-    r"\b(?:Surv|coxph|survfit|survdiff|cuminc|crr|finegray)\s*\(",
+    r"\b(?:Surv|coxph|survfit|survdiff|cuminc|crr|finegray)\s*\("
+    r"|\b(?:at_risk|risk_set|cif|cum_inc|survival_probability)\b\s*"
+    r"(?:<-|=|\[|\()",
     re.IGNORECASE,
 )
 
 
 def _python_uses_survival_estimation(tree: ast.AST) -> bool:
+    manual_identifiers: set[str] = set()
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Call):
-            continue
-        name = (
-            node.func.id
-            if isinstance(node.func, ast.Name)
-            else node.func.attr
-            if isinstance(node.func, ast.Attribute)
-            else ""
-        )
-        if name in _PYTHON_SURVIVAL_ESTIMATION_CALLS:
-            return True
-    return False
+        names: list[str] = []
+        if isinstance(node, ast.Call):
+            names.append(
+                node.func.id
+                if isinstance(node.func, ast.Name)
+                else node.func.attr
+                if isinstance(node.func, ast.Attribute)
+                else ""
+            )
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            names.append(node.name)
+        elif isinstance(node, ast.Name):
+            names.append(node.id)
+        elif isinstance(node, ast.Attribute):
+            names.append(node.attr)
+        for name in names:
+            if name in _PYTHON_SURVIVAL_ESTIMATION_CALLS:
+                return True
+            if _PYTHON_MANUAL_SURVIVAL_IDENTIFIER.search(name):
+                manual_identifiers.add(name.casefold())
+    return bool(manual_identifiers)
 
 
 def _task_input_read_paths(task: TaskSpec) -> frozenset[str]:
@@ -548,9 +566,11 @@ def _python_scientific_preflight(
         and _python_uses_survival_estimation(tree)
     ):
         issues.append(
-            "survival estimation is denied until exact controller-visible task or "
-            "source text defines the time origin; retrieve and read that definition "
-            "or report the analysis as not estimable"
+            "survival estimation is denied until the exact task text or an uploaded "
+            "source file in the immutable input manifest defines the time origin. "
+            "External retrieval and unrelated workspace references cannot establish "
+            "it; report the analysis as not estimable instead of searching or "
+            "retrying estimation"
         )
     if survival_task:
         for node in ast.walk(tree):
@@ -785,9 +805,11 @@ class ScientificToolOrderGate:
                     "error": "SCIENTIFIC_CODE_PREFLIGHT_FAILED",
                     "reason": "Correct every high-confidence issue before execution.",
                     "issues": [
-                        "survival estimation is denied until exact controller-visible "
-                        "task or source text defines the time origin; retrieve and read "
-                        "that definition or report the analysis as not estimable"
+                        "survival estimation is denied until the exact task text or an "
+                        "uploaded source file in the immutable input manifest defines "
+                        "the time origin. External retrieval and unrelated workspace "
+                        "references cannot establish it; report the analysis as not "
+                        "estimable instead of searching or retrying estimation"
                     ],
                 }
         if (

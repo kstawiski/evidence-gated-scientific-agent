@@ -127,6 +127,19 @@ def _contains_competing_risk_result(document: Any) -> bool:
         "transitions",
     }
 
+    def valid_result_value(raw_key: Any, raw_value: Any) -> bool:
+        key = _numeric_key(str(raw_key))
+        if key not in result_keys:
+            return False
+        number = _json_number(raw_value)
+        if number is None:
+            return False
+        if key in {"incidence", "probability", "risk"}:
+            return 0.0 <= number <= 1.0
+        if key in {"hazard_ratio", "subdistribution_hazard_ratio"}:
+            return number > 0.0
+        return True
+
     def formal_value(value: Any) -> bool:
         if not isinstance(value, (dict, list)):
             return False
@@ -139,15 +152,21 @@ def _contains_competing_risk_result(document: Any) -> bool:
             )
             for _, candidate in nested
         )
-        has_numeric_result = any(
-            any(
-                _numeric_key(str(raw_key)) in result_keys
-                and _json_number(raw_value) is not None
-                for raw_key, raw_value in candidate.items()
-            )
+        result_entries = [
+            (raw_key, raw_value)
             for _, candidate in nested
+            for raw_key, raw_value in candidate.items()
+            if _numeric_key(str(raw_key)) in result_keys
+        ]
+        has_numeric_result = any(
+            valid_result_value(raw_key, raw_value)
+            for raw_key, raw_value in result_entries
         )
-        return has_local_context and has_numeric_result
+        all_result_values_valid = all(
+            valid_result_value(raw_key, raw_value)
+            for raw_key, raw_value in result_entries
+        )
+        return has_local_context and has_numeric_result and all_result_values_valid
 
     for _, node in _nested_json_objects(document):
         normalized = {_numeric_key(str(key)): value for key, value in node.items()}

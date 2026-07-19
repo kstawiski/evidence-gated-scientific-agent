@@ -664,6 +664,88 @@ coefficient_limits_on_ratio_scale = np.exp(model.confidence_intervals_)
     )
 
 
+def test_survival_code_preflight_rejects_direct_semantic_indicators_and_origin():
+    gate = ScientificToolOrderGate(
+        frozenset(),
+        survival_task=True,
+        ungrounded_categorical_columns=frozenset(
+            {"Gender", "T", "Grading", "No_tumors", "Diameter", "BCG"}
+        ),
+    )
+    code = """
+from lifelines.statistics import proportional_hazard_test
+df_cox['Gender_female'] = (df_cox['Gender'] == 2).astype(int)
+df_cox['T_1'] = (df_cox['T'] == 1).astype(int)  # Tis
+df_cox['Grading_2'] = (df_cox['Grading'] == 2).astype(int)  # intermediate grade
+df_cox['Multifocal'] = df_cox['No_tumors'].copy()
+df_cox['Large_diameter'] = df_cox['Diameter'].copy()
+df_cox['BCG_yes'] = df_cox['BCG'].copy()
+try:
+    diagnostics = proportional_hazard_test(model, data)
+except Exception as exc:
+    diagnostics = {'note': f'PH diagnostic failed: {exc}'}
+results = {
+    'analysis_metadata': {
+        'time_origin': 'Inferred as initial TURBT; not explicitly verified'
+    },
+    'diagnostics': diagnostics,
+}
+"""
+
+    denied = gate.before_tool(
+        "run_python_analysis",
+        ComputationEvidence(),
+        arguments={"code": code},
+    )
+
+    assert denied is not None
+    assert denied["error"] == "SCIENTIFIC_CODE_PREFLIGHT_FAILED"
+    joined = " ".join(denied["issues"])
+    assert "unverified time origin" in joined
+    assert "Gender has no complete input-profile codebook" in joined
+    assert "T has no complete input-profile codebook" in joined
+    assert "No_tumors has no complete input-profile codebook" in joined
+    assert "Diameter has no complete input-profile codebook" in joined
+    assert "BCG has no complete input-profile codebook" in joined
+    assert "proportional-hazards diagnostic failure" in joined
+
+
+def test_survival_code_preflight_accepts_raw_numeric_indicator_names():
+    gate = ScientificToolOrderGate(
+        frozenset(),
+        survival_task=True,
+        ungrounded_categorical_columns=frozenset({"Gender", "T", "Grading"}),
+    )
+    code = """
+df_cox['Gender_2'] = (df_cox['Gender'] == 2).astype(int)
+df_cox['T_1'] = (df_cox['T'] == 1).astype(int)
+df_cox['Grading_2'] = (df_cox['Grading'] == 2).astype(int)
+results = {'time_origin': 'Verified from uploaded codebook: initial procedure'}
+"""
+
+    assert (
+        gate.before_tool(
+            "run_python_analysis",
+            ComputationEvidence(),
+            arguments={"code": code},
+        )
+        is None
+    )
+
+
+def test_non_survival_code_preflight_ignores_unrelated_time_origin_field():
+    gate = ScientificToolOrderGate(frozenset(), survival_task=False)
+
+    assert (
+        gate.before_tool(
+            "run_python_analysis",
+            ComputationEvidence(),
+            arguments={"code": "result = {'time_origin': 'unknown'}"},
+        )
+        is None
+    )
+
+
 def test_simple_tool_order_gate_caps_post_computation_pubmed_attempts():
     gate = ScientificToolOrderGate(
         frozenset(),

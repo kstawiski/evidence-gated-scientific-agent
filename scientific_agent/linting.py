@@ -839,6 +839,16 @@ _STOP_BEFORE_SURVIVAL_ESTIMATION = re.compile(
     r"\b(?:estimat|fit|model|kaplan|cox|survival)\w*\b",
     re.IGNORECASE,
 )
+_SPECIFIC_SURVIVAL_TIME_ORIGIN = re.compile(
+    r"\b(?:time origin|time[- ]zero)\b.{0,120}"
+    r"\b(?:diagnos\w*|surg\w*|resection|turbt|randomi[sz]\w*|enrol\w*|"
+    r"treatment (?:start|initiat\w*)|index date|baseline(?: visit)?|study entry)\b"
+    r"|\b(?:recurrence[- ]free survival|progression[- ]free survival|rfs|pfs|"
+    r"time[- ]to[- ]event|follow[- ]up)\b.{0,120}\b(?:from|since|began|started)\b"
+    r".{0,80}\b(?:diagnos\w*|surg\w*|resection|turbt|randomi[sz]\w*|enrol\w*|"
+    r"treatment (?:start|initiat\w*)|index date|baseline(?: visit)?|study entry)\b",
+    re.IGNORECASE,
+)
 
 
 def _has_arbitrary_semantic_arm_mapping(text: str) -> bool:
@@ -1121,6 +1131,20 @@ def _terms(text: str) -> set[str]:
 
 def _grounding_terms(text: str) -> set[str]:
     return _terms(text) - _GROUNDING_STOPWORDS
+
+
+def _sentence_containing_anchor(text: str, anchor: str) -> str:
+    position = text.find(anchor)
+    if position < 0:
+        return ""
+    left = max(text.rfind(marker, 0, position) for marker in (".", "!", "?", "\n"))
+    right_candidates = [
+        found
+        for marker in (".", "!", "?", "\n")
+        if (found := text.find(marker, position + len(anchor))) >= 0
+    ]
+    right = min(right_candidates) if right_candidates else len(text)
+    return text[left + 1 : right].strip()
 
 
 def _citation_correspondence_terms(text: str) -> set[str]:
@@ -3607,6 +3631,39 @@ def validate_report(
         "discussion": report.discussion,
         "conclusions": report.conclusions,
     }
+    claims_by_id = {claim.claim_id: claim for claim in report.claims}
+    for index, citation in enumerate(report.inline_citations):
+        section_text = article_sections[citation.section]
+        assertion_text = " ".join(
+            [
+                _sentence_containing_anchor(section_text, citation.anchor_text),
+                *(
+                    claims_by_id[claim_id].text
+                    for claim_id in citation.claim_ids
+                    if claim_id in claims_by_id
+                ),
+            ]
+        )
+        if not _SPECIFIC_SURVIVAL_TIME_ORIGIN.search(assertion_text):
+            continue
+        for source_id in citation.source_ids:
+            acquired_text = acquired_text_by_source.get(source_id)
+            if acquired_text is None or _SPECIFIC_SURVIVAL_TIME_ORIGIN.search(
+                acquired_text
+            ):
+                continue
+            findings.append(
+                LintFinding(
+                    code="literature_time_origin_not_grounded",
+                    location=f"inline_citations[{index}]",
+                    message=(
+                        "The report attributes a specific survival time origin to "
+                        f"{source_id}, but the controller-acquired source text does "
+                        "not define that origin. Keep time zero unknown and stop "
+                        "survival estimation unless an exact source/codebook states it."
+                    ),
+                )
+            )
     for left_index, left in enumerate(report.inline_citations):
         section_text = article_sections[left.section]
         left_start = section_text.find(left.anchor_text)

@@ -1,7 +1,7 @@
 {
   "name": "evidence-gated-scientific-agent-mcp",
   "private": true,
-  "version": "0.4.8",
+  "version": "0.4.9",
   "description": "Pinned MCP subprocess dependencies for the scientific agent",
   "dependencies": {
     "@brave/brave-search-mcp-server": "2.0.85",

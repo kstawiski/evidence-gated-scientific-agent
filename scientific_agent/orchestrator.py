@@ -331,6 +331,149 @@ def _raw_category_label(column: str, key: object, value: str) -> bool:
     return normalized in {raw, f"{column_name}={raw}", f"{column_name} = {raw}"}
 
 
+def _normalized_identifier(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.casefold())
+
+
+def _assignment_targets(node: ast.Assign | ast.AnnAssign) -> set[str]:
+    targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+    names: set[str] = set()
+    for target in targets:
+        if isinstance(target, ast.Name):
+            names.add(target.id)
+        else:
+            subscript = _subscript_string(target)
+            if subscript is not None:
+                names.add(subscript)
+    return names
+
+
+def _raw_indicator_target(column: str, target: str, value: int | float) -> bool:
+    column_name = _normalized_identifier(column)
+    target_name = _normalized_identifier(target)
+    raw_value = str(value).replace("-", "minus").replace(".", "point")
+    return target_name in {column_name, f"{column_name}{raw_value}"}
+
+
+_UNGROUNDED_CATEGORY_ALIASES: dict[str, tuple[str, ...]] = {
+    "gender": ("female", "male", "woman", "women", "man", "men"),
+    "grading": ("low grade", "intermediate grade", "high grade"),
+    "notumors": ("single", "multiple", "multifocal"),
+    "diameter": ("small", "large", "cm"),
+    "bcg": ("yes", "no", "none", "treated", "treatment"),
+    "t": ("ta", "tis", "t1"),
+}
+
+
+def _semantic_indicator_issues(
+    code: str,
+    tree: ast.AST,
+    ungrounded_categorical_columns: frozenset[str],
+) -> list[str]:
+    """Find direct numeric-to-semantic recoding beyond ``Series.map`` calls."""
+
+    issues: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign | ast.AnnAssign):
+            continue
+        value = node.value
+        if any(
+            isinstance(candidate, ast.Call)
+            and isinstance(candidate.func, ast.Attribute)
+            and candidate.func.attr == "map"
+            for candidate in ast.walk(value)
+        ):
+            # Dict-backed mappings are checked below with their literal values;
+            # the destination variable name alone is not a category assertion.
+            continue
+        source_columns = {
+            column
+            for candidate in ast.walk(value)
+            if (column := _subscript_string(candidate))
+            in ungrounded_categorical_columns
+        }
+        if not source_columns:
+            continue
+        numeric_values = {
+            candidate.value
+            for candidate in ast.walk(value)
+            if isinstance(candidate, ast.Constant)
+            and not isinstance(candidate.value, bool)
+            and isinstance(candidate.value, int | float)
+        }
+        for column in source_columns:
+            for target in _assignment_targets(node):
+                if target == column:
+                    continue
+                if len(numeric_values) == 1 and _raw_indicator_target(
+                    column, target, next(iter(numeric_values))
+                ):
+                    continue
+                issues.add(
+                    f"{column} has no complete input-profile codebook; name derived "
+                    f"indicators with literal raw labels such as {column}=0 rather "
+                    f"than the unsupported semantic label {target!r}"
+                )
+
+    # Comments, result keys, and plot labels can still silently reinterpret a
+    # correctly named raw indicator. Inspect only lines that also name the source
+    # column, keeping this deliberately narrower than free-text keyword matching.
+    for column in ungrounded_categorical_columns:
+        aliases = _UNGROUNDED_CATEGORY_ALIASES.get(_normalized_identifier(column))
+        if not aliases:
+            continue
+        column_pattern = re.compile(
+            rf"(?:['\"]{re.escape(column)}['\"]|\b{re.escape(column)}_)",
+            re.IGNORECASE,
+        )
+        alias_pattern = re.compile(
+            r"\b(?:" + "|".join(re.escape(alias) for alias in aliases) + r")\b",
+            re.IGNORECASE,
+        )
+        if any(
+            column_pattern.search(line) and alias_pattern.search(line)
+            for line in code.splitlines()
+        ):
+            issues.add(
+                f"{column} has no complete input-profile codebook; preserve its "
+                "literal raw category labels in comments, result keys, tables, "
+                "and figures"
+            )
+    return sorted(issues)
+
+
+def _has_swallowed_ph_diagnostic(tree: ast.AST) -> bool:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Try):
+            continue
+        has_ph_call = any(
+            isinstance(candidate, ast.Call)
+            and (
+                (
+                    isinstance(candidate.func, ast.Name)
+                    and candidate.func.id == "proportional_hazard_test"
+                )
+                or (
+                    isinstance(candidate.func, ast.Attribute)
+                    and candidate.func.attr == "proportional_hazard_test"
+                )
+            )
+            for statement in node.body
+            for candidate in ast.walk(statement)
+        )
+        if not has_ph_call:
+            continue
+        if any(
+            handler.body
+            and not any(
+                isinstance(candidate, ast.Raise) for candidate in ast.walk(handler)
+            )
+            for handler in node.handlers
+        ):
+            return True
+    return False
+
+
 def _python_scientific_preflight(
     code: str,
     *,
@@ -350,6 +493,35 @@ def _python_scientific_preflight(
         for child in ast.iter_child_nodes(parent)
     }
     issues: list[str] = []
+    if survival_task:
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Dict):
+                continue
+            for key, value in zip(node.keys, node.values, strict=True):
+                if not (
+                    isinstance(key, ast.Constant)
+                    and isinstance(key.value, str)
+                    and key.value.casefold().replace("-", "_") == "time_origin"
+                ):
+                    continue
+                source = ast.get_source_segment(code, value) or ""
+                if re.search(
+                    r"\b(?:infer\w*|assum\w*|unknown|unavailable|undocumented|"
+                    r"not explicitly (?:verified|defined|established))\b",
+                    source,
+                    re.IGNORECASE,
+                ):
+                    issues.append(
+                        "survival estimation cannot proceed with an inferred, assumed, "
+                        "unknown, or explicitly unverified time origin; stop and report "
+                        "the analysis as not estimable"
+                    )
+    if survival_task and _has_swallowed_ph_diagnostic(tree):
+        issues.append(
+            "do not catch a proportional-hazards diagnostic failure and emit an "
+            "apparently complete Cox result; repair the diagnostic or keep the "
+            "model result unsupported"
+        )
     if survival_task and any(
         isinstance(node, ast.Attribute) and node.attr == "median_survival_time"
         for node in ast.walk(tree)
@@ -444,6 +616,9 @@ def _python_scientific_preflight(
                 f"{column} has no complete input-profile codebook; preserve raw "
                 f"labels instead of unsupported semantic recoding ({', '.join(unsupported)})"
             )
+    issues.extend(
+        _semantic_indicator_issues(code, tree, ungrounded_categorical_columns)
+    )
     return issues
 
 

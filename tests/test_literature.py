@@ -702,6 +702,52 @@ def test_acquisition_metadata_resolves_by_pmid_when_model_citekey_is_missing_or_
         assert "pubmed_acquisition_metadata_mismatch" in codes
 
 
+@pytest.mark.parametrize("source_defines_origin", [False, True])
+def test_specific_survival_time_origin_must_occur_in_acquired_source(
+    tmp_path: Path, source_defines_origin: bool
+):
+    markdown = tmp_path / "lovelace.md"
+    origin_text = (
+        "RFS was defined as time from initial TURBT to recurrence."
+        if source_defines_origin
+        else "The study modeled recurrence-free survival."
+    )
+    markdown.write_text(
+        "# Verified article\n\n"
+        "The controlled study reported a treatment effect. "
+        f"{origin_text}\n",
+        encoding="utf-8",
+    )
+    report = _literature_report(markdown)
+    assertion = "Time origin was defined as the date of initial TURBT."
+    report.methods = [assertion]
+    report.claims[0] = report.claims[0].model_copy(update={"text": assertion})
+    report.inline_citations[0] = report.inline_citations[0].model_copy(
+        update={
+            "section": "methods",
+            "anchor_text": assertion,
+        }
+    )
+    metadata = _acquisition_metadata(tmp_path, markdown)
+    retrieval = RetrievalEvidence(
+        successful_calls=1,
+        tools=["acquire_pubmed_article"],
+        urls=["https://pubmed.ncbi.nlm.nih.gov/12345678/"],
+        retrieval_dates=["2026-07-14"],
+        artifacts=[str(markdown), str(metadata)],
+    )
+
+    validation = validate_report(
+        report, retrieval=retrieval, require_inline_citations=True
+    )
+    codes = {finding.code for finding in validation.findings}
+
+    if source_defines_origin:
+        assert "literature_time_origin_not_grounded" not in codes
+    else:
+        assert "literature_time_origin_not_grounded" in codes
+
+
 def test_local_literature_paths_are_linted_materialized_and_linked(tmp_path: Path):
     markdown = tmp_path / "lovelace.md"
     markdown.write_text(

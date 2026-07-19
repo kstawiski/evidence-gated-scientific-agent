@@ -206,6 +206,20 @@ def test_plan_linter_accepts_explicit_prohibition_on_order_based_arm_assignment(
     }
 
 
+def test_plan_linter_accepts_categorical_reference_levels_for_cox_model():
+    plan = good_plan()
+    plan.steps[0].methods = [
+        "Fit a Cox model with explicit categorical levels and reference groups: "
+        "Gender raw code 0 and Grading raw code 1."
+    ]
+
+    report = lint_plan(task(), plan)
+
+    assert "arbitrary_semantic_arm_mapping" not in {
+        finding.code for finding in report.findings
+    }
+
+
 @pytest.mark.parametrize(
     "method",
     [

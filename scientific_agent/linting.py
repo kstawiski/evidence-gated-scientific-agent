@@ -764,8 +764,8 @@ def reconciliation_verdict(
 _WORD = re.compile(r"[a-z0-9]{4,}")
 _ARBITRARY_SEMANTIC_ARM_MAPPING = re.compile(
     r"\b(?:lexicograph\w*|alphabet\w*|numeric\w*|row|categor\w*)\b"
-    r".{0,120}\b(?:control|treatment|intervention|comparison|reference)\b"
-    r"|\b(?:control|treatment|intervention|comparison|reference)\b"
+    r".{0,120}\b(?:control|treatment|intervention|comparison)\b"
+    r"|\b(?:control|treatment|intervention|comparison)\b"
     r".{0,120}\b(?:lexicograph\w*|alphabet\w*|numeric\w*|row|categor\w*)\b"
     r"|\b(?:assign|map|designat|classif|infer)\w*\b.{0,120}"
     r"\b(?:based on|according to|using|higher|lower|larger|smaller|"

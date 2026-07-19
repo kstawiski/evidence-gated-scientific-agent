@@ -284,6 +284,25 @@ def test_survival_plan_accepts_source_codebook_checkpoint_for_time_origin():
     }
 
 
+def test_survival_plan_accepts_source_codebook_verification_noun():
+    survival_task = task().model_copy(
+        update={"objective": "Add survival and competing-risk analyses."}
+    )
+    plan = good_plan().model_copy(
+        update={"objective": "Estimate recurrence-free survival."}
+    )
+    plan.steps[0].methods = [
+        "Schedule exact source/codebook verification for time origin and event "
+        "definitions before any estimation."
+    ]
+
+    report = lint_plan(survival_task, plan)
+
+    assert "survival_time_origin_not_grounded" not in {
+        finding.code for finding in report.findings
+    }
+
+
 def test_survival_plan_accepts_workbook_metadata_before_time_zero_term():
     survival_task = task().model_copy(
         update={"objective": "Add survival and competing-risk analyses."}

@@ -818,15 +818,18 @@ _EXPLICIT_TIME_ORIGIN = re.compile(
     re.IGNORECASE,
 )
 _TIME_ORIGIN_SOURCE_CHECK = re.compile(
-    r"\b(?:verify|confirm|establish|inspect|retrieve|acquire|consult)\w*\b"
+    r"\b(?:verify|verification|confirm|establish|inspect|retrieve|acquire|consult)\w*\b"
     r".{0,100}\b(?:time origin|time[- ]zero)\b.{0,100}"
     r"\b(?:source|article|codebook|metadata|workbook|uploaded (?:data|input))\b"
-    r"|\b(?:verify|confirm|establish|inspect|retrieve|acquire|consult)\w*\b"
+    r"|\b(?:verify|verification|confirm|establish|inspect|retrieve|acquire|consult)\w*\b"
     r".{0,100}\b(?:source|article|codebook|metadata|workbook|uploaded (?:data|input))\b"
+    r".{0,100}\b(?:time origin|time[- ]zero)\b"
+    r"|\b(?:source|article|codebook|metadata|workbook|uploaded (?:data|input))\b"
+    r".{0,100}\b(?:verify|verification|confirm|establish|inspect|retrieve|acquire|consult)\w*\b"
     r".{0,100}\b(?:time origin|time[- ]zero)\b"
     r"|\b(?:time origin|time[- ]zero)\b.{0,100}"
     r"\b(?:source|article|codebook|metadata|workbook|uploaded (?:data|input))\b"
-    r".{0,100}\b(?:verify|confirm|establish|inspect|retrieve|acquire|consult)\w*\b",
+    r".{0,100}\b(?:verify|verification|confirm|establish|inspect|retrieve|acquire|consult)\w*\b",
     re.IGNORECASE,
 )
 _UNKNOWN_TIME_ORIGIN = re.compile(

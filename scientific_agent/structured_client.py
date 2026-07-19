@@ -467,6 +467,7 @@ async def request_structured(
     output_type: type[T],
     temperature: float,
     max_tokens: int | None = None,
+    max_private_reasoning_bytes_without_final: int | None = None,
     timeout: float,
     enable_thinking: bool | None = None,
     repair_attempts: int = 1,
@@ -476,6 +477,12 @@ async def request_structured(
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> T:
     """Request one schema-valid value, with at most one explicit repair call."""
+
+    if (
+        max_private_reasoning_bytes_without_final is not None
+        and max_private_reasoning_bytes_without_final <= 0
+    ):
+        raise ValueError("max_private_reasoning_bytes_without_final must be positive")
 
     original_input = _jsonable(payload)
     user_payload: Any = original_input
@@ -604,8 +611,10 @@ async def request_structured(
                 content_guard = _StreamRepetitionGuard()
                 stream_started = False
                 private_reasoning_bytes_without_final = 0
-                private_reasoning_no_final_limit = _private_reasoning_no_final_limit(
-                    endpoint
+                private_reasoning_no_final_limit = (
+                    max_private_reasoning_bytes_without_final
+                    if max_private_reasoning_bytes_without_final is not None
+                    else _private_reasoning_no_final_limit(endpoint)
                 )
 
                 async def consume_stream() -> None:

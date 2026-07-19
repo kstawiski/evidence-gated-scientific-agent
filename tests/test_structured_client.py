@@ -1181,6 +1181,7 @@ async def test_gemma_private_reasoning_without_final_progress_is_retried():
         output_type=Answer,
         temperature=0.2,
         max_tokens=None,
+        max_private_reasoning_bytes_without_final=1024,
         timeout=2,
         repair_attempts=1,
         on_visible_text=visible.append,
@@ -1190,6 +1191,22 @@ async def test_gemma_private_reasoning_without_final_progress_is_retried():
     assert result.value == "recovered"
     assert calls == 2
     assert "Gemma stream with no final-channel progress" in "".join(visible)
+
+
+@pytest.mark.asyncio
+async def test_private_reasoning_override_must_be_positive():
+    with pytest.raises(
+        ValueError, match="max_private_reasoning_bytes_without_final must be positive"
+    ):
+        await request_structured(
+            _endpoint(),
+            system_prompt="Return an answer.",
+            payload={},
+            output_type=Answer,
+            temperature=0.2,
+            max_private_reasoning_bytes_without_final=0,
+            timeout=2,
+        )
 
 
 @pytest.mark.asyncio

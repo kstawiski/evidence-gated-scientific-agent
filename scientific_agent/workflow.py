@@ -29,6 +29,7 @@ from .schemas import (
 from .structured_client import request_structured
 
 PLAN_CRITIC_UNAVAILABLE = "plan-critic-unavailable"
+PLAN_AUDIT_MAX_PRIVATE_REASONING_BYTES_WITHOUT_FINAL = 64 * 1024
 DEFAULT_METHOD_LOCK_FIELDS = [
     "primary estimand and endpoints",
     "eligibility and exclusions",
@@ -433,6 +434,9 @@ async def audit_master_plan(
             payload=build_plan_audit_packet(master),
             output_type=PlanAuditChecklist,
             temperature=settings.gemma.temperature,
+            max_private_reasoning_bytes_without_final=(
+                PLAN_AUDIT_MAX_PRIVATE_REASONING_BYTES_WITHOUT_FINAL
+            ),
             timeout=150,
             on_visible_text=(
                 (lambda text: on_visible_text("Gemma", text))

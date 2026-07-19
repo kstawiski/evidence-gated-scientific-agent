@@ -288,6 +288,7 @@ class ScientificToolOrderGate:
 
     required_languages: frozenset[str]
     require_reconciliation: bool = False
+    require_current_computation: bool = False
     max_pubmed_search_attempts: int | None = None
     max_pubmed_acquisition_attempts: int | None = None
     pubmed_search_attempts: int = 0
@@ -363,7 +364,10 @@ class ScientificToolOrderGate:
                 tool_name, self.max_pubmed_acquisition_attempts
             )
         missing, reconciliation = self.missing_requirements(current, existing)
-        if not missing and not reconciliation:
+        current_computation_pending = (
+            self.require_current_computation and current.successful_calls == 0
+        )
+        if not missing and not reconciliation and not current_computation_pending:
             return None
         search_limit_reached = (
             self.pubmed_search_successes >= 1 or self.pubmed_search_attempts >= 3
@@ -373,9 +377,13 @@ class ScientificToolOrderGate:
             or self.pubmed_acquisition_attempts >= 3
         )
         if tool_name == "search_pubmed" and search_limit_reached:
-            return self._deferred(tool_name, missing, reconciliation)
+            return self._deferred(
+                tool_name, missing, reconciliation, current_computation_pending
+            )
         if tool_name == "acquire_pubmed_article" and acquisition_limit_reached:
-            return self._deferred(tool_name, missing, reconciliation)
+            return self._deferred(
+                tool_name, missing, reconciliation, current_computation_pending
+            )
         return None
 
     @staticmethod
@@ -391,8 +399,15 @@ class ScientificToolOrderGate:
         }
 
     @staticmethod
-    def _deferred(tool_name: str, missing: list[str], reconciliation: bool) -> dict:
+    def _deferred(
+        tool_name: str,
+        missing: list[str],
+        reconciliation: bool,
+        current_computation_pending: bool,
+    ) -> dict:
         requirements = [*missing]
+        if current_computation_pending:
+            requirements.append("a successful current-run Python or R computation")
         if reconciliation:
             requirements.append("passing cross-language reconciliation")
         description = ", ".join(requirements)
@@ -405,6 +420,7 @@ class ScientificToolOrderGate:
                 "acquired paper and run the locked analysis next."
             ),
             "missing_required_languages": missing,
+            "current_computation_required": current_computation_pending,
             "reconciliation_required": reconciliation,
         }
 
@@ -2384,12 +2400,92 @@ def _can_continue_after_research_error(
     repairing: bool,
     computation: ComputationEvidence,
     retrieval: RetrievalEvidence,
+    require_current_computation: bool = False,
 ) -> bool:
     """Allow reporting when existing controller evidence can still be gated."""
 
+    if require_current_computation and computation.successful_calls == 0:
+        return False
     return bool(
         repairing or computation.successful_calls > 0 or retrieval.successful_calls > 0
     )
+
+
+def _requires_current_run_computation(
+    task: TaskSpec,
+    *,
+    enable_code: bool,
+    repairing: bool,
+    revision_request: str | None,
+) -> bool:
+    """Identify runs that cannot be reported from inherited/retrieved evidence alone."""
+
+    if not enable_code:
+        return False
+    if revision_request is not None:
+        return _revision_requests_new_analysis(revision_request)
+    if repairing:
+        return False
+    return bool(
+        task.required_computation_languages
+        or task.task_type
+        in {
+            "data_analysis",
+            "bioinformatics_pipeline",
+            "statistical_modeling",
+            "figure_generation",
+        }
+    )
+
+
+def _research_continuation_payload(
+    *,
+    planning: PlanningResult,
+    retrieval: RetrievalEvidence,
+    computation: ComputationEvidence,
+    error: Exception,
+    revision_request: str | None,
+    environment_records: list[dict] | None = None,
+) -> dict:
+    """Build a bounded fresh-session handoff after a tool-only ADK turn."""
+
+    payload = {
+        "task": planning.master_plan.task.model_dump(mode="json"),
+        "master_plan": planning.master_plan.model_dump(mode="json"),
+        "continuation_reason": {
+            "error_type": type(error).__name__,
+            "message": (
+                "The prior research turn ended without a usable final response. "
+                "Controller-recorded tool evidence remains valid."
+            ),
+        },
+        "controller_retrieval_evidence": retrieval.model_dump(mode="json"),
+        "controller_computation_evidence": _compact_computation_summary(computation),
+        "successful_package_installations": [
+            {
+                "language": record.get("language"),
+                "repository": record.get("repository"),
+                "requested": record.get("requested", []),
+            }
+            for record in (environment_records or [])
+            if record.get("status") == "succeeded"
+        ],
+        "mandatory_next_action": (
+            "Do not draft the report and do not repeat literature retrieval. Execute "
+            "the locked analysis now with run_python_analysis or run_r_analysis. "
+            "Packages in successful_package_installations are already mounted; do "
+            "not reinstall them. "
+            "Create at least one meaningful machine-readable JSON result and every "
+            "reader-facing figure/table required by the plan under /output. Verify "
+            "all outputs in the successful tool response, then return a concise "
+            "evidence summary. If the estimand is not identifiable, still write a "
+            "machine-readable feasibility result with the observed schema facts and "
+            "the reason it is not estimable; never invent an estimate."
+        ),
+    }
+    if revision_request is not None:
+        payload["user_revision_request"] = revision_request
+    return payload
 
 
 def _merge_retrieval_evidence(
@@ -2748,6 +2844,7 @@ async def _produce_report(
     literature_tools = build_literature_tools(literature)
     analysis_tools = []
     environment_tools = []
+    environment_manager = None
     packages_enabled = bool(
         enable_code
         and settings.environment.worker_url
@@ -2821,6 +2918,12 @@ async def _produce_report(
             )
         ),
     )
+    require_current_computation = _requires_current_run_computation(
+        planning.master_plan.task,
+        enable_code=enable_code,
+        repairing=repairing,
+        revision_request=revision_request,
+    )
     tool_order = ScientificToolOrderGate(
         required_languages=(
             frozenset(planning.master_plan.task.required_computation_languages)
@@ -2831,6 +2934,7 @@ async def _produce_report(
             enable_code
             and _requires_cross_language_reconciliation(planning.master_plan.task)
         ),
+        require_current_computation=require_current_computation,
         max_pubmed_search_attempts=3 if simple_mode else None,
         max_pubmed_acquisition_attempts=3 if simple_mode else None,
     )
@@ -3077,10 +3181,100 @@ async def _produce_report(
                     ),
                     cancel_event=cancel_event,
                 )
+                if (
+                    require_current_computation
+                    and executor is not None
+                    and executor.evidence().successful_calls == 0
+                ):
+                    raise RuntimeError(
+                        "research turn returned without the required current-run "
+                        "computation"
+                    )
                 _cancel_checkpoint(cancel_event)
             except Exception as exc:
                 research_error = exc
                 research_packet = ""
+                current_computation = (
+                    executor.evidence()
+                    if executor is not None
+                    else ComputationEvidence()
+                )
+                if (
+                    require_current_computation
+                    and current_computation.successful_calls == 0
+                ):
+                    current_retrieval = policy.retrieval_evidence()
+                    ledger.append(
+                        "research_continuation_started",
+                        {
+                            "trigger_error_type": type(exc).__name__,
+                            "successful_computations": 0,
+                            "successful_retrievals": current_retrieval.successful_calls,
+                            "current_run_computation_required": True,
+                        },
+                    )
+                    if phase_progress is not None:
+                        phase_progress(
+                            "research",
+                            "Qwen is continuing directly with the required analysis",
+                        )
+                    try:
+                        research_packet = await run_text(
+                            research_agent,
+                            _research_continuation_payload(
+                                planning=planning,
+                                retrieval=current_retrieval,
+                                computation=current_computation,
+                                error=exc,
+                                revision_request=revision_request,
+                                environment_records=(
+                                    environment_manager.records()
+                                    if environment_manager is not None
+                                    else None
+                                ),
+                            ),
+                            on_visible_text=record_visible_text,
+                            on_model_turn=lambda: research_budget.record_model_turn(
+                                cancel_event
+                            ),
+                            cancel_event=cancel_event,
+                        )
+                        if (
+                            executor is None
+                            or executor.evidence().successful_calls == 0
+                        ):
+                            raise RuntimeError(
+                                "research continuation returned without the required "
+                                "current-run computation"
+                            )
+                        research_error = None
+                        ledger.append(
+                            "research_continuation_completed",
+                            {
+                                "successful_computations": (
+                                    executor.evidence().successful_calls
+                                    if executor is not None
+                                    else 0
+                                ),
+                                "successful_retrievals": (
+                                    policy.retrieval_evidence().successful_calls
+                                ),
+                            },
+                        )
+                    except Exception as continuation_exc:
+                        research_error = continuation_exc
+                        research_packet = ""
+                        ledger.append(
+                            "research_continuation_failed",
+                            {
+                                "error_type": type(continuation_exc).__name__,
+                                "successful_computations": (
+                                    executor.evidence().successful_calls
+                                    if executor is not None
+                                    else 0
+                                ),
+                            },
+                        )
             finally:
                 await close_mcp_toolsets(toolsets)
     finally:
@@ -3089,11 +3283,20 @@ async def _produce_report(
         literature.close()
     retrieval = policy.retrieval_evidence()
     computation = executor.evidence() if executor is not None else ComputationEvidence()
+    if (
+        research_error is None
+        and require_current_computation
+        and computation.successful_calls == 0
+    ):
+        research_error = RuntimeError(
+            "research completed without the required current-run computation"
+        )
     if research_error is not None:
         if not _can_continue_after_research_error(
             repairing=repairing,
             computation=computation,
             retrieval=retrieval,
+            require_current_computation=require_current_computation,
         ):
             raise research_error
         ledger.append(

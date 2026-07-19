@@ -31,6 +31,8 @@ from scientific_agent.orchestrator import (
     _prepare_task_spec,
     _prepare_revision_task_spec,
     _register_computation_path_evidence,
+    _research_continuation_payload,
+    _requires_current_run_computation,
     _revision_required_new_display_kinds,
     _revision_requires_any_new_display,
     _revision_requests_new_analysis,
@@ -563,6 +565,22 @@ def test_tool_order_gate_allows_broader_zero_hit_search_and_lifts_after_code():
     gate.record_result("search_pubmed", {"articles": [{"pmid": "1"}]})
 
     assert gate.before_tool("search_pubmed", successful) is None
+
+
+def test_tool_order_gate_requires_current_child_computation_not_inherited_evidence():
+    gate = ScientificToolOrderGate(frozenset(), require_current_computation=True)
+    gate.record_result("search_pubmed", {"articles": [{"pmid": "1"}]})
+    inherited = ComputationEvidence(successful_calls=1)
+
+    denied = gate.before_tool(
+        "search_pubmed", ComputationEvidence(), existing=inherited
+    )
+
+    assert denied is not None
+    assert denied["error"] == "REQUIRED_COMPUTATION_PENDING"
+    assert denied["current_computation_required"] is True
+    current = ComputationEvidence(successful_calls=1)
+    assert gate.before_tool("search_pubmed", current, existing=inherited) is None
 
 
 def test_simple_tool_order_gate_caps_post_computation_pubmed_attempts():
@@ -1463,6 +1481,83 @@ def test_research_budget_exhaustion_can_continue_only_with_existing_evidence():
         computation=ComputationEvidence(),
         retrieval=RetrievalEvidence(),
     )
+    assert not _can_continue_after_research_error(
+        repairing=True,
+        computation=ComputationEvidence(),
+        retrieval=RetrievalEvidence(successful_calls=2),
+        require_current_computation=True,
+    )
+    assert _can_continue_after_research_error(
+        repairing=True,
+        computation=ComputationEvidence(successful_calls=1),
+        retrieval=RetrievalEvidence(),
+        require_current_computation=True,
+    )
+
+
+def test_current_run_computation_requirement_covers_analysis_and_child_revisions():
+    analysis_task = _task().model_copy(update={"task_type": "data_analysis"})
+    writing_task = _task().model_copy(update={"task_type": "literature_review"})
+
+    assert _requires_current_run_computation(
+        analysis_task,
+        enable_code=True,
+        repairing=False,
+        revision_request=None,
+    )
+    assert _requires_current_run_computation(
+        writing_task,
+        enable_code=True,
+        repairing=True,
+        revision_request="Add more survival analyses.",
+    )
+    assert not _requires_current_run_computation(
+        writing_task,
+        enable_code=True,
+        repairing=True,
+        revision_request="Clarify the survival-analysis limitations.",
+    )
+
+
+def test_research_continuation_handoff_forbids_reporting_before_computation():
+    task = _task().model_copy(update={"task_type": "statistical_modeling"})
+    planning = PlanningResult(
+        master_plan=MasterPlan(
+            task=task,
+            plan=_plan("MASTER"),
+            resolutions=[],
+            method_lock_required=False,
+        ),
+        audit=VerificationReport(verdict="pass"),
+        plan_lints=[],
+        status="supported",
+    )
+
+    payload = _research_continuation_payload(
+        planning=planning,
+        retrieval=RetrievalEvidence(successful_calls=1),
+        computation=ComputationEvidence(),
+        error=RuntimeError("secret transport detail"),
+        revision_request="Add more survival analyses.",
+        environment_records=[
+            {
+                "language": "r",
+                "repository": "cran",
+                "requested": ["survival"],
+                "status": "succeeded",
+                "stdout": "unbounded installer output",
+            }
+        ],
+    )
+
+    assert "run_python_analysis or run_r_analysis" in payload["mandatory_next_action"]
+    assert "Do not draft the report" in payload["mandatory_next_action"]
+    assert payload["user_revision_request"] == "Add more survival analyses."
+    assert payload["successful_package_installations"] == [
+        {"language": "r", "repository": "cran", "requested": ["survival"]}
+    ]
+    assert "unbounded installer output" not in json.dumps(payload)
+    assert "secret transport detail" not in json.dumps(payload)
 
 
 @pytest.mark.asyncio

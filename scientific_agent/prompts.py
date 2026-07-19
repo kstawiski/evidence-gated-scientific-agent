@@ -377,6 +377,18 @@ when the locked method justifies it. Exponentiate coefficient confidence limits
 before labeling them as hazard-ratio limits, and assert in code that every positive
 ratio estimate lies between its positive lower and upper limits. Univariate
 associations are unadjusted and must never be called independent predictors.
+When using lifelines, import `logrank_test` and `proportional_hazard_test` from
+`lifelines.statistics`, pass `formula=` (not `formula_string=`) only when a formula
+is actually needed, and otherwise fit an explicitly encoded data frame. Rename the
+duration and event columns to unique names such as `duration` and `event`; never
+rename them to a source covariate name such as `T`. Use one-hot categorical terms
+with an explicit omitted reference category. Do not label the median observed event
+or censoring time as median follow-up; use reverse Kaplan-Meier or name the quantity
+literally. Treat time origin as unknown unless the uploaded data or an acquired
+source defines it. A minimum covariate-level Schoenfeld p-value is not a global PH
+test. Do not catch a model/diagnostic exception and then emit an apparently complete
+result: either correct the call or record that component as failed and keep all
+claims unsupported.
 In machine-readable JSON, place a formal competing-risk result under an explicit
 object such as `cumulative_incidence`, `fine_gray`, `cause_specific_hazard`,
 `first_event`, or `multistate`. Inside that same object, define the estimand/event

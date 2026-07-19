@@ -119,6 +119,11 @@ class EnvironmentManager:
             raise RuntimeError("package worker URL and token are both required")
         self.workspace_id = workspace_id_from_path(self.workspace)
 
+    def records(self) -> list[dict]:
+        """Return controller-recorded installation results for bounded handoffs."""
+
+        return list(self._records)
+
     def install(
         self,
         language: str,

@@ -87,6 +87,17 @@ def test_researcher_documents_matplotlib_hlines_return_type():
     assert "pmid, pmcid, citekey, license, rights_status" in REPORTER
 
 
+def test_researcher_uses_safe_survival_api_and_endpoint_semantics():
+    assert "from\n`lifelines.statistics`" in RESEARCHER
+    assert "`formula=` (not `formula_string=`)" in RESEARCHER
+    assert "never\nrename them to a source covariate name such as `T`" in RESEARCHER
+    assert "median observed event\nor censoring time as median follow-up" in RESEARCHER
+    assert (
+        "A minimum covariate-level Schoenfeld p-value is not a global PH" in RESEARCHER
+    )
+    assert "Treat time origin as unknown" in RESEARCHER
+
+
 def test_planners_do_not_invent_input_names_or_qwen_visual_audits():
     for prompt in (PLANNER_A, PLANNER_B, SIMPLE_PLANNER):
         assert "filename" in prompt

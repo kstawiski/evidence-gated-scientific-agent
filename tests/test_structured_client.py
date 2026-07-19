@@ -348,7 +348,7 @@ async def test_prompt_schema_preserves_maximum_thinking_without_client_ceiling()
         payload={"question": "test"},
         output_type=Answer,
         temperature=0.2,
-        max_tokens=100,
+        max_tokens=None,
         timeout=2,
         transport=httpx.MockTransport(handler),
     )
@@ -359,6 +359,42 @@ async def test_prompt_schema_preserves_maximum_thinking_without_client_ceiling()
     assert "chat_template_kwargs" not in seen
     assert "STRUCTURED FINAL OUTPUT REQUIREMENT" in seen["messages"][0]["content"]
     assert '"value"' in seen["messages"][0]["content"]
+
+
+@pytest.mark.asyncio
+async def test_prompt_schema_honors_explicit_client_ceiling():
+    seen = {}
+    endpoint = replace(
+        _endpoint(), max_tokens=None, native_json_schema=False, enable_thinking=None
+    )
+
+    def handler(request: httpx.Request):
+        seen.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            json={
+                "choices": [
+                    {
+                        "message": {"content": '{"value":"bounded"}'},
+                        "finish_reason": "stop",
+                    }
+                ]
+            },
+        )
+
+    result = await request_structured(
+        endpoint,
+        system_prompt="Return an answer.",
+        payload={},
+        output_type=Answer,
+        temperature=0.2,
+        max_tokens=100,
+        timeout=2,
+        transport=httpx.MockTransport(handler),
+    )
+
+    assert result.value == "bounded"
+    assert seen["max_tokens"] == 100
 
 
 @pytest.mark.asyncio

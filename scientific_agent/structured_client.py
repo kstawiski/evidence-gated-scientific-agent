@@ -530,13 +530,16 @@ async def request_structured(
                 request_body["chat_template_kwargs"] = {
                     "enable_thinking": thinking_setting
                 }
-            if endpoint.max_tokens is not None:
-                request_body["max_tokens"] = endpoint.max_tokens
-                if max_tokens is not None:
-                    request_body["max_tokens"] = min(
-                        endpoint.max_tokens,
-                        max_tokens * (attempt + 1),
-                    )
+            attempt_max_tokens = (
+                max_tokens * (attempt + 1) if max_tokens is not None else None
+            )
+            selected_max_tokens = endpoint.max_tokens
+            if selected_max_tokens is None:
+                selected_max_tokens = attempt_max_tokens
+            elif attempt_max_tokens is not None:
+                selected_max_tokens = min(selected_max_tokens, attempt_max_tokens)
+            if selected_max_tokens is not None:
+                request_body["max_tokens"] = selected_max_tokens
             if endpoint.native_json_schema:
                 request_body["response_format"] = {
                     "type": "json_schema",

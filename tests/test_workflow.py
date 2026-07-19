@@ -75,6 +75,7 @@ from scientific_agent.schemas import (
 from scientific_agent.workflow import (
     DEFAULT_METHOD_LOCK_FIELDS,
     PLAN_AUDIT_MAX_PRIVATE_REASONING_BYTES_WITHOUT_FINAL,
+    PLAN_AUDIT_MAX_TOKENS,
     PLAN_CRITIC_UNAVAILABLE,
     audit_master_plan,
     bind_controller_task,
@@ -1801,6 +1802,7 @@ async def test_plan_critic_failure_becomes_explicit_inconclusive_audit(monkeypat
     assert "private endpoint detail" not in audit.model_dump_json()
     assert result.status == "inconclusive"
     assert observed["temperature"] == Settings().gemma.temperature
+    assert observed["max_tokens"] == PLAN_AUDIT_MAX_TOKENS
     assert observed["max_private_reasoning_bytes_without_final"] == (
         PLAN_AUDIT_MAX_PRIVATE_REASONING_BYTES_WITHOUT_FINAL
     )

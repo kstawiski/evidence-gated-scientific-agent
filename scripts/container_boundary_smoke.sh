@@ -41,6 +41,12 @@ cleanup() {
   fi
   docker rm --force "$private_probe" "$app_probe" 2>/dev/null || true
   compose down --volumes || true
+  if [ -d "$smoke_root" ]; then
+    docker run --rm --network none \
+      --volume "$smoke_root:/smoke" \
+      --entrypoint /bin/chmod "$browser_image" \
+      -R a+rwX /smoke >/dev/null 2>&1 || true
+  fi
   rm -rf "$smoke_root" || true
   trap - EXIT
   exit "$status"

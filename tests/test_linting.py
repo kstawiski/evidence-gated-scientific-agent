@@ -446,6 +446,55 @@ def test_survival_report_rejects_specific_origin_not_present_in_source():
     }
 
 
+def test_survival_report_rejects_origin_that_differs_from_grounded_input():
+    survival_task = task().model_copy(
+        update={
+            "objective": "Add survival analyses.",
+            "constraints": ["The time origin was the initial TURBT."],
+        }
+    )
+    report = article_report(
+        methods=["The time origin was the date of diagnosis."],
+        claims=[
+            ClaimRecord(
+                claim_id="cox-result",
+                text="The adjusted hazard ratio was 1.20 (95% CI 1.05-1.37).",
+                claim_type="computed",
+                evidence_refs=[],
+                status=EvidenceStatus.SUPPORTED,
+            )
+        ],
+    )
+
+    validation = validate_report(report, task=survival_task)
+
+    assert "survival_report_time_origin_not_grounded" in {
+        finding.code for finding in validation.findings
+    }
+
+
+def test_survival_report_does_not_mistake_change_from_baseline_for_time_zero():
+    survival_task = task().model_copy(update={"objective": "Add survival analyses."})
+    report = article_report(
+        methods=["The 60-month RFS increased from 0.39 to 0.52 at baseline."],
+        claims=[
+            ClaimRecord(
+                claim_id="cox-result",
+                text="The adjusted hazard ratio was 1.20 (95% CI 1.05-1.37).",
+                claim_type="computed",
+                evidence_refs=[],
+                status=EvidenceStatus.SUPPORTED,
+            )
+        ],
+    )
+
+    validation = validate_report(report, task=survival_task)
+
+    assert "survival_report_time_origin_missing" in {
+        finding.code for finding in validation.findings
+    }
+
+
 def test_plan_linter_rejects_role_mapping_keys_absent_from_input_profile():
     profiled_task = task().model_copy(
         update={

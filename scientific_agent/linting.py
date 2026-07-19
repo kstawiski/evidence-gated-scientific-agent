@@ -842,14 +842,20 @@ _STOP_BEFORE_SURVIVAL_ESTIMATION = re.compile(
     r"\b(?:estimat|fit|model|kaplan|cox|survival)\w*\b",
     re.IGNORECASE,
 )
+_SURVIVAL_ORIGIN_TERM = (
+    r"diagnos\w*|surg\w*|resection|turbt|randomi[sz]\w*|enrol\w*|"
+    r"treatment (?:start|initiat\w*)|index date|baseline(?: visit)?|study entry"
+)
+_SURVIVAL_ORIGIN_PREFIX = r"(?:\s+(?:the|date|time|day|of|initial|first|at|on))*\s+"
 _SPECIFIC_SURVIVAL_TIME_ORIGIN = re.compile(
-    r"\b(?:time origin|time[- ]zero)\b.{0,120}"
-    r"\b(?:diagnos\w*|surg\w*|resection|turbt|randomi[sz]\w*|enrol\w*|"
-    r"treatment (?:start|initiat\w*)|index date|baseline(?: visit)?|study entry)\b"
-    r"|\b(?:recurrence[- ]free survival|progression[- ]free survival|rfs|pfs|"
-    r"time[- ]to[- ]event|follow[- ]up)\b.{0,120}\b(?:from|since|began|started)\b"
-    r".{0,80}\b(?:diagnos\w*|surg\w*|resection|turbt|randomi[sz]\w*|enrol\w*|"
-    r"treatment (?:start|initiat\w*)|index date|baseline(?: visit)?|study entry)\b",
+    rf"\b(?:time origin|time[- ]zero)\b.{{0,50}}"
+    rf"\b(?:is|was|were|as|at|on|from)\b{_SURVIVAL_ORIGIN_PREFIX}"
+    rf"\b(?P<explicit_origin>{_SURVIVAL_ORIGIN_TERM})\b"
+    rf"|\bfollow[- ]up\b.{{0,30}}\b(?:begins|starts|began|started)\b"
+    rf"{_SURVIVAL_ORIGIN_PREFIX}\b(?P<followup_origin>{_SURVIVAL_ORIGIN_TERM})\b"
+    rf"|\b(?:recurrence[- ]free survival|progression[- ]free survival|rfs|pfs|"
+    rf"time[- ]to[- ]event)\b.{{0,100}}\b(?:from|since)\b"
+    rf"{_SURVIVAL_ORIGIN_PREFIX}\b(?P<endpoint_origin>{_SURVIVAL_ORIGIN_TERM})\b",
     re.IGNORECASE,
 )
 _SURVIVAL_ESTIMATE_CLAIM = re.compile(
@@ -870,6 +876,35 @@ def has_specific_survival_time_origin(text: str) -> bool:
     """Return whether exact text defines a recognizable survival time zero."""
 
     return bool(_SPECIFIC_SURVIVAL_TIME_ORIGIN.search(text))
+
+
+def survival_time_origin_keys(text: str) -> frozenset[str]:
+    """Return normalized, explicitly defined survival time-origin categories."""
+
+    keys: set[str] = set()
+    for match in _SPECIFIC_SURVIVAL_TIME_ORIGIN.finditer(text):
+        value = next(item for item in match.groups() if item is not None).casefold()
+        if value.startswith("diagnos"):
+            keys.add("diagnosis")
+        elif value.startswith("surg"):
+            keys.add("surgery")
+        elif value == "resection":
+            keys.add("resection")
+        elif value == "turbt":
+            keys.add("turbt")
+        elif value.startswith("random"):
+            keys.add("randomization")
+        elif value.startswith("enrol"):
+            keys.add("enrollment")
+        elif value.startswith("treatment"):
+            keys.add("treatment_start")
+        elif value == "index date":
+            keys.add("index_date")
+        elif value.startswith("baseline"):
+            keys.add("baseline")
+        elif value == "study entry":
+            keys.add("study_entry")
+    return frozenset(keys)
 
 
 def _has_arbitrary_semantic_arm_mapping(text: str) -> bool:
@@ -2298,6 +2333,7 @@ def validate_report(
     required_new_display_kinds: tuple[str, ...] = (),
     require_any_new_display: bool = False,
     require_competing_risk_result: bool = False,
+    survival_time_origin_grounding_text: str = "",
 ) -> DeterministicValidation:
     findings: list[LintFinding] = []
     valid_reconciliation_paths: set[str] = set()
@@ -3623,7 +3659,11 @@ def validate_report(
         ]
         if survival_estimate_claims:
             task_text = " ".join([task.objective, *task.constraints])
-            if not _SPECIFIC_SURVIVAL_TIME_ORIGIN.search(report_text):
+            report_time_origins = survival_time_origin_keys(report_text)
+            grounded_time_origins = survival_time_origin_keys(
+                "\n".join([task_text, survival_time_origin_grounding_text])
+            )
+            if not report_time_origins:
                 findings.append(
                     LintFinding(
                         code="survival_report_time_origin_missing",
@@ -3636,22 +3676,16 @@ def validate_report(
                         ),
                     )
                 )
-            elif not (
-                _EXPLICIT_TIME_ORIGIN.search(task_text)
-                or any(
-                    _SPECIFIC_SURVIVAL_TIME_ORIGIN.search(source_text)
-                    for source_text in acquired_text_by_source.values()
-                )
-            ):
+            elif report_time_origins.isdisjoint(grounded_time_origins):
                 findings.append(
                     LintFinding(
                         code="survival_report_time_origin_not_grounded",
                         location="report",
                         message=(
                             "The report states a specific survival time origin, but "
-                            "that definition does not occur in the controller-grounded "
-                            "task or acquired source text. Remove the estimate and keep "
-                            "time zero unknown unless an exact source/codebook defines it."
+                            "that same definition does not occur in the controller-grounded "
+                            "task or an exact immutable input read by the controller. Remove "
+                            "the estimate and keep time zero unknown unless that input defines it."
                         ),
                     )
                 )

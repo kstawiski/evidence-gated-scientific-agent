@@ -31,6 +31,7 @@ from .linting import (
     has_specific_survival_time_origin,
     is_meaningful_machine_result,
     reconciliation_verdict,
+    survival_time_origin_keys,
     validate_report,
 )
 from .literature import (
@@ -508,27 +509,17 @@ def _python_uses_survival_estimation(tree: ast.AST) -> bool:
     return False
 
 
-def _controller_source_text(tool_name: str, result: dict) -> str:
-    """Extract only returned source text, excluding model-controlled queries."""
+def _task_input_read_paths(task: TaskSpec) -> frozenset[str]:
+    """Return exact workspace-relative paths that belong to immutable run inputs."""
 
-    if tool_name == "read_text_file":
-        content = result.get("content")
-        return content if isinstance(content, str) else ""
-    if tool_name == "search_pubmed":
-        return "\n".join(
-            str(article.get(field) or "")
-            for article in result.get("articles", [])
-            if isinstance(article, dict)
-            for field in ("title", "abstract")
-        )
-    if tool_name == "search_knowledge":
-        return "\n".join(
-            str(passage.get(field) or "")
-            for passage in result.get("passages", [])
-            if isinstance(passage, dict)
-            for field in ("content", "untrusted_source_text", "supporting_passage")
-        )
-    return ""
+    paths: set[str] = set()
+    for artifact in task.available_inputs:
+        path = Path(artifact.path)
+        if path.is_absolute() and path.parts[:2] == ("/", "workspace"):
+            paths.add(Path(*path.parts[2:]).as_posix())
+        elif not path.is_absolute():
+            paths.add(path.as_posix())
+    return frozenset(paths)
 
 
 def _python_scientific_preflight(
@@ -699,6 +690,8 @@ class ScientificToolOrderGate:
     require_current_computation: bool = False
     survival_task: bool = False
     survival_time_origin_grounded: bool = False
+    survival_time_origin_source_paths: frozenset[str] = frozenset()
+    survival_time_origin_grounding_text: str = ""
     ungrounded_categorical_columns: frozenset[str] = frozenset()
     allow_penalized_cox: bool = False
     max_pubmed_search_attempts: int | None = None
@@ -873,17 +866,28 @@ class ScientificToolOrderGate:
         }
 
     def record_result(self, tool_name: str, result) -> None:
+        source_text = ""
+        source_path = ""
+        if tool_name == "read_text_file" and isinstance(result, dict):
+            source_path = (
+                result.get("path") if isinstance(result.get("path"), str) else ""
+            )
+            source_text = (
+                result.get("content") if isinstance(result.get("content"), str) else ""
+            )
         if (
             self.survival_task
             and not self.survival_time_origin_grounded
-            and tool_name in {"read_text_file", "search_knowledge", "search_pubmed"}
             and isinstance(result, dict)
             and not result.get("error")
-            and has_specific_survival_time_origin(
-                _controller_source_text(tool_name, result)
-            )
+            and tool_name == "read_text_file"
+            and source_path in self.survival_time_origin_source_paths
+            and has_specific_survival_time_origin(source_text)
         ):
             self.survival_time_origin_grounded = True
+            self.survival_time_origin_grounding_text = "\n".join(
+                filter(None, [self.survival_time_origin_grounding_text, source_text])
+            )
         if (
             isinstance(result, dict)
             and result.get("error") == "REQUIRED_COMPUTATION_PENDING"
@@ -3257,11 +3261,13 @@ async def _produce_report(
     activity: ActivityCallback | None = None,
     phase_progress: Callable[[str, str], None] | None = None,
     cancel_event: threading.Event | None = None,
+    existing_survival_time_origin_grounding_text: str = "",
 ) -> tuple[
     ScientificReport,
     RetrievalEvidence,
     ComputationEvidence,
     tuple[ArtifactRef, ...],
+    str,
 ]:
     _cancel_checkpoint(cancel_event)
     toolsets = build_mcp_toolsets(settings, mcp_names) if mcp_names else []
@@ -3407,6 +3413,17 @@ async def _produce_report(
         and "integer" in column.inferred_types
         and not re.search(r"\b0\s*[-=:]|\b1\s*[-=:]", column.name)
     )
+    task_time_origin_text = " ".join(
+        [
+            planning.master_plan.task.objective,
+            *planning.master_plan.task.constraints,
+        ]
+    )
+    survival_time_origin_grounding_text = "\n".join(
+        filter(
+            None, [task_time_origin_text, existing_survival_time_origin_grounding_text]
+        )
+    )
     tool_order = ScientificToolOrderGate(
         required_languages=(
             frozenset(planning.master_plan.task.required_computation_languages)
@@ -3419,14 +3436,13 @@ async def _produce_report(
         ),
         require_current_computation=require_current_computation,
         survival_task=bool(_SURVIVAL_REQUEST.search(task_and_method_text)),
-        survival_time_origin_grounded=has_specific_survival_time_origin(
-            " ".join(
-                [
-                    planning.master_plan.task.objective,
-                    *planning.master_plan.task.constraints,
-                ]
-            )
+        survival_time_origin_grounded=bool(
+            survival_time_origin_keys(survival_time_origin_grounding_text)
         ),
+        survival_time_origin_source_paths=_task_input_read_paths(
+            planning.master_plan.task
+        ),
+        survival_time_origin_grounding_text=survival_time_origin_grounding_text,
         ungrounded_categorical_columns=ungrounded_categorical_columns,
         allow_penalized_cox=any(
             "penaliz" in method.casefold()
@@ -3986,7 +4002,13 @@ async def _produce_report(
                 "Structured article draft is available",
                 str(draft_path),
             )
-    return report, retrieval, computation, input_visual_artifacts
+    return (
+        report,
+        retrieval,
+        computation,
+        input_visual_artifacts,
+        tool_order.survival_time_origin_grounding_text,
+    )
 
 
 async def _audit_report(
@@ -5297,7 +5319,13 @@ async def run_scientific_task(
         return result
 
     report_progress("research", "Executing the locked method and collecting evidence")
-    report, retrieval, computation, visual_controller_artifacts = await _produce_report(
+    (
+        report,
+        retrieval,
+        computation,
+        visual_controller_artifacts,
+        survival_time_origin_grounding_text,
+    ) = await _produce_report(
         settings,
         planning,
         ledger,
@@ -5356,6 +5384,7 @@ async def run_scientific_task(
         controller_artifacts=controller_artifacts,
         controller_dates=controller_dates,
         task=planning.master_plan.task,
+        survival_time_origin_grounding_text=survival_time_origin_grounding_text,
         required_new_computation_root=(
             run_dir / "computations"
             if revision_request is not None
@@ -5430,6 +5459,7 @@ async def run_scientific_task(
                 repair_retrieval,
                 repair_computation,
                 visual_controller_artifacts,
+                repair_survival_time_origin_grounding_text,
             ) = await _produce_report(
                 settings,
                 planning,
@@ -5452,6 +5482,12 @@ async def run_scientific_task(
                 activity=activity,
                 phase_progress=report_progress,
                 cancel_event=cancel_event,
+                existing_survival_time_origin_grounding_text=(
+                    survival_time_origin_grounding_text
+                ),
+            )
+            survival_time_origin_grounding_text = (
+                repair_survival_time_origin_grounding_text
             )
             controller_artifacts = _merge_controller_artifacts(
                 controller_artifacts, visual_controller_artifacts
@@ -5517,6 +5553,7 @@ async def run_scientific_task(
             controller_artifacts=controller_artifacts,
             controller_dates=controller_dates,
             task=planning.master_plan.task,
+            survival_time_origin_grounding_text=survival_time_origin_grounding_text,
             required_new_computation_root=(
                 run_dir / "computations"
                 if revision_request is not None

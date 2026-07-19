@@ -685,7 +685,11 @@ KaplanMeierFitter().fit(df['RFS_time'], df['RFS_event'])
 
 
 def test_survival_code_preflight_accepts_source_grounded_time_origin():
-    gate = ScientificToolOrderGate(frozenset(), survival_task=True)
+    gate = ScientificToolOrderGate(
+        frozenset(),
+        survival_task=True,
+        survival_time_origin_source_paths=frozenset({"codebook.md"}),
+    )
     gate.record_result(
         "search_pubmed",
         {
@@ -712,6 +716,44 @@ def test_survival_code_preflight_accepts_source_grounded_time_origin():
         )
         is None
     )
+
+
+def test_survival_code_preflight_rejects_unrelated_retrieval_time_origin():
+    gate = ScientificToolOrderGate(
+        frozenset(),
+        survival_task=True,
+        survival_time_origin_source_paths=frozenset({"codebook.md"}),
+    )
+    gate.record_result(
+        "search_pubmed",
+        {
+            "articles": [
+                {
+                    "abstract": (
+                        "The 60-month RFS and PFS increased from 0.39 and 0.85 "
+                        "at baseline in an unrelated cohort."
+                    )
+                }
+            ]
+        },
+    )
+    gate.record_result(
+        "read_text_file",
+        {
+            "path": "references/unrelated.md",
+            "content": "RFS was measured from diagnosis in an external cohort.",
+        },
+    )
+
+    denied = gate.before_tool(
+        "run_python_analysis",
+        ComputationEvidence(),
+        arguments={"code": "from lifelines import CoxPHFitter\nCoxPHFitter().fit(df)"},
+    )
+
+    assert not gate.survival_time_origin_grounded
+    assert denied is not None
+    assert denied["error"] == "SCIENTIFIC_CODE_PREFLIGHT_FAILED"
 
 
 def test_r_survival_code_preflight_requires_controller_grounded_time_origin():
@@ -4251,7 +4293,7 @@ async def test_schema_invalid_repair_preserves_audited_report_and_escalates(
         nonlocal produce_calls
         produce_calls += 1
         if produce_calls == 1:
-            return report, RetrievalEvidence(), ComputationEvidence(), ()
+            return report, RetrievalEvidence(), ComputationEvidence(), (), ""
         raise RuntimeError("schema-invalid repair")
 
     async def fake_audit(*_args, **_kwargs):

@@ -814,7 +814,7 @@ _SURVIVAL_PLAN_REQUEST = re.compile(
 _EXPLICIT_TIME_ORIGIN = re.compile(
     r"\b(?:time origin|time[- ]zero|follow-up (?:begins|starts))\b"
     r".{0,100}\b(?:diagnos\w*|surg\w*|resection|randomi[sz]\w*|enrol\w*|"
-    r"treatment (?:start|initiat\w*)|index date|baseline visit)\b",
+    r"treatment (?:start|initiat\w*)|index date|baseline(?: visit)?|study entry)\b",
     re.IGNORECASE,
 )
 _TIME_ORIGIN_SOURCE_CHECK = re.compile(
@@ -1252,6 +1252,25 @@ def lint_plan(
     if _SURVIVAL_PLAN_REQUEST.search(task_text) and not _EXPLICIT_TIME_ORIGIN.search(
         task_text
     ):
+        unsupported_origin_assumptions = [
+            assumption
+            for assumption in plan.assumptions
+            if _EXPLICIT_TIME_ORIGIN.search(assumption)
+        ]
+        if unsupported_origin_assumptions:
+            findings.append(
+                LintFinding(
+                    code="unsupported_survival_time_origin_assumption",
+                    location="plan.assumptions",
+                    message=(
+                        "The task/input profile does not establish the asserted "
+                        "survival time origin. Remove that assumption and verify "
+                        "time zero from an exact uploaded/source codebook before "
+                        "estimation; a later verification step does not make the "
+                        "unsupported assumption valid."
+                    ),
+                )
+            )
         source_check = any(
             _TIME_ORIGIN_SOURCE_CHECK.search(method)
             for step in plan.steps

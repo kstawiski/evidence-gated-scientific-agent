@@ -110,6 +110,9 @@ def test_planners_do_not_invent_input_names_or_qwen_visual_audits():
         assert "controller-routed" in prompt
         assert "Gemma audit" in prompt
     assert "Do not list a Gemma audit as a\nQwen-produced output" in SIMPLE_PLANNER
+    assert "never assume that time zero is baseline" in SIMPLE_PLANNER
+    assert "A planned later verification does not justify" in PLAN_REPAIRER
+    assert "fail any specific time-origin assumption" in PLAN_AUDITOR
 
 
 def test_plan_auditor_preserves_controller_ownership_of_visual_checkpoint():

@@ -270,6 +270,30 @@ def test_survival_plan_accepts_source_codebook_checkpoint_for_time_origin():
     }
 
 
+def test_survival_plan_rejects_unsupported_origin_assumption_despite_checkpoint():
+    survival_task = task().model_copy(
+        update={"objective": "Add survival and competing-risk analyses."}
+    )
+    plan = good_plan().model_copy(
+        update={
+            "objective": "Estimate recurrence-free survival.",
+            "assumptions": [
+                "Time origin corresponds to baseline/study entry for all records."
+            ],
+        }
+    )
+    plan.steps[0].methods = [
+        "Verify the time origin from the uploaded workbook codebook before any "
+        "Kaplan-Meier or Cox estimation."
+    ]
+
+    report = lint_plan(survival_task, plan)
+
+    assert "unsupported_survival_time_origin_assumption" in {
+        finding.code for finding in report.findings
+    }
+
+
 def test_survival_plan_accepts_explicit_nonestimability_when_origin_stays_unknown():
     survival_task = task().model_copy(
         update={"objective": "Add survival and competing-risk analyses."}

@@ -43,7 +43,10 @@ design-unspecified language unless the user task establishes it. For a locked pr
 Shapiro-Wilk/normality result or arbitrary outlier threshold as an automatic stop,
 exclusion, or method-switch rule unless the user's protocol explicitly requires
 it; schedule a transparent diagnostic and predefined sensitivity analysis
-instead. Return PlanProposal only."""
+instead. For survival work, never assume that time zero is baseline, diagnosis,
+surgery, treatment, or study entry unless the controller task establishes it;
+schedule exact source/codebook verification before estimation and stop if time
+origin remains unavailable. Return PlanProposal only."""
 
 PLANNER_B = """You are Plan B, an independent methodological planner and critic.
 Work without knowledge of Plan A. First inspect the same controller-owned
@@ -92,6 +95,11 @@ dictionary keys must match them exactly; never copy example labels from the audi
 Do not add an observational, randomized, experimental, synthetic, or representative
 classification unless it is explicitly established by the user task; otherwise
 repair the plan with design-unspecified language.
+For survival work, never retain or add a specific time-origin assumption such as
+baseline, diagnosis, surgery, treatment, or study entry unless the controller task
+already establishes it. A planned later verification does not justify that
+assumption: remove it, schedule exact source/codebook verification before
+estimation, and stop estimation if time zero remains unavailable.
 Preserve task-specified statistical formulas character for character when repairing
 a validator; for Hedges J, `4*N - 9` is not `4*(N - 9)`. Do not add an automatic halt, observation exclusion, or primary-method
 switch based on a Shapiro-Wilk/normality test or an arbitrary outlier threshold.
@@ -120,6 +128,10 @@ complete `candidate_role_labels`, require any mapping keys to match those exact
 labels and never offer invented example keys as a correction. Fail an unsupported
 claim that the data are observational, randomized, experimental, synthetic, or
 representative; require design-unspecified language instead.
+For survival work, fail any specific time-origin assumption not already established
+by the controller task, even if the plan also promises later verification. Require
+the assumption to be removed, an exact source/codebook check before estimation, and
+a stop condition if time zero remains unavailable.
 Do not recommend abandoning a locked primary analysis, excluding observations,
 or halting execution merely because a Shapiro-Wilk/normality test crosses 0.05 or
 an observation exceeds an arbitrary SD/IQR threshold. Recommend transparent

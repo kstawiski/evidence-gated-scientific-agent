@@ -362,6 +362,38 @@ nonzero p-value in scientific notation or as an inequality (for example,
 table and figure values to conventional scientific display precision (normally
 3-4 significant figures) while preserving full precision in machine-readable
 JSON.
+For survival or competing-risk work, define the time origin, endpoint event,
+censoring rule, analysis population, and competing event before estimation. Two
+outcomes are not competing risks merely because both are recorded: verify that
+the occurrence of one precludes the other for the stated estimand, or use an
+explicit first-event or multistate framework. Never substitute event-pattern
+counts for a requested cumulative-incidence, cause-specific, Fine-Gray, or
+multistate analysis. If the data cannot identify a defensible competing-risk
+estimand, record that it is not estimable. Give duration, event, and covariate
+columns unique names. Encode categorical predictors with explicit levels and a
+reported reference group; do not silently impose a linear effect on ordinal codes.
+For Cox models, report proportional-hazards diagnostics and use penalization only
+when the locked method justifies it. Exponentiate coefficient confidence limits
+before labeling them as hazard-ratio limits, and assert in code that every positive
+ratio estimate lies between its positive lower and upper limits. Univariate
+associations are unadjusted and must never be called independent predictors.
+In machine-readable JSON, place a formal competing-risk result under an explicit
+object such as `cumulative_incidence`, `fine_gray`, `cause_specific_hazard`,
+`first_event`, or `multistate`. Inside that same object, define the estimand/event
+context (`estimand`, `event_of_interest`, `competing_event`, `states`, or
+`transitions`) and include a named finite numeric estimate (for example `estimate`,
+`incidence`, `probability`, `hazard_ratio`, or
+`subdistribution_hazard_ratio`). A label, event name, empty object, or event count
+does not constitute a formal result. When it is not estimable, instead use a
+`competing_risk_analysis` object with literal `estimable: false` and a specific
+nonempty `reason` tied to the observed data/coding limitation; placeholders such
+as `TBD`, `unknown`, or merely `not estimable` are invalid.
+When an uploaded workbook contains training, validation, endpoint-specific, or
+combined sheets, inventory every value-free sheet name and declared dimension
+from input_profile before selecting data. Reconcile cohort/sample counts and split
+roles across sheets and against any cited source article. Do not silently choose
+the first sheet or repeat source-publication counts when the supplied workbook has
+a different row structure; record and investigate the discrepancy.
 Never abbreviate an unstandardized mean difference as bare `d` or `d = ...` in
 a figure or table: readers can reasonably interpret that notation as Cohen d.
 Write `mean difference = ...` (with units when known), and write the full
@@ -753,7 +785,23 @@ language, and causal or clinical overreach. Review every criterion point by poin
 instead of stopping after the first defect. Primary estimates and uncertainty
 belong in Results; Discussion must interpret rather than duplicate the Results
 paragraph; Conclusions must lead with the scientific answer rather than workflow
-machinery. For each substantive analysis paragraph in Results, verify the
+machinery.
+For survival and competing-risk analyses, independently verify the stated time
+origin, event, censoring, population, and competing-event estimand; reject event
+counts presented as a formal competing-risk analysis. Check that one event really
+precludes the other or that a defensible first-event/multistate framework is used.
+Audit categorical reference levels, proportional-hazards diagnostics, penalizer
+justification, and uniqueness of duration/event/covariate columns. Confirm every
+hazard-ratio confidence interval is on the exponentiated ratio scale and contains
+the estimate. Treat “independent predictor” language as blocking unless an
+appropriate adjusted model directly supports it, and reject any result statement
+that contradicts the linked machine-readable p-value, median, event count, or
+confidence interval.
+For multi-sheet workbooks, compare the controller-provided sheet names and
+dimensions with the analyzed sheet, reported denominators, train/validation roles,
+and any source-publication cohort counts. Treat an unexplained mismatch or silent
+first-sheet substitution as blocking.
+For each substantive analysis paragraph in Results, verify the
 why -> what -> local meaning sequence: a concise statement of the question, the
 actual result with its evidence and display reference, and a bounded interpretation
 answering that same question. Treat a missing component or Discussion-style drift

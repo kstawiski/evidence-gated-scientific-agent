@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import os
 import re
 import signal
@@ -29,6 +30,10 @@ RETURN_TEXT_BYTES = 32 * 1024
 PREVIEW_TEXT_BYTES = 8 * 1024
 PREVIEW_SUFFIXES = {".csv", ".json", ".md", ".tsv", ".txt"}
 PRIOR_EXECUTION_REFERENCE = re.compile(r"/prior/(?P<execution_id>exec-[0-9]{3})/")
+
+
+def _reject_nonfinite_json(value: str):
+    raise ValueError(f"non-finite JSON constant: {value}")
 
 
 def _python_static_violations(code: str) -> list[str]:
@@ -910,6 +915,33 @@ class AnalysisExecutor:
                     read_table_preview(path)
                 except ValueError as exc:
                     violations.append(f"invalid reader table {path}: {exc}")
+            if path.suffix.casefold() in {".json", ".ipynb"}:
+                try:
+                    json.loads(
+                        path.read_text(encoding="utf-8"),
+                        parse_constant=_reject_nonfinite_json,
+                    )
+                except (OSError, UnicodeError, ValueError) as exc:
+                    violations.append(
+                        f"generated output must be strict JSON {path}: {exc}"
+                    )
+            if path.suffix.casefold() == ".jsonl":
+                try:
+                    for line_number, line in enumerate(
+                        path.read_text(encoding="utf-8").splitlines(), 1
+                    ):
+                        if line.strip():
+                            try:
+                                json.loads(
+                                    line,
+                                    parse_constant=_reject_nonfinite_json,
+                                )
+                            except ValueError as exc:
+                                raise ValueError(f"line {line_number}: {exc}") from exc
+                except (OSError, UnicodeError, ValueError) as exc:
+                    violations.append(
+                        f"generated output must be strict JSON Lines {path}: {exc}"
+                    )
             artifacts.append(_artifact(path, "sandbox-generated analysis artifact"))
         if total_bytes > self.settings.max_output_bytes:
             violations.append(

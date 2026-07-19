@@ -1168,7 +1168,7 @@ function renderTab() {
   if (state.tab === "article") {
     content.append(renderArticle(report, run));
   } else if (state.tab === "claims") {
-    for (const claim of report.claims || []) content.append(claimCard(claim));
+    for (const claim of report.claims || []) content.append(claimCard(claim, run));
   } else if (state.tab === "sources") {
     for (const source of report.sources || []) content.append(sourceRow(source, run));
   } else if (state.tab === "artifacts") {
@@ -1409,7 +1409,12 @@ function renderArticle(report, run) {
   article.className = "report-article";
   const notice = document.createElement("p");
   notice.className = "report-boundary";
-  notice.textContent = "Standards-derived exploratory report. Tests and evidence records outrank both models; publication use requires independent human and manuscript gates.";
+  if (supportedStates.has(run.status)) {
+    notice.textContent = "Standards-derived exploratory report. Tests and evidence records outrank both models; publication use requires independent human and manuscript gates.";
+  } else {
+    notice.classList.add("unvalidated");
+    notice.textContent = `NOT VALIDATED — run status: ${displayStatus(run.status)}. The article and claim labels are provisional model output and must not be treated as supported findings.`;
+  }
   article.append(notice);
   article.append(articleSection("Abstract", report.executive_summary, report, run, "executive_summary"));
   article.append(articleSection("Introduction", report.introduction || "The legacy parent report did not contain a distinct Introduction.", report, run, "introduction"));
@@ -1516,12 +1521,16 @@ function evidenceLine(display) {
   return note;
 }
 
-function claimCard(claim) {
+function claimCard(claim, run) {
   const card = document.createElement("article");
-  card.className = `claim-card ${claim.status}`;
+  const validated = supportedStates.has(run.status);
+  card.className = `claim-card ${validated ? claim.status : "unvalidated"}`;
   const header = document.createElement("header");
   const id = document.createElement("code"); id.textContent = claim.claim_id;
-  const status = document.createElement("span"); status.textContent = displayStatus(claim.status);
+  const status = document.createElement("span");
+  status.textContent = validated
+    ? displayStatus(claim.status)
+    : `Model-labeled ${displayStatus(claim.status)} · run not validated`;
   header.append(id, status);
   const text = document.createElement("p"); text.textContent = claim.text;
   const refs = document.createElement("small"); refs.textContent = `Evidence: ${claim.evidence_refs.join(", ") || "none"}`;

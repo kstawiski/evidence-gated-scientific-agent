@@ -24,12 +24,16 @@ from scientific_agent.orchestrator import (
     _merge_reviews,
     _needs_repair,
     _merge_retrieval_evidence,
+    _normalize_inline_citation_provenance,
     _without_ocr_contradicted_typography,
     _without_inline_citation_policy_conflicts,
     _without_validation_conflicts,
     _prepare_task_spec,
+    _prepare_revision_task_spec,
     _register_computation_path_evidence,
-    _review_deferred_by_deterministic_gate,
+    _revision_required_new_display_kinds,
+    _revision_requires_any_new_display,
+    _revision_requests_new_analysis,
     _remove_display_ids_from_claim_evidence,
     _requires_pubmed_literature,
     _write_attempt_bundle,
@@ -45,6 +49,7 @@ from scientific_agent.schemas import (
     ComputationRecord,
     DeterministicValidation,
     Finding,
+    InlineCitation,
     MasterPlan,
     LintFinding,
     KnowledgeVisualEvidence,
@@ -1091,6 +1096,99 @@ def test_task_spec_binds_requested_output_artifacts_before_planning():
     assert orchestrator_module._task_requests_visual_evidence(task)
 
 
+def test_revision_task_is_a_new_survival_addendum_not_the_parent_plan():
+    parent_task = normalize_task("Describe the uploaded cohort.")
+    parent = PlanningResult(
+        master_plan=MasterPlan(
+            task=parent_task,
+            plan=_plan("MASTER"),
+            resolutions=[],
+            method_lock_required=False,
+        ),
+        audit=VerificationReport(verdict="pass"),
+        plan_lints=[],
+        status="supported",
+    )
+
+    task = _prepare_revision_task_spec(
+        "Add more survival and competing risk analyses.",
+        parent,
+        enable_code=True,
+    )
+
+    assert task.objective == "Add more survival and competing risk analyses."
+    assert task.objective != parent_task.objective
+    assert "New machine-readable analysis results produced in this child run" in (
+        task.deliverables
+    )
+    contract = " ".join([*task.constraints, *task.acceptance_tests]).casefold()
+    assert "time origin" in contract
+    assert "recurrence and progression are not competing events" in contract
+    assert "univariate association" in contract
+    assert "ratio confidence" in contract
+
+    unauthorized = _prepare_revision_task_spec(
+        "Compute adjusted odds ratios.",
+        parent,
+        enable_code=False,
+    )
+    assert "New machine-readable analysis results produced in this child run" in (
+        unauthorized.deliverables
+    )
+    assert (
+        "code execution is not authorized"
+        in " ".join(unauthorized.constraints).casefold()
+    )
+
+
+def test_revision_analysis_intent_distinguishes_computation_from_editorial_changes():
+    for request in (
+        "Rephrase the conclusion to add clarity.",
+        "Please expand the discussion with more context.",
+        "Add a sentence noting the sample size.",
+        "Add discussion without rerunning the analysis.",
+        "Do not perform a new analysis; clarify the old table.",
+        "Update the hazard ratio wording.",
+        "Add a paragraph discussing the Cox model.",
+        "Improve the fit of the layout.",
+        "Clarify the estimate wording.",
+        "Do not rerun the Cox model but clarify its caption.",
+    ):
+        assert not _revision_requests_new_analysis(request), request
+
+    for request in (
+        "Add more survival and competing risk analyses.",
+        "Compute adjusted odds ratios.",
+        "Fit a logistic regression.",
+        "Rerun the primary analysis.",
+        "Provide a Fine-Gray competing risk analysis.",
+        "Report the cause-specific hazard ratios.",
+        "Present Kaplan-Meier survival curves by arm.",
+        "Model overall survival with a Cox model.",
+        "Determine the cumulative incidence of relapse.",
+        "Produce a survival analysis for the cohort.",
+        "Test proportional hazards.",
+        "Do not alter the prose but rerun the Cox model.",
+    ):
+        assert _revision_requests_new_analysis(request), request
+
+
+def test_revision_display_gate_matches_requested_scope():
+    assert _revision_required_new_display_kinds("Add a Cox hazard-ratio table") == (
+        "table",
+    )
+    assert _revision_required_new_display_kinds("Add a Kaplan-Meier figure") == (
+        "figure",
+    )
+    generic = "Add more survival and competing risk analyses"
+    assert _revision_required_new_display_kinds(generic) == ()
+    assert _revision_requires_any_new_display(generic)
+    assert (
+        _revision_required_new_display_kinds("Rerun the Cox model without a new figure")
+        == ()
+    )
+
+
 def test_controller_task_cannot_be_shortened_by_plan_synthesis():
     full = normalize_task(
         "Analyze the dataset in Python and R, then save a reconciliation artifact."
@@ -1651,6 +1749,27 @@ def test_critic_cannot_require_inline_citation_to_computation_artifact():
     assert any(
         "reserved for URL-backed" in item for item in filtered.unsupported_claims
     )
+
+
+def test_controller_removes_policy_impossible_computation_inline_citation():
+    report = _report_with_literature_and_computation_sources().model_copy(
+        update={
+            "inline_citations": [
+                InlineCitation(
+                    citation_id="computed",
+                    section="results",
+                    anchor_text="The estimated effect was 5.0.",
+                    source_ids=["src-python-results", "src-nakagawa"],
+                    claim_ids=["computed-effect"],
+                )
+            ]
+        }
+    )
+
+    normalized = _normalize_inline_citation_provenance(report)
+
+    assert normalized.inline_citations == []
+    assert normalized.claims == report.claims
 
 
 def test_misattributed_literature_citation_keeps_blocker_with_valid_correction():
@@ -3705,26 +3824,6 @@ def test_deterministic_only_repair_exhaustion_requires_human_decision():
     )
 
 
-def test_deterministic_failure_defers_gemma_review_until_repaired():
-    validation = DeterministicValidation(
-        passed=False,
-        findings=[
-            LintFinding(
-                code="table_excessive_precision",
-                location="Table 1",
-                message="Reader-facing precision remains excessive.",
-            )
-        ],
-    )
-
-    review = _review_deferred_by_deterministic_gate(validation)
-
-    assert review.verdict == "inconclusive"
-    assert review.blocking_findings == []
-    assert "table_excessive_precision" in review.unsupported_claims[0]
-    assert _needs_repair(validation, review)
-
-
 def test_research_repair_instruction_disambiguates_significant_digits():
     guidance = orchestrator_module.TABLE_PRECISION_REPAIR_GUIDANCE
 
@@ -3765,6 +3864,7 @@ async def test_schema_invalid_repair_preserves_audited_report_and_escalates(
         ],
     )
     produce_calls = 0
+    audit_calls = 0
 
     async def fake_planning(*_args, **_kwargs):
         return planning
@@ -3777,6 +3877,8 @@ async def test_schema_invalid_repair_preserves_audited_report_and_escalates(
         raise RuntimeError("schema-invalid repair")
 
     async def fake_audit(*_args, **_kwargs):
+        nonlocal audit_calls
+        audit_calls += 1
         return review
 
     monkeypatch.setattr(orchestrator_module, "build_simple_planning", fake_planning)
@@ -3806,6 +3908,7 @@ async def test_schema_invalid_repair_preserves_audited_report_and_escalates(
     assert result.report == report
     assert result.repair_rounds == 1
     assert produce_calls == 2
+    assert audit_calls == 1
     assert failure["error_type"] == "RuntimeError"
     assert failure["last_deterministic_finding_codes"] == [
         "literature_source_not_locally_acquired"

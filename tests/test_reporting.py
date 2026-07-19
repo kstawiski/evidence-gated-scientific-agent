@@ -16,6 +16,7 @@ from scientific_agent.reporting import (
 )
 from scientific_agent.schemas import (
     ArtifactRef,
+    ClaimRecord,
     ComputationEvidence,
     ComputationRecord,
     ReportDisplay,
@@ -106,6 +107,34 @@ def test_registered_displays_validate_and_render_portably(tmp_path: Path):
     assert "![Point plot" in markdown
     assert "A\\|B" in markdown
     assert str(tmp_path) not in markdown
+
+
+def test_unvalidated_markdown_never_presents_model_claim_labels_as_gate_status(
+    tmp_path,
+):
+    report, _ = _fixture(tmp_path)
+    report = report.model_copy(
+        update={
+            "claims": [
+                ClaimRecord(
+                    claim_id="provisional",
+                    text="The provisional estimate was 1.25 units.",
+                    claim_type="computed",
+                    evidence_refs=[],
+                    status="supported",
+                )
+            ]
+        }
+    )
+
+    markdown = render_report_markdown(
+        report,
+        quality_status="requires_human_decision",
+    )
+
+    assert "NOT VALIDATED" in markdown
+    assert "requires_human_decision" in markdown
+    assert "model-labeled supported; run not validated" in markdown
 
 
 def test_tesseract_tsv_parser_returns_bounded_text_and_geometry():

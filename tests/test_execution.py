@@ -440,6 +440,32 @@ def test_output_inspection_rejects_nonrectangular_reader_table(tmp_path):
     assert violations == []
 
 
+def test_output_inspection_rejects_nonfinite_or_malformed_json(tmp_path):
+    executor = _executor(tmp_path)
+    output = tmp_path / "output"
+    output.mkdir()
+    result = output / "results.json"
+
+    result.write_text('{"median": Infinity}\n', encoding="utf-8")
+    _, violations = executor._inspect_outputs(output)
+    assert any("strict JSON" in item and "Infinity" in item for item in violations)
+
+    result.write_text('{"median": null}\n', encoding="utf-8")
+    _, violations = executor._inspect_outputs(output)
+    assert violations == []
+
+    notebook = output / "analysis.ipynb"
+    notebook.write_text('{"cells": [], "score": NaN}\n', encoding="utf-8")
+    _, violations = executor._inspect_outputs(output)
+    assert any("strict JSON" in item and "NaN" in item for item in violations)
+    notebook.unlink()
+
+    jsonl = output / "rows.jsonl"
+    jsonl.write_text('{"estimate": 1}\n{"estimate": Infinity}\n', encoding="utf-8")
+    _, violations = executor._inspect_outputs(output)
+    assert any("strict JSON Lines" in item and "line 2" in item for item in violations)
+
+
 def test_prior_reference_preflight_requires_current_successful_execution():
     code = "open('/prior/exec-002/output/results.json').read()"
 

@@ -92,8 +92,188 @@ def _nested_json_objects(value: Any, path: str = "$"):
             yield from _nested_json_objects(child, f"{path}[{index}]")
 
 
+def _contains_competing_risk_result(document: Any) -> bool:
+    formal_keys = {
+        "cumulative_incidence",
+        "cumulative_incidence_function",
+        "fine_gray",
+        "subdistribution_hazard",
+        "subdistribution_hazard_ratio",
+        "cause_specific_hazard",
+        "cause_specific_hazard_ratio",
+        "first_event",
+        "multistate",
+        "multi_state",
+    }
+    result_keys = {
+        "coefficient",
+        "estimate",
+        "hazard_ratio",
+        "incidence",
+        "probability",
+        "rate",
+        "risk",
+        "subdistribution_hazard_ratio",
+    }
+    context_keys = {
+        "cause",
+        "competing_event",
+        "competing_event_definition",
+        "endpoint_event",
+        "estimand",
+        "event_definition",
+        "event_of_interest",
+        "states",
+        "transitions",
+    }
+
+    def formal_value(value: Any) -> bool:
+        if not isinstance(value, (dict, list)):
+            return False
+        nested = list(_nested_json_objects(value))
+        has_local_context = any(
+            any(
+                _numeric_key(str(raw_key)) in context_keys
+                and raw_value not in (None, "", [], {})
+                for raw_key, raw_value in candidate.items()
+            )
+            for _, candidate in nested
+        )
+        has_numeric_result = any(
+            any(
+                _numeric_key(str(raw_key)) in result_keys
+                and _json_number(raw_value) is not None
+                for raw_key, raw_value in candidate.items()
+            )
+            for _, candidate in nested
+        )
+        return has_local_context and has_numeric_result
+
+    for _, node in _nested_json_objects(document):
+        normalized = {_numeric_key(str(key)): value for key, value in node.items()}
+        if any(
+            key in normalized and formal_value(normalized[key]) for key in formal_keys
+        ):
+            return True
+        for key in ("competing_risk", "competing_risk_analysis"):
+            value = normalized.get(key)
+            if not isinstance(value, dict):
+                continue
+            value_normalized = {
+                _numeric_key(str(child_key)): child
+                for child_key, child in value.items()
+            }
+            if (
+                value_normalized.get("estimable") is False
+                and isinstance(value_normalized.get("reason"), str)
+                and _reasoned_nonestimability(value_normalized["reason"])
+            ):
+                return True
+    return False
+
+
+_MACHINE_RESULT_KEY = re.compile(
+    r"(?:^|_)(?:estimate|effect|coefficient|statistic|p_value|hazard_ratio|"
+    r"odds_ratio|risk_ratio|subdistribution_hazard_ratio|median|probability|"
+    r"incidence|rate|difference|correlation|result|hr|or|rr)(?:$|_)",
+)
+
+
+def _reasoned_nonestimability(reason: str) -> bool:
+    normalized = " ".join(reason.casefold().split())
+    return bool(
+        len(normalized) >= 20
+        and normalized not in {"tbd", "not estimable", "not available", "unknown"}
+        and re.search(
+            r"\b(?:data|coding|event|endpoint|record|observed|missing|unavailable|"
+            r"mutually|preclude|identif|follow-up|time)\w*\b",
+            normalized,
+        )
+    )
+
+
+def _contains_finite_number(value: Any) -> bool:
+    if _json_number(value) is not None:
+        return True
+    if isinstance(value, list):
+        return any(_contains_finite_number(item) for item in value)
+    if isinstance(value, dict):
+        return any(_contains_finite_number(item) for item in value.values())
+    return False
+
+
+def _contains_machine_result(document: Any) -> bool:
+    if isinstance(document, list):
+        return any(_contains_machine_result(item) for item in document)
+    if not isinstance(document, dict):
+        return False
+    normalized = {_numeric_key(str(key)): value for key, value in document.items()}
+    if (
+        normalized.get("estimable") is False
+        and isinstance(normalized.get("reason"), str)
+        and _reasoned_nonestimability(normalized["reason"])
+    ):
+        return True
+    if any(
+        _MACHINE_RESULT_KEY.search(_numeric_key(str(key)))
+        and _contains_finite_number(value)
+        for key, value in document.items()
+    ):
+        return True
+    return any(
+        _contains_machine_result(value)
+        for value in document.values()
+        if isinstance(value, (dict, list))
+    )
+
+
+def _strict_machine_json(path: Path) -> Any | None:
+    if path.suffix.casefold() != ".json" or not path.is_file() or path.is_symlink():
+        return None
+    try:
+        document = json.loads(
+            path.read_text(encoding="utf-8"),
+            parse_constant=_reject_nonfinite_json,
+        )
+    except (OSError, UnicodeError, ValueError):
+        return None
+    return document if _contains_machine_result(document) else None
+
+
+def _machine_result_corresponds_to_claim(document: Any, claim_text: str) -> bool:
+    machine_text = json.dumps(document, sort_keys=True).replace("_", " ")
+    if _citation_correspondence_terms(machine_text) & _citation_correspondence_terms(
+        claim_text
+    ):
+        return True
+    reported_numbers = _citation_correspondence_numbers(claim_text)
+
+    def machine_numbers(value: Any):
+        if isinstance(value, bool):
+            return
+        if isinstance(value, (int, float, Decimal)):
+            number = Decimal(str(value))
+            if number.is_finite():
+                yield number
+            return
+        if isinstance(value, dict):
+            for child in value.values():
+                yield from machine_numbers(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from machine_numbers(child)
+
+    exact_numbers = tuple(machine_numbers(document))
+    return any(
+        _numeric_cell_agrees(reported.rstrip("%"), machine_value)
+        for reported in reported_numbers
+        if not reported.endswith("%")
+        for machine_value in exact_numbers
+    )
+
+
 def _inferential_consistency_findings(path: Path, document: Any) -> list[LintFinding]:
-    """Check that reported t, df, and p-value tuples are arithmetically possible."""
+    """Check inferential tuples and ratio-scale intervals for internal validity."""
 
     try:
         from scipy.stats import t as student_t
@@ -101,6 +281,146 @@ def _inferential_consistency_findings(path: Path, document: Any) -> list[LintFin
         student_t = None
     findings: list[LintFinding] = []
     for json_path, node in _nested_json_objects(document):
+        ratio_aliases = (
+            ("hazard ratio", ("hazard_ratio", "hr"), "hr"),
+            ("odds ratio", ("odds_ratio", "or"), "or"),
+            ("risk ratio", ("risk_ratio", "rr"), "rr"),
+        )
+        path_key = _numeric_key(json_path.rsplit(".", 1)[-1])
+        normalized_node: dict[str, list[Any]] = {}
+        for raw_key, raw_value in node.items():
+            normalized_node.setdefault(_numeric_key(str(raw_key)), []).append(raw_value)
+        for ratio_label, estimate_aliases, prefix in ratio_aliases:
+            estimate_values = [
+                value
+                for key in estimate_aliases
+                for value in normalized_node.get(key, [])
+            ]
+            if (
+                not estimate_values
+                and path_key in estimate_aliases
+                and "estimate" in normalized_node
+            ):
+                estimate_values = normalized_node["estimate"]
+            if not estimate_values:
+                continue
+            if all(isinstance(value, dict) for value in estimate_values):
+                # A structured ratio object is validated at its nested JSON path.
+                continue
+            lower_aliases = (
+                f"{prefix}_lower_95ci",
+                f"{prefix}_ci_lower",
+                f"{prefix}_lower_ci",
+                "ci_lower",
+                "lower_95ci",
+                "lower_ci",
+                "confidence_interval_lower",
+            )
+            upper_aliases = (
+                f"{prefix}_upper_95ci",
+                f"{prefix}_ci_upper",
+                f"{prefix}_upper_ci",
+                "ci_upper",
+                "upper_95ci",
+                "upper_ci",
+                "confidence_interval_upper",
+            )
+            if path_key in estimate_aliases:
+                lower_aliases = (*lower_aliases, "lower", "lower_bound")
+                upper_aliases = (*upper_aliases, "upper", "upper_bound")
+            lower_values = [
+                value for key in lower_aliases for value in normalized_node.get(key, [])
+            ]
+            upper_values = [
+                value for key in upper_aliases for value in normalized_node.get(key, [])
+            ]
+            intervals = [
+                value
+                for key in (
+                    "confidence_interval",
+                    "confidence_interval_95",
+                    "ci_95",
+                    "95_ci",
+                )
+                for value in normalized_node.get(key, [])
+            ]
+            interval_invalid = False
+            for interval in intervals:
+                if isinstance(interval, (list, tuple)) and len(interval) == 2:
+                    lower_values.append(interval[0])
+                    upper_values.append(interval[1])
+                    continue
+                if not isinstance(interval, dict):
+                    interval_invalid = True
+                    continue
+                normalized_interval = {
+                    _numeric_key(str(key)): value for key, value in interval.items()
+                }
+                interval_lower = [
+                    normalized_interval[key]
+                    for key in ("lower", "lower_bound", "ci_lower")
+                    if key in normalized_interval
+                ]
+                interval_upper = [
+                    normalized_interval[key]
+                    for key in ("upper", "upper_bound", "ci_upper")
+                    if key in normalized_interval
+                ]
+                if not interval_lower or not interval_upper:
+                    interval_invalid = True
+                lower_values.extend(interval_lower)
+                upper_values.extend(interval_upper)
+            if (
+                all(value is None for value in estimate_values)
+                and all(value is None for value in lower_values)
+                and all(value is None for value in upper_values)
+            ):
+                continue
+            estimates = [_json_number(value) for value in estimate_values]
+            lowers = [_json_number(value) for value in lower_values]
+            uppers = [_json_number(value) for value in upper_values]
+            invalid = bool(
+                any(value is None for value in estimates)
+                or any(value <= 0 for value in estimates if value is not None)
+                or any(
+                    not math.isclose(value, estimates[0], rel_tol=1e-12, abs_tol=1e-15)
+                    for value in estimates[1:]
+                )
+            )
+            interval_present = bool(intervals or lower_values or upper_values)
+            if interval_present:
+                invalid = bool(
+                    invalid
+                    or interval_invalid
+                    or not lower_values
+                    or not upper_values
+                    or any(value is None for value in (*lowers, *uppers))
+                    or any(
+                        value <= 0 for value in (*lowers, *uppers) if value is not None
+                    )
+                    or any(
+                        not math.isclose(value, lowers[0], rel_tol=1e-12, abs_tol=1e-15)
+                        for value in lowers[1:]
+                    )
+                    or any(
+                        not math.isclose(value, uppers[0], rel_tol=1e-12, abs_tol=1e-15)
+                        for value in uppers[1:]
+                    )
+                    or not lowers[0] <= estimates[0] <= uppers[0]
+                )
+            if invalid:
+                findings.append(
+                    LintFinding(
+                        code="ratio_confidence_interval_inconsistent",
+                        location=f"{path}:{json_path}",
+                        message=(
+                            f"{ratio_label} and its confidence limits must be "
+                            "finite positive ratio-scale values with lower <= "
+                            "estimate <= upper. Exponentiate coefficient-scale "
+                            "limits before labeling them as ratio confidence limits."
+                        ),
+                    )
+                )
         alias_groups = {
             "t statistic": ("t_statistic", "welch_t_statistic"),
             "degrees of freedom": (
@@ -1836,6 +2156,10 @@ def validate_report(
     controller_artifacts: tuple[ArtifactRef, ...] = (),
     controller_dates: tuple[str, ...] = (),
     task: TaskSpec | None = None,
+    required_new_computation_root: Path | None = None,
+    required_new_display_kinds: tuple[str, ...] = (),
+    require_any_new_display: bool = False,
+    require_competing_risk_result: bool = False,
 ) -> DeterministicValidation:
     findings: list[LintFinding] = []
     valid_reconciliation_paths: set[str] = set()
@@ -1883,6 +2207,162 @@ def validate_report(
         for artifact in (computation.artifacts if computation else [])
         if artifact.description == "sandbox-generated analysis artifact"
     ]
+    new_machine_results: dict[str, Any] = {}
+    if required_new_computation_root is not None:
+        required_root = required_new_computation_root.resolve()
+        for record in records:
+            if record.status != "succeeded":
+                continue
+            for artifact in record.artifacts:
+                path = Path(artifact.path)
+                try:
+                    resolved = path.resolve()
+                except OSError:
+                    continue
+                if artifact.description == "sandbox-generated analysis artifact" and (
+                    resolved == required_root or required_root in resolved.parents
+                ):
+                    document = _strict_machine_json(path)
+                    if document is not None:
+                        new_machine_results[os.path.normpath(str(path))] = document
+        new_source_paths = {
+            source.source_id: os.path.normpath(source.artifact_path)
+            for source in report.sources
+            if source.artifact_path is not None
+            and os.path.normpath(source.artifact_path) in new_machine_results
+        }
+        linked_new_source_ids: set[str] = set()
+        new_claim_ids: set[str] = set()
+        for claim in report.claims:
+            if claim.claim_type != "computed":
+                continue
+            matching_sources = {
+                source_id
+                for source_id in claim.evidence_refs
+                if source_id in new_source_paths
+                and _machine_result_corresponds_to_claim(
+                    new_machine_results[new_source_paths[source_id]], claim.text
+                )
+            }
+            if not matching_sources:
+                continue
+            linked_new_source_ids.update(matching_sources)
+            new_claim_ids.add(claim.claim_id)
+        superficially_linked_claim_ids = {
+            claim.claim_id
+            for claim in report.claims
+            if set(claim.evidence_refs) & set(new_source_paths)
+        }
+        if not new_machine_results:
+            findings.append(
+                LintFinding(
+                    code="revision_new_computation_missing",
+                    location="computation_evidence",
+                    message=(
+                        "The locked revision requires a new analysis, but this child "
+                        "run has no successful, strict, nonempty machine-readable "
+                        "JSON result containing a finite estimate or a reasoned "
+                        "non-estimability record. Inherited evidence and placeholder "
+                        "text files cannot satisfy new work."
+                    ),
+                )
+            )
+        elif not new_claim_ids:
+            findings.append(
+                LintFinding(
+                    code="revision_new_computation_unlinked",
+                    location="claims",
+                    message=(
+                        "A meaningful child-run JSON result exists, but no revised "
+                        "computed ClaimRecord has direct lexical or numerical "
+                        "correspondence to its registered child-result SourceRecord. "
+                        "Hypotheses, unrelated claims, metadata, and inherited parent "
+                        "evidence cannot satisfy the revised analysis."
+                    ),
+                )
+            )
+            if superficially_linked_claim_ids:
+                findings[-1] = findings[-1].model_copy(
+                    update={
+                        "message": findings[-1].message
+                        + " Superficial child-source links were present on claims: "
+                        + ", ".join(sorted(superficially_linked_claim_ids))
+                        + "."
+                    }
+                )
+
+        def linked_child_display(display) -> bool:
+            try:
+                resolved = Path(display.artifact_path).resolve()
+            except OSError:
+                return False
+            return bool(
+                (resolved == required_root or required_root in resolved.parents)
+                and (
+                    set(display.claim_ids) & new_claim_ids
+                    or set(display.evidence_refs) & linked_new_source_ids
+                )
+            )
+
+        for kind in required_new_display_kinds:
+            if not any(
+                display.kind == kind and linked_child_display(display)
+                for display in report.displays
+            ):
+                findings.append(
+                    LintFinding(
+                        code="revision_new_display_missing",
+                        location="displays",
+                        message=(
+                            f"The locked revision requires a new {kind} produced in "
+                            "this child run and linked to a child-run result claim; "
+                            "an inherited or unlinked display does not satisfy the "
+                            "requested analysis."
+                        ),
+                    )
+                )
+        if require_any_new_display and not any(
+            linked_child_display(display) for display in report.displays
+        ):
+            findings.append(
+                LintFinding(
+                    code="revision_new_display_missing",
+                    location="displays",
+                    message=(
+                        "The locked revision requires at least one new figure or "
+                        "table linked to a child-run result claim; inherited or "
+                        "unlinked displays do not satisfy the requested analysis."
+                    ),
+                )
+            )
+
+    if require_competing_risk_result:
+        if required_new_computation_root is not None:
+            candidate_results = (
+                new_machine_results[new_source_paths[source_id]]
+                for source_id in linked_new_source_ids
+            )
+        else:
+            candidate_results = [
+                document
+                for path in generated_artifacts
+                if (document := _strict_machine_json(path)) is not None
+            ]
+        if not any(_contains_competing_risk_result(item) for item in candidate_results):
+            findings.append(
+                LintFinding(
+                    code="requested_competing_risk_analysis_missing",
+                    location="computation_evidence",
+                    message=(
+                        "The task requests competing-risk analysis, but relevant "
+                        "machine-readable evidence contains no explicit numeric "
+                        "cumulative-incidence, cause-specific/Fine-Gray, first-event, "
+                        "or multistate result and no reasoned non-estimability record. "
+                        "Event labels, counts, empty objects, and textual placeholders "
+                        "do not satisfy this gate."
+                    ),
+                )
+            )
     present_display_kinds = {display.kind for display in report.displays}
     for required_kind in required_display_kinds:
         if required_kind not in present_display_kinds:
@@ -1968,7 +2448,10 @@ def validate_report(
         elif required_suffix.casefold() == ".ipynb":
             try:
                 notebook = (
-                    json.loads(candidates[-1].read_text(encoding="utf-8"))
+                    json.loads(
+                        candidates[-1].read_text(encoding="utf-8"),
+                        parse_constant=_reject_nonfinite_json,
+                    )
                     if candidates[-1].stat().st_size <= 64 * 1024 * 1024
                     else None
                 )

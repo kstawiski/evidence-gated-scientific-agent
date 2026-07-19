@@ -102,3 +102,48 @@ def test_xlsx_intake_profiles_first_sheet_missingness_without_cell_values(tmp_pa
     serialized = json.dumps(profile.model_dump(mode="json"))
     assert "P001" not in serialized
     assert source.details["values_included_in_profile"] is False
+
+
+def test_xlsx_intake_exposes_value_free_sheet_names_and_dimensions(tmp_path):
+    workbook = tmp_path / "cohort.xlsx"
+    workbook_xml = """<?xml version="1.0" encoding="UTF-8"?>
+    <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+      xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+      <sheets>
+        <sheet name="training_rfs" sheetId="1" r:id="rId1"/>
+        <sheet name="validation_pfs" sheetId="2" r:id="rId2"/>
+      </sheets>
+    </workbook>"""
+    rels = """<?xml version="1.0" encoding="UTF-8"?>
+    <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+      <Relationship Id="rId1" Target="worksheets/sheet1.xml"/>
+      <Relationship Id="rId2" Target="worksheets/sheet2.xml"/>
+    </Relationships>"""
+    sheet1 = """<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+      <dimension ref="A1:C2558"/><sheetData><row r="1"/></sheetData></worksheet>"""
+    sheet2 = """<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+      <dimension ref="A1:D323"/><sheetData><row r="1"/></sheetData></worksheet>"""
+    with zipfile.ZipFile(workbook, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("xl/workbook.xml", workbook_xml)
+        archive.writestr("xl/_rels/workbook.xml.rels", rels)
+        archive.writestr("xl/worksheets/sheet1.xml", sheet1)
+        archive.writestr("xl/worksheets/sheet2.xml", sheet2)
+
+    source = build_input_profile(tmp_path).files[0]
+
+    assert source.details["worksheet_structure"] == [
+        {"name": "training_rfs", "rows_declared": 2558, "columns_declared": 3},
+        {"name": "validation_pfs", "rows_declared": 323, "columns_declared": 4},
+    ]
+
+
+def test_xlsx_declared_dimensions_count_used_range_not_absolute_indices(tmp_path):
+    workbook = tmp_path / "offset.xlsx"
+    sheet = """<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+      <dimension ref="C5:F10"/><sheetData><row r="5"/></sheetData></worksheet>"""
+    with zipfile.ZipFile(workbook, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("xl/worksheets/sheet1.xml", sheet)
+
+    structure = build_input_profile(tmp_path).files[0].details["worksheet_structure"]
+
+    assert structure == [{"name": "sheet1", "rows_declared": 6, "columns_declared": 4}]

@@ -126,22 +126,6 @@ REPORT_AUDIT_JSON_MAX_FILE_BYTES = 16 * 1024
 REPORT_AUDIT_JSON_MAX_TOTAL_BYTES = 64 * 1024
 
 
-def _review_deferred_by_deterministic_gate(
-    validation: DeterministicValidation,
-) -> VerificationReport:
-    """Represent a review that cannot start until objective checks pass."""
-
-    codes = ", ".join(sorted({finding.code for finding in validation.findings}))
-    return VerificationReport(
-        verdict="inconclusive",
-        unsupported_claims=[
-            "Gemma review was deferred because deterministic validation failed"
-            + (f" ({codes})." if codes else ".")
-            + " The objective findings must be repaired before model review."
-        ],
-    )
-
-
 ActivityCallback = Callable[[str, str, str, str, str | None], None]
 PRESENTATION_ONLY_FINDINGS = {
     "computed_without_artifact",
@@ -2165,6 +2149,40 @@ def _ensure_declared_display_mentions(report: ScientificReport) -> ScientificRep
     )
 
 
+def _normalize_inline_citation_provenance(
+    report: ScientificReport,
+) -> ScientificReport:
+    """Remove policy-impossible article citations without changing claim evidence."""
+
+    sources = {source.source_id: source for source in report.sources}
+    claims = {claim.claim_id: claim for claim in report.claims}
+    normalized = []
+    changed = False
+    for citation in report.inline_citations:
+        linked_claims = [
+            claims[claim_id] for claim_id in citation.claim_ids if claim_id in claims
+        ]
+        source_ids = [
+            source_id
+            for source_id in citation.source_ids
+            if source_id not in sources
+            or (
+                sources[source_id].url is not None
+                and all(source_id in claim.evidence_refs for claim in linked_claims)
+            )
+        ]
+        if not source_ids:
+            changed = True
+            continue
+        if source_ids != citation.source_ids:
+            changed = True
+            citation = citation.model_copy(update={"source_ids": source_ids})
+        normalized.append(citation)
+    if not changed:
+        return report
+    return report.model_copy(update={"inline_citations": normalized})
+
+
 def _load_report_compat(path: Path) -> ScientificReport:
     """Load pre-v0.4 reports without mutating their immutable parent files."""
 
@@ -3219,18 +3237,37 @@ async def _produce_report(
         cancel_event=cancel_event,
     )
     normalized_report = _ensure_declared_display_mentions(
-        _remove_display_ids_from_claim_evidence(
-            _register_computation_path_evidence(report, effective_computation)
+        _normalize_inline_citation_provenance(
+            _remove_display_ids_from_claim_evidence(
+                _register_computation_path_evidence(report, effective_computation)
+            )
         )
     )
     if normalized_report is not report:
+        citation_links_before = {
+            (citation.citation_id, source_id)
+            for citation in report.inline_citations
+            for source_id in citation.source_ids
+        }
+        citation_links_after = {
+            (citation.citation_id, source_id)
+            for citation in normalized_report.inline_citations
+            for source_id in citation.source_ids
+        }
         ledger.append(
             "report_cross_references_normalized",
             {
                 "rules": [
                     "ClaimRecord.evidence_refs accept SourceRecord IDs only",
                     "Exact generated-artifact path refs become registered SourceRecords",
+                    "Inline citations retain only direct URL-backed claim evidence",
                     "Registered displays are referenced in their declared section",
+                ],
+                "removed_inline_citation_links": [
+                    {"citation_id": citation_id, "source_id": source_id}
+                    for citation_id, source_id in sorted(
+                        citation_links_before - citation_links_after
+                    )
                 ],
             },
         )
@@ -3864,6 +3901,199 @@ def _prepare_task_spec(
     )
 
 
+_SURVIVAL_REQUEST = re.compile(
+    r"\b(?:survival|cox|kaplan[ -]meier|competing[ -]risk|fine[ -]gray|"
+    r"cumulative incidence|cause[ -]specific)\b",
+    re.IGNORECASE,
+)
+
+_STATISTICAL_TARGET = (
+    r"(?:data|outcome|endpoint|association|effect|estimate|ratio|regression|model|"
+    r"cox|survival|hazard|odds|risk|incidence|fine[ -]gray|competing[ -]risk|"
+    r"kaplan[ -]meier|proportional hazards|curve|analysis|analyses)"
+)
+_EDITORIAL_TARGET = re.compile(
+    r"\b(?:wording|prose|text|sentence|paragraph|discussion|caption|description|"
+    r"clarif\w*|rephras\w*|interpret\w*)\b",
+    re.IGNORECASE,
+)
+
+
+def _unnegated_revision_text(revision_request: str) -> str:
+    text = revision_request.casefold()
+    text = re.sub(
+        r"\b(?:do\s+not|don't|no)\b[^,.;]*?\bbut\b",
+        " but ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    text = re.sub(
+        r"\bwithout\b[^,.;]*(?=,|;|\.|$)",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(
+        r"\b(?:do\s+not|don't|no|not)\b[^,.;]*(?=,|;|\.|$)",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
+
+
+def _revision_requests_new_analysis(revision_request: str) -> bool:
+    text = _unnegated_revision_text(revision_request)
+    strong_patterns = (
+        rf"\b(?:analy[sz]e|recompute|rerun|calculate)\b[^.;]{{0,100}}{_STATISTICAL_TARGET}?",
+        rf"\b(?:compute|estimate|derive|quantify|determine|assess|evaluate|model|test)\b"
+        rf"[^.;]{{0,100}}{_STATISTICAL_TARGET}",
+        r"\bfit\b[^.;]{0,80}(?:regression|model|cox|distribution|curve|data)",
+        r"\b(?:perform|run|conduct)\b[^.;]{0,80}(?:analysis|analyses|model|"
+        r"regression|test|cox|fine[ -]gray|kaplan[ -]meier)",
+        r"\b(?:provide|report|present|produce|give|show)\b[^.;]{0,100}"
+        r"(?:analysis|analyses|results?|estimates?|ratios?|curves?|regression|"
+        r"cox|fine[ -]gray|cumulative incidence)",
+        r"\b(?:add|more|additional|new)\b[^.;]{0,60}\banalys(?:is|es)\b",
+        r"\b(?:create|generate)\b[^.;]{0,80}\b(?:figure|plot|curve|table)\b",
+        r"\badd\b(?=[^.;]{0,80}\b(?:figure|plot|curve|table)\b)"
+        r"(?=[^.;]{0,80}\b(?:cox|survival|hazard|odds|risk|incidence|"
+        r"fine[ -]gray|kaplan[ -]meier)\b)",
+    )
+    if not any(re.search(pattern, text, re.IGNORECASE) for pattern in strong_patterns):
+        return False
+    if _EDITORIAL_TARGET.search(text) and not re.search(
+        r"\b(?:analy[sz]e|recompute|rerun|compute|calculate|estimate|fit|perform|"
+        r"run|conduct|derive|quantify|determine|assess|evaluate|model|test)\b",
+        text,
+        re.IGNORECASE,
+    ):
+        return False
+    return True
+
+
+def _revision_required_new_display_kinds(revision_request: str) -> tuple[str, ...]:
+    lowered = _unnegated_revision_text(revision_request)
+    kinds = []
+    if re.search(r"\b(?:figure|plot|chart|curve)\b", lowered):
+        kinds.append("figure")
+    if re.search(r"\btables?\b", lowered):
+        kinds.append("table")
+    return tuple(kinds)
+
+
+def _revision_requires_any_new_display(revision_request: str) -> bool:
+    return bool(
+        _revision_requests_new_analysis(revision_request)
+        and _SURVIVAL_REQUEST.search(revision_request)
+        and not _revision_required_new_display_kinds(revision_request)
+    )
+
+
+def _prepare_revision_task_spec(
+    revision_request: str,
+    parent_planning: PlanningResult,
+    *,
+    enable_code: bool,
+    input_manifest: dict | None = None,
+    input_profile: InputProfile | None = None,
+    knowledge_snapshot: dict | None = None,
+    requested_outputs: tuple[str, ...] = (),
+) -> TaskSpec:
+    """Create a controller-bound addendum task instead of reusing the parent plan."""
+
+    task = _prepare_task_spec(
+        revision_request,
+        enable_code=enable_code,
+        input_manifest=input_manifest,
+        input_profile=input_profile,
+        knowledge_snapshot=knowledge_snapshot,
+        requested_outputs=requested_outputs,
+    )
+    parent_task = parent_planning.master_plan.task
+    parent_steps = [
+        f"{step.step_id}: {step.objective}"
+        for step in parent_planning.master_plan.plan.steps
+    ]
+    constraints = [
+        *task.constraints,
+        "This is a child revision addendum. The parent report, protocol, inputs, "
+        "and evidence remain immutable; distinguish inherited evidence from every "
+        "new computation or retrieval.",
+        f"Parent objective retained only as context: {parent_task.objective}",
+        "Parent plan steps retained only as context: " + "; ".join(parent_steps),
+        "The addendum plan must directly operationalize the exact revision request "
+        "and must not reuse the parent plan as the child protocol.",
+    ]
+    deliverables = [*task.deliverables]
+    acceptance_tests = [
+        *task.acceptance_tests,
+        "The locked child plan directly addresses the exact revision request and "
+        "separates inherited evidence from newly produced evidence",
+    ]
+    if _revision_requests_new_analysis(revision_request):
+        deliverables.append(
+            "New machine-readable analysis results produced in this child run"
+        )
+        for kind in _revision_required_new_display_kinds(revision_request):
+            deliverables.append(
+                f"New reader-facing result {kind} produced in this child run"
+            )
+        if _revision_requires_any_new_display(revision_request):
+            deliverables.append(
+                "At least one new reader-facing result figure or table produced "
+                "in this child run"
+            )
+        acceptance_tests.append(
+            "At least one meaningful machine-readable child-run result is directly "
+            "linked to a revised claim, and every requested new display is linked "
+            "to that child-run evidence"
+        )
+        if not enable_code:
+            constraints.append(
+                "The revision requests new computation but code execution is not "
+                "authorized. The new analysis cannot pass the evidence gate unless "
+                "the user enables the sandbox and reruns this child revision."
+            )
+    if _SURVIVAL_REQUEST.search(revision_request):
+        constraints.extend(
+            [
+                "For every time-to-event estimand define time origin, event, "
+                "censoring, analysis population, and competing-event coding before "
+                "estimation; recurrence and progression are not competing events "
+                "merely because both columns exist.",
+                "Cox models must use unique duration/event/covariate columns, explicit "
+                "categorical levels and reference groups, proportional-hazards "
+                "diagnostics, and justified penalization only; ratio confidence "
+                "limits must be exponentiated and contain the ratio estimate.",
+                "Never call an univariate association an independent or adjusted "
+                "predictor. If formal competing-risk data or a defensible first-event "
+                "or multistate estimand are unavailable, report that analysis as not "
+                "estimable instead of substituting event counts.",
+            ]
+        )
+        acceptance_tests.extend(
+            [
+                "Every hazard or subdistribution hazard ratio is positive and lies "
+                "inside its reported positive confidence interval",
+                "Any claimed competing-risk result is supported by explicit competing "
+                "event coding and a cause-specific, cumulative-incidence, Fine-Gray, "
+                "first-event, or multistate analysis appropriate to the estimand",
+            ]
+        )
+    return task.model_copy(
+        update={
+            "constraints": list(dict.fromkeys(constraints)),
+            "deliverables": list(dict.fromkeys(deliverables)),
+            "acceptance_tests": list(dict.fromkeys(acceptance_tests)),
+            "task_type": (
+                "statistical_modeling"
+                if _revision_requests_new_analysis(revision_request)
+                else task.task_type
+            ),
+        }
+    )
+
+
 async def run_scientific_task(
     objective: str,
     settings: Settings,
@@ -3988,6 +4218,74 @@ async def run_scientific_task(
                 str(path),
             )
 
+    async def prepare_and_audit_plan(task: TaskSpec) -> PlanningResult:
+        report_progress(
+            "planning",
+            (
+                "Qwen is preparing one lean plan from the inspected inputs"
+                if simple_mode
+                else "Qwen and Gemma are independently planning from the inspected inputs"
+            ),
+        )
+        if simple_mode:
+            candidate = await build_simple_planning(
+                settings, task, record_planning_visible_text
+            )
+        else:
+            workflow = build_planning_workflow(settings, record_planning_visible_text)
+            candidate = await run_typed(
+                workflow, task.model_dump_json(), PlanningResult
+            )
+        _cancel_checkpoint(cancel_event)
+        plan_repair_history = []
+        plan_repair_findings: tuple[Finding, ...] = ()
+        while (
+            candidate.status == "requires_revision"
+            and len(plan_repair_history) < settings.max_repair_rounds
+        ):
+            round_number = len(plan_repair_history) + 1
+            previous = candidate
+            plan_repair_findings = _merge_plan_repair_findings(
+                plan_repair_findings, candidate.audit
+            )
+            report_progress(
+                "plan-review",
+                f"Repairing concrete plan findings (round {round_number})",
+            )
+            ledger.append(
+                "plan_repair_started",
+                {"round": round_number, "reason": candidate.audit.verdict},
+            )
+            candidate = await _repair_plan(
+                settings,
+                candidate,
+                record_planning_visible_text,
+                repair_findings=plan_repair_findings,
+            )
+            plan_repair_history.append(
+                {
+                    "round": round_number,
+                    "cumulative_repair_findings": [
+                        finding.model_dump(mode="json")
+                        for finding in plan_repair_findings
+                    ],
+                    "rejected_planning": previous.model_dump(mode="json"),
+                    "repaired_status": candidate.status,
+                    "repaired_audit": candidate.audit.model_dump(mode="json"),
+                    "repaired_lints": [
+                        item.model_dump(mode="json") for item in candidate.plan_lints
+                    ],
+                }
+            )
+            ledger.append(
+                "plan_repair_finished",
+                {"round": round_number, "status": candidate.status},
+            )
+            _cancel_checkpoint(cancel_event)
+        if plan_repair_history:
+            write_json(run_dir / "plan_repair_history.json", plan_repair_history)
+        return candidate
+
     write_json(
         run_dir / "run_configuration.json",
         {
@@ -4098,7 +4396,7 @@ async def run_scientific_task(
                 "workspace inputs changed after the parent run; start a new analysis "
                 "instead of revising the old evidence record"
             )
-        planning = PlanningResult.model_validate_json(
+        parent_planning = PlanningResult.model_validate_json(
             (parent_root / "planning_result.json").read_text(encoding="utf-8")
         )
         parent_report = _load_report_compat(parent_root / "scientific_report.json")
@@ -4162,6 +4460,16 @@ async def run_scientific_task(
                 "Immutable parent protocol and evidence were loaded",
                 str(lineage_path),
             )
+        task = _prepare_revision_task_spec(
+            revision_request or "",
+            parent_planning,
+            enable_code=enable_code,
+            input_manifest=input_manifest,
+            input_profile=input_profile,
+            knowledge_snapshot=knowledge_snapshot,
+            requested_outputs=requested_outputs,
+        )
+        planning = await prepare_and_audit_plan(task)
     else:
         task = _prepare_task_spec(
             objective,
@@ -4212,70 +4520,7 @@ async def run_scientific_task(
             task = task.model_copy(update={"input_profile": input_profile})
             write_json(run_dir / "input_profile.json", input_profile)
         _cancel_checkpoint(cancel_event)
-        report_progress(
-            "planning",
-            (
-                "Qwen is preparing one lean plan from the inspected inputs"
-                if simple_mode
-                else "Qwen and Gemma are independently planning from the inspected inputs"
-            ),
-        )
-        planning_input = task.model_dump_json()
-        if simple_mode:
-            planning = await build_simple_planning(
-                settings, task, record_planning_visible_text
-            )
-        else:
-            workflow = build_planning_workflow(settings, record_planning_visible_text)
-            planning = await run_typed(workflow, planning_input, PlanningResult)
-        _cancel_checkpoint(cancel_event)
-        plan_repair_history = []
-        plan_repair_findings: tuple[Finding, ...] = ()
-        while (
-            planning.status == "requires_revision"
-            and len(plan_repair_history) < settings.max_repair_rounds
-        ):
-            round_number = len(plan_repair_history) + 1
-            previous = planning
-            plan_repair_findings = _merge_plan_repair_findings(
-                plan_repair_findings, planning.audit
-            )
-            report_progress(
-                "plan-review",
-                f"Repairing concrete plan findings (round {round_number})",
-            )
-            ledger.append(
-                "plan_repair_started",
-                {"round": round_number, "reason": planning.audit.verdict},
-            )
-            planning = await _repair_plan(
-                settings,
-                planning,
-                record_planning_visible_text,
-                repair_findings=plan_repair_findings,
-            )
-            plan_repair_history.append(
-                {
-                    "round": round_number,
-                    "cumulative_repair_findings": [
-                        finding.model_dump(mode="json")
-                        for finding in plan_repair_findings
-                    ],
-                    "rejected_planning": previous.model_dump(mode="json"),
-                    "repaired_status": planning.status,
-                    "repaired_audit": planning.audit.model_dump(mode="json"),
-                    "repaired_lints": [
-                        item.model_dump(mode="json") for item in planning.plan_lints
-                    ],
-                }
-            )
-            ledger.append(
-                "plan_repair_finished",
-                {"round": round_number, "status": planning.status},
-            )
-            _cancel_checkpoint(cancel_event)
-        if plan_repair_history:
-            write_json(run_dir / "plan_repair_history.json", plan_repair_history)
+        planning = await prepare_and_audit_plan(task)
     write_json(run_dir / "planning_result.json", planning)
     if activity is not None:
         activity(
@@ -4409,36 +4654,53 @@ async def run_scientific_task(
         controller_artifacts=controller_artifacts,
         controller_dates=controller_dates,
         task=planning.master_plan.task,
+        required_new_computation_root=(
+            run_dir / "computations"
+            if revision_request is not None
+            and _revision_requests_new_analysis(revision_request)
+            else None
+        ),
+        required_new_display_kinds=(
+            _revision_required_new_display_kinds(revision_request)
+            if revision_request is not None
+            and _revision_requests_new_analysis(revision_request)
+            else ()
+        ),
+        require_any_new_display=(
+            _revision_requires_any_new_display(revision_request)
+            if revision_request is not None
+            else False
+        ),
+        require_competing_risk_result=bool(
+            re.search(
+                r"\bcompeting[ -]risk",
+                revision_request if revision_request is not None else objective,
+                re.IGNORECASE,
+            )
+            and _revision_requests_new_analysis(
+                revision_request if revision_request is not None else objective
+            )
+        ),
     )
-    if validation.passed:
-        report_progress(
-            "scientific-review", "Gemma is independently auditing the result"
-        )
-        review = await _audit_report_resilient(
-            settings,
-            planning,
-            report,
-            validation,
-            retrieval,
-            computation,
-            ledger,
-            controller_artifacts,
-            controller_dates,
-            simple_mode,
-            run_dir / "live",
-            activity,
-            cancel_event,
-        )
-    else:
-        review = _review_deferred_by_deterministic_gate(validation)
-        report_progress(
-            "validation",
-            "Deterministic findings must be repaired before Gemma review",
-        )
-        ledger.append(
-            "gemma_review_deferred",
-            {"finding_codes": sorted({item.code for item in validation.findings})},
-        )
+    report_progress(
+        "scientific-review",
+        "Gemma is independently auditing the result alongside deterministic findings",
+    )
+    review = await _audit_report_resilient(
+        settings,
+        planning,
+        report,
+        validation,
+        retrieval,
+        computation,
+        ledger,
+        controller_artifacts,
+        controller_dates,
+        simple_mode,
+        run_dir / "live",
+        activity,
+        cancel_event,
+    )
     _write_attempt_bundle(
         run_dir, 0, report, validation, review, retrieval, computation
     )
@@ -4553,36 +4815,53 @@ async def run_scientific_task(
             controller_artifacts=controller_artifacts,
             controller_dates=controller_dates,
             task=planning.master_plan.task,
+            required_new_computation_root=(
+                run_dir / "computations"
+                if revision_request is not None
+                and _revision_requests_new_analysis(revision_request)
+                else None
+            ),
+            required_new_display_kinds=(
+                _revision_required_new_display_kinds(revision_request)
+                if revision_request is not None
+                and _revision_requests_new_analysis(revision_request)
+                else ()
+            ),
+            require_any_new_display=(
+                _revision_requires_any_new_display(revision_request)
+                if revision_request is not None
+                else False
+            ),
+            require_competing_risk_result=bool(
+                re.search(
+                    r"\bcompeting[ -]risk",
+                    revision_request if revision_request is not None else objective,
+                    re.IGNORECASE,
+                )
+                and _revision_requests_new_analysis(
+                    revision_request if revision_request is not None else objective
+                )
+            ),
         )
-        if validation.passed:
-            report_progress(
-                "scientific-review", "Gemma is auditing the repaired result"
-            )
-            review = await _audit_report_resilient(
-                settings,
-                planning,
-                report,
-                validation,
-                retrieval,
-                computation,
-                ledger,
-                controller_artifacts,
-                controller_dates,
-                simple_mode,
-                run_dir / "live",
-                activity,
-                cancel_event,
-            )
-        else:
-            review = _review_deferred_by_deterministic_gate(validation)
-            report_progress(
-                "validation",
-                "Deterministic findings must be repaired before Gemma review",
-            )
-            ledger.append(
-                "gemma_review_deferred",
-                {"finding_codes": sorted({item.code for item in validation.findings})},
-            )
+        report_progress(
+            "scientific-review",
+            "Gemma is auditing the repaired result alongside deterministic findings",
+        )
+        review = await _audit_report_resilient(
+            settings,
+            planning,
+            report,
+            validation,
+            retrieval,
+            computation,
+            ledger,
+            controller_artifacts,
+            controller_dates,
+            simple_mode,
+            run_dir / "live",
+            activity,
+            cancel_event,
+        )
         _write_attempt_bundle(
             run_dir,
             repair_rounds,
@@ -4659,7 +4938,12 @@ async def run_scientific_task(
         else None
     )
     (run_dir / "report.md").write_text(
-        render_report_markdown(report, display_manifest, reference_manifest),
+        render_report_markdown(
+            report,
+            display_manifest,
+            reference_manifest,
+            quality_status=status,
+        ),
         encoding="utf-8",
     )
     write_json(run_dir / "deterministic_validation.json", validation)

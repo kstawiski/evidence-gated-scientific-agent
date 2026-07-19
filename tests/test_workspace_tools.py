@@ -15,6 +15,21 @@ def test_workspace_tools_read_and_block_escape(tmp_path):
     assert tools["search_workspace"]("beta")["matches"]
 
 
+def test_workspace_reader_accepts_real_absolute_paths_inside_workspace(tmp_path):
+    references = tmp_path / "files" / "references"
+    references.mkdir(parents=True)
+    article = references / "article.md"
+    article.write_text("locally acquired article\n", encoding="utf-8")
+    tools = {tool.__name__: tool for tool in build_workspace_tools(tmp_path)}
+
+    observed = tools["read_text_file"](str(article.resolve()))
+
+    assert observed == {
+        "path": "files/references/article.md",
+        "content": "locally acquired article\n",
+    }
+
+
 def test_workspace_search_does_not_follow_external_symlink(tmp_path):
     outside = tmp_path.parent / f"{tmp_path.name}-outside.txt"
     outside.write_text("TOPSECRET marker\n", encoding="utf-8")

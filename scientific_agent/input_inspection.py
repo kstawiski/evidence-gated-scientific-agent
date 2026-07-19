@@ -453,6 +453,89 @@ def _xlsx_cell_value(cell: ElementTree.Element, shared: list[str]) -> Any:
     return int(number) if number.is_integer() else number
 
 
+def _xlsx_declared_shape(xml_prefix: bytes) -> tuple[int | None, int | None]:
+    dimension = re.search(
+        rb"<(?:[A-Za-z0-9_]+:)?dimension\b[^>]*\bref=[\"']([^\"']+)",
+        xml_prefix,
+    )
+    reference = (
+        dimension.group(1).decode("ascii", errors="ignore")
+        if dimension is not None
+        else ""
+    )
+    endpoints = reference.split(":")
+    if len(endpoints) == 1:
+        endpoints = [endpoints[0], endpoints[0]]
+    if len(endpoints) != 2:
+        return None, None
+    matches = [
+        re.fullmatch(r"\$?([A-Za-z]+)\$?([0-9]+)", endpoint) for endpoint in endpoints
+    ]
+    if any(match is None for match in matches):
+        return None, None
+    first, last = matches
+    assert first is not None and last is not None
+    first_column = _xlsx_column_index(f"{first.group(1)}1")
+    last_column = _xlsx_column_index(f"{last.group(1)}1")
+    if first_column is None or last_column is None:
+        return None, None
+    rows = int(last.group(2)) - int(first.group(2)) + 1
+    columns = last_column - first_column + 1
+    if rows < 1 or columns < 1:
+        return None, None
+    return rows, columns
+
+
+def _xlsx_worksheet_structure(
+    archive: zipfile.ZipFile,
+    names: set[str],
+    sheet_files: list[str],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Return bounded, value-free worksheet names and declared dimensions."""
+
+    labels = {sheet_file: Path(sheet_file).stem for sheet_file in sheet_files}
+    ordered_files = list(sheet_files)
+    if {
+        "xl/workbook.xml",
+        "xl/_rels/workbook.xml.rels",
+    }.issubset(names):
+        workbook = ElementTree.fromstring(archive.read("xl/workbook.xml"))
+        relations = ElementTree.fromstring(archive.read("xl/_rels/workbook.xml.rels"))
+        targets = {
+            relation.attrib.get("Id"): relation.attrib.get("Target", "")
+            for relation in relations.findall("{*}Relationship")
+        }
+        discovered: list[str] = []
+        for sheet in workbook.findall(".//{*}sheet")[:32]:
+            relation_id = sheet.attrib.get(
+                "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+            )
+            target = targets.get(relation_id, "").lstrip("/")
+            member = target if target.startswith("xl/") else f"xl/{target}"
+            if ".." in Path(member).parts or member not in sheet_files:
+                continue
+            labels[member] = sheet.attrib.get("name", labels[member])[:200]
+            discovered.append(member)
+        if discovered:
+            ordered_files = [
+                *discovered,
+                *[item for item in sheet_files if item not in discovered],
+            ]
+
+    structure: list[dict[str, Any]] = []
+    for sheet_file in ordered_files[:32]:
+        with archive.open(sheet_file) as handle:
+            rows, columns = _xlsx_declared_shape(handle.read(64 * 1024))
+        structure.append(
+            {
+                "name": labels[sheet_file],
+                "rows_declared": rows,
+                "columns_declared": columns,
+            }
+        )
+    return structure, ordered_files
+
+
 def _profile_xlsx(path: Path, base: dict[str, Any]) -> InputFileProfile:
     try:
         with zipfile.ZipFile(path) as archive:
@@ -472,7 +555,11 @@ def _profile_xlsx(path: Path, base: dict[str, Any]) -> InputFileProfile:
             )
             if not sheets:
                 raise ValueError("workbook has no worksheets")
-            root = ElementTree.fromstring(archive.read(sheets[0]))
+            worksheet_structure, ordered_sheets = _xlsx_worksheet_structure(
+                archive, names, sheets
+            )
+            first_sheet = ordered_sheets[0]
+            root = ElementTree.fromstring(archive.read(first_sheet))
     except (
         OSError,
         ValueError,
@@ -510,7 +597,11 @@ def _profile_xlsx(path: Path, base: dict[str, Any]) -> InputFileProfile:
             inspection_status="complete",
             rows_observed=0,
             rows_total=0,
-            details={"worksheets": len(sheets), "first_worksheet": sheets[0]},
+            details={
+                "worksheets": len(sheets),
+                "first_worksheet": first_sheet,
+                "worksheet_structure": worksheet_structure,
+            },
             limitations=["the first worksheet is empty"],
         )
     width = min(
@@ -549,7 +640,8 @@ def _profile_xlsx(path: Path, base: dict[str, Any]) -> InputFileProfile:
         details={
             "worksheets": len(sheets),
             "worksheet_files": sheets[:32],
-            "first_worksheet": sheets[0],
+            "first_worksheet": first_sheet,
+            "worksheet_structure": worksheet_structure,
             "declared_columns": width,
             "values_included_in_profile": False,
             "bounded_candidate_role_labels_included": any(

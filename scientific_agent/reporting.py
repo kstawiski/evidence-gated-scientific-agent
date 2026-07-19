@@ -931,6 +931,7 @@ def render_report_markdown(
     report: ScientificReport,
     display_manifest: dict[str, Any] | None = None,
     reference_manifest: dict[str, Any] | None = None,
+    quality_status: str | None = None,
 ) -> str:
     """Render a portable article with an exact, controller-owned heading order."""
 
@@ -980,17 +981,31 @@ def render_report_markdown(
     lines = [
         f"# {report.title}",
         "",
-        "## Abstract",
-        "",
-        cited_text("executive_summary", report.executive_summary),
-        "",
-        "## Introduction",
-        "",
-        cited_text("introduction", report.introduction),
-        "",
-        "## Methods",
-        "",
     ]
+    validated_statuses = {"supported", "supported_with_comments"}
+    if quality_status is not None and quality_status not in validated_statuses:
+        lines.extend(
+            [
+                "> **NOT VALIDATED** — The run quality status is "
+                f"`{quality_status}`. Claim labels below are provisional model "
+                "output and must not be treated as supported findings.",
+                "",
+            ]
+        )
+    lines.extend(
+        [
+            "## Abstract",
+            "",
+            cited_text("executive_summary", report.executive_summary),
+            "",
+            "## Introduction",
+            "",
+            cited_text("introduction", report.introduction),
+            "",
+            "## Methods",
+            "",
+        ]
+    )
     lines.extend(f"- {cited_text('methods', method)}" for method in report.methods)
     for entry in by_placement["methods"]:
         lines.extend(_display_markdown(entry))
@@ -1009,9 +1024,11 @@ def render_report_markdown(
     lines.extend(["", "## Evidence ledger", ""])
     for claim in report.claims:
         refs = ", ".join(claim.evidence_refs) or "none"
+        claim_status = claim.status.value
+        if quality_status is not None and quality_status not in validated_statuses:
+            claim_status = f"model-labeled {claim_status}; run not validated"
         lines.append(
-            f"- **{claim.claim_id} [{claim.status.value}]** {claim.text} "
-            f"(evidence: {refs})"
+            f"- **{claim.claim_id} [{claim_status}]** {claim.text} (evidence: {refs})"
         )
     lines.extend(["", "## Sources", ""])
     for source in external_sources:

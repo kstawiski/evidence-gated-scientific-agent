@@ -109,7 +109,11 @@ def build_workspace_tools(
             candidate = Path(path)
             registered_hash = None
             if candidate.is_absolute() and candidate.parts[:2] != ("/", "workspace"):
-                target, registered_hash = resolve_registered_artifact(path)
+                absolute = candidate.resolve()
+                if absolute == workspace or workspace in absolute.parents:
+                    target = resolve(path)
+                else:
+                    target, registered_hash = resolve_registered_artifact(path)
             else:
                 target = resolve(path)
             size = target.stat().st_size

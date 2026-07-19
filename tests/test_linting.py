@@ -5,6 +5,7 @@ import zipfile
 from PIL import Image
 
 from scientific_agent.linting import (
+    _contains_competing_risk_result,
     _inferential_consistency_findings,
     lint_plan,
     reconciliation_verdict,
@@ -2290,6 +2291,333 @@ def test_inferential_check_rejects_impossible_two_sided_p_value_alias(tmp_path):
     assert "inferential_statistic_inconsistent" in {
         finding.code for finding in findings
     }
+
+
+def test_inferential_check_rejects_ratio_estimate_outside_reported_interval(tmp_path):
+    findings = _inferential_consistency_findings(
+        tmp_path / "cox_results.json",
+        {
+            "covariate": "T_stage",
+            "hazard_ratio": 1.951,
+            "hr_lower_95ci": 0.4966,
+            "hr_upper_95ci": 0.8400,
+        },
+    )
+
+    assert {finding.code for finding in findings} == {
+        "ratio_confidence_interval_inconsistent"
+    }
+
+    valid = _inferential_consistency_findings(
+        tmp_path / "cox_results.json",
+        {"hazard_ratio": 1.951, "hr_lower_95ci": 1.643, "hr_upper_95ci": 2.317},
+    )
+    assert valid == []
+
+    assert (
+        _inferential_consistency_findings(
+            tmp_path / "cox_results.json",
+            {"hazard_ratio": 1.951, "hr_ci_lower": 1.643, "hr_ci_upper": 2.317},
+        )
+        == []
+    )
+    assert {
+        finding.code
+        for finding in _inferential_consistency_findings(
+            tmp_path / "cox_results.json", {"hazard_ratio": 0}
+        )
+    } == {"ratio_confidence_interval_inconsistent"}
+    assert {
+        finding.code
+        for finding in _inferential_consistency_findings(
+            tmp_path / "cox_results.json",
+            {"hazard_ratio": 1.2, "hr": 1.8},
+        )
+    } == {"ratio_confidence_interval_inconsistent"}
+    assert (
+        _inferential_consistency_findings(
+            tmp_path / "cox_results.json",
+            {"HAZARD_RATIO": 1.5, "CONFIDENCE_INTERVAL_95": [1.1, 2.0]},
+        )
+        == []
+    )
+    assert {
+        finding.code
+        for finding in _inferential_consistency_findings(
+            tmp_path / "cox_results.json",
+            {"hazard_ratio": 1.5, "confidence_interval_95": [1.6, 2.0]},
+        )
+    } == {"ratio_confidence_interval_inconsistent"}
+    assert {
+        finding.code
+        for finding in _inferential_consistency_findings(
+            tmp_path / "cox_results.json",
+            {"hazard_ratio": 1.5, "confidence_interval_95": [1.1]},
+        )
+    } == {"ratio_confidence_interval_inconsistent"}
+    assert (
+        _inferential_consistency_findings(
+            tmp_path / "cox_results.json",
+            {
+                "hazard_ratio": {
+                    "estimate": 1.951,
+                    "confidence_interval": {"lower": 1.643, "upper": 2.317},
+                }
+            },
+        )
+        == []
+    )
+    assert (
+        _inferential_consistency_findings(
+            tmp_path / "cox_results.json",
+            {"hazard_ratio": 1.951},
+        )
+        == []
+    )
+    assert (
+        _inferential_consistency_findings(
+            tmp_path / "cox_results.json",
+            {"hazard_ratio": None, "hr_ci_lower": None, "hr_ci_upper": None},
+        )
+        == []
+    )
+
+
+def test_revision_validation_requires_child_artifacts_and_formal_competing_risk_record(
+    tmp_path,
+):
+    parent_root = tmp_path / "parent" / "computations"
+    parent_root.mkdir(parents=True)
+    inherited = parent_root / "results.json"
+    inherited.write_text('{"event_counts": {"recurrence": 10}}\n', encoding="utf-8")
+    artifact = ArtifactRef(
+        path=str(inherited.resolve()),
+        sha256=sha256_file(inherited),
+        description="sandbox-generated analysis artifact",
+    )
+    record = ComputationRecord(
+        execution_id="exec-parent",
+        language="python",
+        code_sha256="a" * 64,
+        started_at="2026-07-18T00:00:00Z",
+        duration_seconds=1,
+        exit_code=0,
+        status="succeeded",
+        stdout_path=str(tmp_path / "stdout.txt"),
+        stderr_path=str(tmp_path / "stderr.txt"),
+        artifacts=[artifact],
+    )
+
+    validation = validate_report(
+        article_report(),
+        computation=ComputationEvidence(records=[record], artifacts=[artifact]),
+        task=task().model_copy(
+            update={"objective": "Add survival and competing risk analyses"}
+        ),
+        required_new_computation_root=tmp_path / "child" / "computations",
+        required_new_display_kinds=("figure", "table"),
+        require_competing_risk_result=True,
+    )
+
+    codes = {finding.code for finding in validation.findings}
+    assert "revision_new_computation_missing" in codes
+    assert "revision_new_display_missing" in codes
+    assert "requested_competing_risk_analysis_missing" in codes
+
+
+def test_revision_machine_result_must_be_nonempty_and_linked_to_revised_claim(tmp_path):
+    child_root = tmp_path / "child" / "computations"
+    output = child_root / "attempt-0" / "exec-001" / "output"
+    output.mkdir(parents=True)
+    result = output / "results.json"
+    result.write_text("{}\n", encoding="utf-8")
+
+    def evidence():
+        artifact = ArtifactRef(
+            path=str(result.resolve()),
+            sha256=sha256_file(result),
+            description="sandbox-generated analysis artifact",
+        )
+        record = ComputationRecord(
+            execution_id="exec-child",
+            language="python",
+            code_sha256="a" * 64,
+            started_at="2026-07-18T00:00:00Z",
+            duration_seconds=1,
+            exit_code=0,
+            status="succeeded",
+            stdout_path=str(tmp_path / "stdout.txt"),
+            stderr_path=str(tmp_path / "stderr.txt"),
+            artifacts=[artifact],
+        )
+        return ComputationEvidence(records=[record], artifacts=[artifact])
+
+    placeholder = validate_report(
+        article_report(),
+        computation=evidence(),
+        required_new_computation_root=child_root,
+    )
+    assert "revision_new_computation_missing" in {
+        finding.code for finding in placeholder.findings
+    }
+
+    result.write_text('{"schema_version": 1}\n', encoding="utf-8")
+    metadata_only = validate_report(
+        article_report(),
+        computation=evidence(),
+        required_new_computation_root=child_root,
+    )
+    assert "revision_new_computation_missing" in {
+        finding.code for finding in metadata_only.findings
+    }
+
+    result.write_text('{"estimate": 1.25}\n', encoding="utf-8")
+    unlinked = validate_report(
+        article_report(),
+        computation=evidence(),
+        required_new_computation_root=child_root,
+    )
+    codes = {finding.code for finding in unlinked.findings}
+    assert "revision_new_computation_missing" not in codes
+    assert "revision_new_computation_unlinked" in codes
+
+    unrelated_report = article_report(
+        claims=[
+            ClaimRecord(
+                claim_id="unrelated",
+                text="Body temperature was 37 degrees.",
+                claim_type="computed",
+                evidence_refs=["child-results"],
+                status="supported",
+            )
+        ],
+        sources=[
+            SourceRecord(
+                source_id="child-results",
+                title="Child analysis results",
+                artifact_path=str(result.resolve()),
+                source_type="dataset",
+                retrieved_at="2026-07-18T00:00:00Z",
+                supporting_passage="Machine-readable child-run result.",
+            )
+        ],
+    )
+    unrelated = validate_report(
+        unrelated_report,
+        computation=evidence(),
+        required_new_computation_root=child_root,
+    )
+    assert "revision_new_computation_unlinked" in {
+        finding.code for finding in unrelated.findings
+    }
+
+    linked_report = article_report(
+        claims=[
+            ClaimRecord(
+                claim_id="child-estimate",
+                text="The child-run estimate was 1.25.",
+                claim_type="computed",
+                evidence_refs=["child-results"],
+                status="supported",
+            )
+        ],
+        sources=[
+            SourceRecord(
+                source_id="child-results",
+                title="Child analysis results",
+                artifact_path=str(result.resolve()),
+                source_type="dataset",
+                retrieved_at="2026-07-18T00:00:00Z",
+                supporting_passage="Machine-readable child-run result.",
+            )
+        ],
+    )
+    linked = validate_report(
+        linked_report,
+        computation=evidence(),
+        required_new_computation_root=child_root,
+    )
+    assert not {
+        "revision_new_computation_missing",
+        "revision_new_computation_unlinked",
+    } & {finding.code for finding in linked.findings}
+
+    competing = output / "competing.json"
+    competing.write_text(
+        json.dumps(
+            {
+                "fine_gray": {
+                    "event_of_interest": "progression",
+                    "competing_event": "death before progression",
+                    "subdistribution_hazard_ratio": 1.2,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    competing_artifact = ArtifactRef(
+        path=str(competing.resolve()),
+        sha256=sha256_file(competing),
+        description="sandbox-generated analysis artifact",
+    )
+    computation = evidence()
+    computation = computation.model_copy(
+        update={
+            "records": [
+                computation.records[0].model_copy(
+                    update={
+                        "artifacts": [
+                            *computation.records[0].artifacts,
+                            competing_artifact,
+                        ]
+                    }
+                )
+            ],
+            "artifacts": [*computation.artifacts, competing_artifact],
+        }
+    )
+    unlinked_competing = validate_report(
+        linked_report,
+        computation=computation,
+        required_new_computation_root=child_root,
+        require_competing_risk_result=True,
+    )
+    assert "requested_competing_risk_analysis_missing" in {
+        finding.code for finding in unlinked_competing.findings
+    }
+
+
+def test_competing_risk_record_accepts_formal_result_or_reasoned_non_estimability():
+    assert _contains_competing_risk_result(
+        {
+            "fine_gray": {
+                "event_of_interest": "progression",
+                "competing_event": "death before progression",
+                "subdistribution_hazard_ratio": 1.2,
+            },
+        }
+    )
+    assert _contains_competing_risk_result(
+        {
+            "competing_risk_analysis": {
+                "estimable": False,
+                "reason": "No mutually exclusive first-event coding is available.",
+            }
+        }
+    )
+    assert not _contains_competing_risk_result(
+        {"competing_risk_assessment": "event-pattern counts only"}
+    )
+    assert not _contains_competing_risk_result({"fine_gray": {}})
+    assert not _contains_competing_risk_result({"cumulative_incidence": "not computed"})
+    assert not _contains_competing_risk_result({"first_event": "recurrence"})
+    assert not _contains_competing_risk_result({"cause_specific_hazard": 0.5})
+    assert not _contains_competing_risk_result(
+        {"fine_gray": {"subdistribution_hazard_ratio": 1.2}}
+    )
+    assert not _contains_competing_risk_result(
+        {"competing_risk_analysis": {"estimable": False, "reason": "TBD"}}
+    )
 
 
 def test_report_df_check_preserves_same_logical_output_from_each_language(tmp_path):

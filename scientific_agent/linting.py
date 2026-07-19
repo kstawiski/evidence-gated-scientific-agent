@@ -813,7 +813,7 @@ _SURVIVAL_PLAN_REQUEST = re.compile(
 )
 _EXPLICIT_TIME_ORIGIN = re.compile(
     r"\b(?:time origin|time[- ]zero|follow-up (?:begins|starts))\b"
-    r".{0,100}\b(?:diagnos\w*|surg\w*|resection|randomi[sz]\w*|enrol\w*|"
+    r".{0,100}\b(?:diagnos\w*|surg\w*|resection|turbt|randomi[sz]\w*|enrol\w*|"
     r"treatment (?:start|initiat\w*)|index date|baseline(?: visit)?|study entry)\b",
     re.IGNORECASE,
 )
@@ -852,6 +852,24 @@ _SPECIFIC_SURVIVAL_TIME_ORIGIN = re.compile(
     r"treatment (?:start|initiat\w*)|index date|baseline(?: visit)?|study entry)\b",
     re.IGNORECASE,
 )
+_SURVIVAL_ESTIMATE_CLAIM = re.compile(
+    r"\b(?:hazard ratio|subdistribution hazard ratio|"
+    r"median (?:survival|recurrence[- ]free survival|progression[- ]free survival|"
+    r"rfs|pfs)|kaplan[ -]meier estimate|survival probability|"
+    r"cumulative incidence estimate)\b"
+    r"|\bhr\s*(?:=|of)?\s*[0-9]"
+    r"|\b(?:recurrence[- ]free survival|progression[- ]free survival|"
+    r"overall survival|disease[- ]free survival|rfs|pfs)\b.{0,160}"
+    r"\b(?:differ\w*|median|probability|estimate\w*|p\s*[<=>])"
+    r"|\bfirst[- ]event\b.{0,100}\b(?:median|hazard|incidence)\b",
+    re.IGNORECASE,
+)
+
+
+def has_specific_survival_time_origin(text: str) -> bool:
+    """Return whether exact text defines a recognizable survival time zero."""
+
+    return bool(_SPECIFIC_SURVIVAL_TIME_ORIGIN.search(text))
 
 
 def _has_arbitrary_semantic_arm_mapping(text: str) -> bool:
@@ -3590,6 +3608,50 @@ def validate_report(
                             "Precise values attributed to a knowledge passage "
                             "must occur in its exact snapshotted bytes: "
                             + ", ".join(missing_numbers)
+                        ),
+                    )
+                )
+    if task is not None and _SURVIVAL_PLAN_REQUEST.search(
+        " ".join([task.objective, *task.constraints])
+    ):
+        survival_estimate_claims = [
+            claim
+            for claim in report.claims
+            if claim.claim_type == "computed"
+            and claim.status.value in {"supported", "partially_supported"}
+            and _SURVIVAL_ESTIMATE_CLAIM.search(claim.text)
+        ]
+        if survival_estimate_claims:
+            task_text = " ".join([task.objective, *task.constraints])
+            if not _SPECIFIC_SURVIVAL_TIME_ORIGIN.search(report_text):
+                findings.append(
+                    LintFinding(
+                        code="survival_report_time_origin_missing",
+                        location="report",
+                        message=(
+                            "A supported computed survival estimate requires an "
+                            "explicit time origin in the report. State the exact "
+                            "source-defined time zero or remove the estimate and "
+                            "report the analysis as not estimable."
+                        ),
+                    )
+                )
+            elif not (
+                _EXPLICIT_TIME_ORIGIN.search(task_text)
+                or any(
+                    _SPECIFIC_SURVIVAL_TIME_ORIGIN.search(source_text)
+                    for source_text in acquired_text_by_source.values()
+                )
+            ):
+                findings.append(
+                    LintFinding(
+                        code="survival_report_time_origin_not_grounded",
+                        location="report",
+                        message=(
+                            "The report states a specific survival time origin, but "
+                            "that definition does not occur in the controller-grounded "
+                            "task or acquired source text. Remove the estimate and keep "
+                            "time zero unknown unless an exact source/codebook defines it."
                         ),
                     )
                 )

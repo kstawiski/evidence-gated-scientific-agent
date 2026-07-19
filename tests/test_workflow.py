@@ -666,6 +666,68 @@ coefficient_limits_on_ratio_scale = np.exp(model.confidence_intervals_)
     )
 
 
+def test_survival_code_preflight_requires_controller_grounded_time_origin():
+    gate = ScientificToolOrderGate(frozenset(), survival_task=True)
+    code = """
+from lifelines import KaplanMeierFitter
+KaplanMeierFitter().fit(df['RFS_time'], df['RFS_event'])
+"""
+
+    denied = gate.before_tool(
+        "run_python_analysis",
+        ComputationEvidence(),
+        arguments={"code": code},
+    )
+
+    assert denied is not None
+    assert denied["error"] == "SCIENTIFIC_CODE_PREFLIGHT_FAILED"
+    assert "defines the time origin" in " ".join(denied["issues"])
+
+
+def test_survival_code_preflight_accepts_source_grounded_time_origin():
+    gate = ScientificToolOrderGate(frozenset(), survival_task=True)
+    gate.record_result(
+        "search_pubmed",
+        {
+            "query": "time origin diagnosis",
+            "articles": [{"abstract": "The study modeled recurrence-free survival."}],
+        },
+    )
+    assert not gate.survival_time_origin_grounded
+    gate.record_result(
+        "read_text_file",
+        {
+            "path": "codebook.md",
+            "content": "RFS was defined as time from initial TURBT to recurrence.",
+        },
+    )
+
+    assert (
+        gate.before_tool(
+            "run_python_analysis",
+            ComputationEvidence(),
+            arguments={
+                "code": "from lifelines import CoxPHFitter\nCoxPHFitter().fit(df)"
+            },
+        )
+        is None
+    )
+
+
+def test_r_survival_code_preflight_requires_controller_grounded_time_origin():
+    gate = ScientificToolOrderGate(frozenset(), survival_task=True)
+
+    denied = gate.before_tool(
+        "run_r_analysis",
+        ComputationEvidence(),
+        arguments={"code": "fit <- coxph(Surv(time, event) ~ age, data=df)"},
+    )
+
+    assert denied is not None
+    assert denied["error"] == "SCIENTIFIC_CODE_PREFLIGHT_FAILED"
+    assert "defines the time origin" in " ".join(denied["issues"])
+
+
 def test_survival_code_preflight_rejects_direct_semantic_indicators_and_origin():
     gate = ScientificToolOrderGate(
         frozenset(),

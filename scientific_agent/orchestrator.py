@@ -28,6 +28,7 @@ from .environment import EnvironmentManager, build_environment_tools
 from .input_inspection import build_input_profile
 from .knowledge import KnowledgeLibrary, build_knowledge_tools, chunk_text
 from .linting import (
+    has_specific_survival_time_origin,
     is_meaningful_machine_result,
     reconciliation_verdict,
     validate_report,
@@ -474,10 +475,67 @@ def _has_swallowed_ph_diagnostic(tree: ast.AST) -> bool:
     return False
 
 
+_PYTHON_SURVIVAL_ESTIMATION_CALLS = {
+    "AalenJohansenFitter",
+    "CoxPHFitter",
+    "CoxPHSurvivalAnalysis",
+    "KaplanMeierFitter",
+    "NelsonAalenFitter",
+    "PHReg",
+    "cumulative_incidence_competing_risks",
+    "logrank_test",
+    "multivariate_logrank_test",
+}
+_R_SURVIVAL_ESTIMATION = re.compile(
+    r"\b(?:Surv|coxph|survfit|survdiff|cuminc|crr|finegray)\s*\(",
+    re.IGNORECASE,
+)
+
+
+def _python_uses_survival_estimation(tree: ast.AST) -> bool:
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = (
+            node.func.id
+            if isinstance(node.func, ast.Name)
+            else node.func.attr
+            if isinstance(node.func, ast.Attribute)
+            else ""
+        )
+        if name in _PYTHON_SURVIVAL_ESTIMATION_CALLS:
+            return True
+    return False
+
+
+def _controller_source_text(tool_name: str, result: dict) -> str:
+    """Extract only returned source text, excluding model-controlled queries."""
+
+    if tool_name == "read_text_file":
+        content = result.get("content")
+        return content if isinstance(content, str) else ""
+    if tool_name == "search_pubmed":
+        return "\n".join(
+            str(article.get(field) or "")
+            for article in result.get("articles", [])
+            if isinstance(article, dict)
+            for field in ("title", "abstract")
+        )
+    if tool_name == "search_knowledge":
+        return "\n".join(
+            str(passage.get(field) or "")
+            for passage in result.get("passages", [])
+            if isinstance(passage, dict)
+            for field in ("content", "untrusted_source_text", "supporting_passage")
+        )
+    return ""
+
+
 def _python_scientific_preflight(
     code: str,
     *,
     survival_task: bool,
+    survival_time_origin_grounded: bool,
     ungrounded_categorical_columns: frozenset[str],
     allow_penalized_cox: bool,
 ) -> list[str]:
@@ -493,6 +551,16 @@ def _python_scientific_preflight(
         for child in ast.iter_child_nodes(parent)
     }
     issues: list[str] = []
+    if (
+        survival_task
+        and not survival_time_origin_grounded
+        and _python_uses_survival_estimation(tree)
+    ):
+        issues.append(
+            "survival estimation is denied until exact controller-visible task or "
+            "source text defines the time origin; retrieve and read that definition "
+            "or report the analysis as not estimable"
+        )
     if survival_task:
         for node in ast.walk(tree):
             if not isinstance(node, ast.Dict):
@@ -630,6 +698,7 @@ class ScientificToolOrderGate:
     require_reconciliation: bool = False
     require_current_computation: bool = False
     survival_task: bool = False
+    survival_time_origin_grounded: bool = False
     ungrounded_categorical_columns: frozenset[str] = frozenset()
     allow_penalized_cox: bool = False
     max_pubmed_search_attempts: int | None = None
@@ -699,6 +768,7 @@ class ScientificToolOrderGate:
                 issues = _python_scientific_preflight(
                     code,
                     survival_task=self.survival_task,
+                    survival_time_origin_grounded=(self.survival_time_origin_grounded),
                     ungrounded_categorical_columns=self.ungrounded_categorical_columns,
                     allow_penalized_cox=self.allow_penalized_cox,
                 )
@@ -709,6 +779,24 @@ class ScientificToolOrderGate:
                         "reason": "Correct every high-confidence issue before execution.",
                         "issues": issues,
                     }
+        if (
+            tool_name == "run_r_analysis"
+            and isinstance(arguments, dict)
+            and self.survival_task
+            and not self.survival_time_origin_grounded
+        ):
+            code = arguments.get("code")
+            if isinstance(code, str) and _R_SURVIVAL_ESTIMATION.search(code):
+                return {
+                    "status": "policy_denied",
+                    "error": "SCIENTIFIC_CODE_PREFLIGHT_FAILED",
+                    "reason": "Correct every high-confidence issue before execution.",
+                    "issues": [
+                        "survival estimation is denied until exact controller-visible "
+                        "task or source text defines the time origin; retrieve and read "
+                        "that definition or report the analysis as not estimable"
+                    ],
+                }
         if (
             tool_name == "search_pubmed"
             and self.max_pubmed_search_attempts is not None
@@ -785,6 +873,17 @@ class ScientificToolOrderGate:
         }
 
     def record_result(self, tool_name: str, result) -> None:
+        if (
+            self.survival_task
+            and not self.survival_time_origin_grounded
+            and tool_name in {"read_text_file", "search_knowledge", "search_pubmed"}
+            and isinstance(result, dict)
+            and not result.get("error")
+            and has_specific_survival_time_origin(
+                _controller_source_text(tool_name, result)
+            )
+        ):
+            self.survival_time_origin_grounded = True
         if (
             isinstance(result, dict)
             and result.get("error") == "REQUIRED_COMPUTATION_PENDING"
@@ -3320,6 +3419,14 @@ async def _produce_report(
         ),
         require_current_computation=require_current_computation,
         survival_task=bool(_SURVIVAL_REQUEST.search(task_and_method_text)),
+        survival_time_origin_grounded=has_specific_survival_time_origin(
+            " ".join(
+                [
+                    planning.master_plan.task.objective,
+                    *planning.master_plan.task.constraints,
+                ]
+            )
+        ),
         ungrounded_categorical_columns=ungrounded_categorical_columns,
         allow_penalized_cox=any(
             "penaliz" in method.casefold()

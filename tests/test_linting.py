@@ -284,6 +284,25 @@ def test_survival_plan_accepts_source_codebook_checkpoint_for_time_origin():
     }
 
 
+def test_survival_plan_accepts_workbook_metadata_before_time_zero_term():
+    survival_task = task().model_copy(
+        update={"objective": "Add survival and competing-risk analyses."}
+    )
+    plan = good_plan().model_copy(
+        update={"objective": "Assess recurrence-free survival feasibility."}
+    )
+    plan.steps[0].methods = [
+        "Inspect all worksheets and column metadata for an explicit time-zero "
+        "definition before any survival estimation."
+    ]
+
+    report = lint_plan(survival_task, plan)
+
+    assert "survival_time_origin_not_grounded" not in {
+        finding.code for finding in report.findings
+    }
+
+
 def test_survival_plan_rejects_unsupported_origin_assumption_despite_checkpoint():
     survival_task = task().model_copy(
         update={"objective": "Add survival and competing-risk analyses."}

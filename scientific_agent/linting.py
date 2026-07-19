@@ -819,15 +819,18 @@ _EXPLICIT_TIME_ORIGIN = re.compile(
 )
 _TIME_ORIGIN_SOURCE_CHECK = re.compile(
     r"\b(?:verify|confirm|establish|inspect|retrieve|acquire|consult)\w*\b"
-    r".{0,100}\btime origin\b.{0,100}"
+    r".{0,100}\b(?:time origin|time[- ]zero)\b.{0,100}"
     r"\b(?:source|article|codebook|metadata|workbook|uploaded (?:data|input))\b"
-    r"|\btime origin\b.{0,100}"
+    r"|\b(?:verify|confirm|establish|inspect|retrieve|acquire|consult)\w*\b"
+    r".{0,100}\b(?:source|article|codebook|metadata|workbook|uploaded (?:data|input))\b"
+    r".{0,100}\b(?:time origin|time[- ]zero)\b"
+    r"|\b(?:time origin|time[- ]zero)\b.{0,100}"
     r"\b(?:source|article|codebook|metadata|workbook|uploaded (?:data|input))\b"
     r".{0,100}\b(?:verify|confirm|establish|inspect|retrieve|acquire|consult)\w*\b",
     re.IGNORECASE,
 )
 _UNKNOWN_TIME_ORIGIN = re.compile(
-    r"\btime origin\b.{0,60}\b(?:unknown|unavailable|undocumented|"
+    r"\b(?:time origin|time[- ]zero)\b.{0,60}\b(?:unknown|unavailable|undocumented|"
     r"not (?:defined|provided|established|identified))\b",
     re.IGNORECASE,
 )

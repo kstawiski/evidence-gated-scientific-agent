@@ -175,6 +175,105 @@ def test_worker_confines_uuid_workspace_and_transactionally_commits(
         state.workspace_root("../escape")
 
 
+def test_worker_reuses_satisfying_locked_generation_without_copy_or_quota_scan(
+    tmp_path, monkeypatch
+):
+    state = EnvironmentWorkerState(tmp_path / "environments", "x" * 32)
+    workspace_id = str(uuid.uuid4())
+
+    def command(request, packages, staging, temporary):
+        del request, packages, temporary
+        return ["/bin/sh", "-c", f"touch {staging / 'installed'}"], {
+            "PATH": "/usr/bin:/bin"
+        }
+
+    monkeypatch.setattr(state, "_command", command)
+    monkeypatch.setattr(
+        state,
+        "_inventory",
+        lambda language, path: [{"name": "polars", "version": "1.0.0"}],
+    )
+    first = state.install(
+        InstallRequest(
+            request_id=str(uuid.uuid4()),
+            workspace_id=workspace_id,
+            language="python",
+            repository="pypi",
+            packages=["polars"],
+            timeout_seconds=30,
+        )
+    )
+
+    def must_not_repeat_work(*args, **kwargs):
+        raise AssertionError("satisfied generation must be reused without scanning")
+
+    monkeypatch.setattr(state, "_command", must_not_repeat_work)
+    monkeypatch.setattr(state, "_cumulative_quota_failure", must_not_repeat_work)
+    second = state.install(
+        InstallRequest(
+            request_id=str(uuid.uuid4()),
+            workspace_id=workspace_id,
+            language="python",
+            repository="pypi",
+            packages=["polars>=0.5"],
+            timeout_seconds=30,
+        )
+    )
+
+    generations = (tmp_path / "environments" / workspace_id / ".generations").iterdir()
+    assert first["status"] == "succeeded"
+    assert second["status"] == "succeeded"
+    assert second["reused"] is True
+    assert second["generation"] == first["generation"]
+    assert [path.name for path in generations] == [first["generation"]]
+
+
+def test_worker_cancels_during_cumulative_quota_scan(tmp_path, monkeypatch):
+    state = EnvironmentWorkerState(tmp_path / "environments", "x" * 32)
+    request_id = str(uuid.uuid4())
+    started = threading.Event()
+
+    def cancellable_usage(root, cancellation=None, **kwargs):
+        del root, kwargs
+        assert cancellation is not None
+        started.set()
+        while not cancellation.wait(0.01):
+            pass
+        raise InterruptedError("cancelled during quota scan")
+
+    monkeypatch.setattr(state, "_directory_usage", cancellable_usage)
+    results = []
+    thread = threading.Thread(
+        target=lambda: results.append(
+            state.install(
+                InstallRequest(
+                    request_id=request_id,
+                    workspace_id=str(uuid.uuid4()),
+                    language="python",
+                    repository="pypi",
+                    packages=["polars"],
+                    timeout_seconds=30,
+                )
+            )
+        )
+    )
+    thread.start()
+    assert started.wait(1)
+    assert state.cancel(request_id) is True
+    thread.join(timeout=2)
+
+    assert not thread.is_alive()
+    assert results == [
+        {
+            "status": "cancelled",
+            "exit_code": None,
+            "stdout": "",
+            "stderr": "",
+            "installed": [],
+        }
+    ]
+
+
 def test_worker_denies_update_before_copy_when_workspace_quota_is_insufficient(
     tmp_path, monkeypatch
 ):

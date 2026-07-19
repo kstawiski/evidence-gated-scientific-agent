@@ -6,6 +6,7 @@ import importlib.metadata
 import hashlib
 import json
 import os
+import re
 import secrets
 import signal
 import shutil
@@ -180,13 +181,16 @@ class EnvironmentWorkerState:
         *,
         additional_bytes: int = 0,
         additional_entries: int = 0,
+        cancellation: threading.Event | None = None,
     ) -> str | None:
-        workspace_bytes, workspace_entries = self._directory_usage(root)
+        workspace_bytes, workspace_entries = self._directory_usage(root, cancellation)
         if workspace_bytes + additional_bytes > self.max_workspace_bytes:
             return "Workspace package-generation quota would be exceeded"
         if workspace_entries + additional_entries > self.max_workspace_entries:
             return "Workspace package-entry quota would be exceeded"
-        total_bytes, total_entries = self._directory_usage(self.environments_dir)
+        total_bytes, total_entries = self._directory_usage(
+            self.environments_dir, cancellation
+        )
         if total_bytes + additional_bytes > self.max_total_bytes:
             return "Global package-environment quota would be exceeded"
         if total_entries + additional_entries > self.max_total_entries:
@@ -332,19 +336,37 @@ class EnvironmentWorkerState:
         if cancellation.is_set():
             return self._cancelled_result()
         root_exists = root.exists()
+        destination = root / request.language
+        if root_exists:
+            reused = self._reuse_active_generation(
+                root,
+                destination,
+                request.language,
+                packages,
+            )
+            if reused is not None:
+                return reused
         generations_exist = (root / ".generations").exists() if root_exists else False
         metadata_entries = int(not root_exists) + int(not generations_exist)
-        quota_failure = self._cumulative_quota_failure(
-            root,
-            additional_entries=metadata_entries,
-        )
+        try:
+            quota_failure = self._cumulative_quota_failure(
+                root,
+                additional_entries=metadata_entries,
+                cancellation=cancellation,
+            )
+        except InterruptedError:
+            return self._cancelled_result()
         if quota_failure:
             return self._quota_failure_result(quota_failure)
         if not root_exists:
             root.mkdir(parents=True, exist_ok=False)
-        destination = root / request.language
         replaces_existing_destination = destination.exists() or destination.is_symlink()
-        quota_failure = self._cumulative_quota_failure(root)
+        try:
+            quota_failure = self._cumulative_quota_failure(
+                root, cancellation=cancellation
+            )
+        except InterruptedError:
+            return self._cancelled_result()
         if quota_failure:
             return self._quota_failure_result(quota_failure)
         generations = self._generation_root(root)
@@ -366,11 +388,15 @@ class EnvironmentWorkerState:
                 return self._quota_failure_result(
                     "Existing package generation exceeds per-generation entry quota"
                 )
-            quota_failure = self._cumulative_quota_failure(
-                root,
-                additional_bytes=copied_bytes,
-                additional_entries=copied_entries + 2,
-            )
+            try:
+                quota_failure = self._cumulative_quota_failure(
+                    root,
+                    additional_bytes=copied_bytes,
+                    additional_entries=copied_entries + 2,
+                    cancellation=cancellation,
+                )
+            except InterruptedError:
+                return self._cancelled_result()
             if quota_failure:
                 return self._quota_failure_result(quota_failure)
             shutil.copytree(previous / "packages", package_dir, symlinks=True)
@@ -577,10 +603,15 @@ class EnvironmentWorkerState:
                 + "\n",
                 encoding="utf-8",
             )
-            quota_failure = self._cumulative_quota_failure(
-                root,
-                additional_entries=0 if replaces_existing_destination else 1,
-            )
+            try:
+                quota_failure = self._cumulative_quota_failure(
+                    root,
+                    additional_entries=0 if replaces_existing_destination else 1,
+                    cancellation=cancellation,
+                )
+            except InterruptedError:
+                shutil.rmtree(staging, ignore_errors=True)
+                return self._cancelled_result(_bounded(stdout), _bounded(stderr))
             if quota_failure:
                 shutil.rmtree(staging, ignore_errors=True)
                 return self._quota_failure_result(
@@ -607,6 +638,75 @@ class EnvironmentWorkerState:
                 "package_tree_bytes": package_tree_bytes,
                 "package_tree_entries": package_tree_entries,
             }
+
+    def _reuse_active_generation(
+        self,
+        root: Path,
+        destination: Path,
+        language: str,
+        packages: list[str],
+    ) -> dict | None:
+        """Return an existing immutable generation when it satisfies the request."""
+
+        if not (destination.exists() or destination.is_symlink()):
+            return None
+        generations = root / ".generations"
+        if generations.is_symlink() or not generations.is_dir():
+            raise RuntimeError("workspace package generation root is invalid")
+        previous = destination.resolve()
+        if previous.parent != generations.resolve():
+            raise RuntimeError("workspace package environment target is invalid")
+        package_dir = previous / "packages"
+        lock_path = previous / "lock.json"
+        if not package_dir.is_dir() or not lock_path.is_file():
+            raise RuntimeError("workspace package generation is incomplete")
+        try:
+            lock = json.loads(lock_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError, TypeError):
+            return None
+        inventory = lock.get("installed")
+        package_tree_sha256 = lock.get("package_tree_sha256")
+        package_tree_bytes = lock.get("package_tree_bytes")
+        package_tree_entries = lock.get("package_tree_entries")
+        if (
+            lock.get("language") != language
+            or not isinstance(inventory, list)
+            or any(
+                not isinstance(item, dict)
+                or not isinstance(item.get("name"), str)
+                or not isinstance(item.get("version"), str)
+                for item in inventory
+            )
+            or not isinstance(package_tree_sha256, str)
+            or re.fullmatch(r"[0-9a-f]{64}", package_tree_sha256) is None
+            or not isinstance(package_tree_bytes, int)
+            or package_tree_bytes < 0
+            or not isinstance(package_tree_entries, int)
+            or package_tree_entries < 0
+        ):
+            return None
+        if (
+            package_tree_bytes > self.max_environment_bytes
+            or package_tree_entries > self.max_environment_entries
+            or self._missing_requested(language, packages, inventory)
+        ):
+            return None
+        return {
+            "status": "succeeded",
+            "exit_code": 0,
+            "stdout": (
+                "All requested packages are already present in the active "
+                "locked generation."
+            ),
+            "stderr": "",
+            "installed": inventory,
+            "lock_file": str(lock_path),
+            "generation": previous.name,
+            "package_tree_sha256": package_tree_sha256,
+            "package_tree_bytes": package_tree_bytes,
+            "package_tree_entries": package_tree_entries,
+            "reused": True,
+        }
 
     @staticmethod
     def _cancelled_result(stdout: str = "", stderr: str = "") -> dict:

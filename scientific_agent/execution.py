@@ -1288,7 +1288,9 @@ def sandbox_preflight(settings: SandboxSettings, workspace: Path | None = None) 
             ),
             timeout_seconds=15,
         )
-        r_packages = ",".join(f"'{package}'" for package in R_ANALYSIS_BASELINE_PACKAGES)
+        r_packages = ",".join(
+            f"'{package}'" for package in R_ANALYSIS_BASELINE_PACKAGES
+        )
         r_probe = executor.execute(
             "r",
             (

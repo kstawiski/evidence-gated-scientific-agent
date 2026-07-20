@@ -67,7 +67,9 @@ def test_scientific_figure_policy_is_r_first_and_task_specific():
         )
 
     normalized_researcher = " ".join(RESEARCHER.split())
-    assert "Use R for the final reader-facing scientific figure" in normalized_researcher
+    assert (
+        "Use R for the final reader-facing scientific figure" in normalized_researcher
+    )
     assert "patchwork >= 1.2.0" in normalized_researcher
     assert "ragg for exact-size raster export" in normalized_researcher
     assert "ComplexHeatmap/circlize for omics" in normalized_researcher

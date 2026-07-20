@@ -10,6 +10,7 @@ from scientific_agent.prompts import (
     REPORTER,
     REPAIRER,
     RESEARCHER,
+    R_FIRST_FIGURE_POLICY,
     SIMPLE_REPORTER,
     SIMPLE_PLANNER,
 )
@@ -35,10 +36,14 @@ def test_researcher_forbids_mixed_effect_scales_and_zero_rounded_p_values():
     assert "Never reconstruct, hand-copy, or hard-code subject-level" in RESEARCHER
     assert "not at a placeholder coordinate plus a text label" in RESEARCHER
     assert "never copy a pooled or\nwhole-cohort diagnostic" in RESEARCHER
-    assert "an R validation call must not plot" in RESEARCHER
-    assert "independent numeric JSON and reconciliation first" in RESEARCHER
+    assert "A required validation-language call\nmust not plot" in RESEARCHER
+    assert "independent numeric JSON and reconciliation first" in " ".join(
+        RESEARCHER.split()
+    )
     assert "never substitute the generic field for a task-required field" in RESEARCHER
-    assert "exit successfully without display generation" in RESEARCHER
+    assert "exit successfully without display generation" in " ".join(
+        RESEARCHER.split()
+    )
     assert "never\ncombine the only required Python/R validation result" in RESEARCHER
     assert "candidate_role_labels" in SIMPLE_PLANNER
     assert "never copy example labels from the audit" in PLAN_REPAIRER
@@ -50,6 +55,31 @@ def test_researcher_forbids_mixed_effect_scales_and_zero_rounded_p_values():
     assert "`jsonlite::write_json(..., auto_unbox = TRUE)`" in RESEARCHER
     assert "never length-one arrays such as `[5.0]`" in RESEARCHER
     assert "never emit a non-null full_text_status" in REPORTER
+
+
+def test_scientific_figure_policy_is_r_first_and_task_specific():
+    planning_prompts = (PLANNER_A, PLANNER_B, SIMPLE_PLANNER, PLAN_REPAIRER)
+    for prompt in planning_prompts:
+        assert R_FIRST_FIGURE_POLICY in prompt
+        assert "Plan R as the default\nrenderer" in prompt
+        assert "install the canonical CRAN/Bioconductor package or fail visibly" in (
+            prompt
+        )
+
+    normalized_researcher = " ".join(RESEARCHER.split())
+    assert "Use R for the final reader-facing scientific figure" in normalized_researcher
+    assert "patchwork >= 1.2.0" in normalized_researcher
+    assert "ragg for exact-size raster export" in normalized_researcher
+    assert "ComplexHeatmap/circlize for omics" in normalized_researcher
+    assert "the plotting layer must not choose tests" in normalized_researcher
+    assert "A Python exception must name that capability" in normalized_researcher
+    assert "use a separate R rendering call" in normalized_researcher
+    assert "record a task_method_fit failure or inconclusive status" in " ".join(
+        PLAN_AUDITOR.split()
+    )
+    assert "any justified exception to the R-first figure policy" in " ".join(
+        REPORTER.split()
+    )
 
 
 def test_researcher_documents_matplotlib_hlines_return_type():

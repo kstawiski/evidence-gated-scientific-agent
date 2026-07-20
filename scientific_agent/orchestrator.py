@@ -4611,6 +4611,12 @@ def _prepare_task_spec(
             "Python and R are authorized only through the offline bubblewrap sandbox; "
             "inputs are read-only and outputs are confined and resource-bounded"
         )
+        constraints.append(
+            "Reader-facing scientific figures use R by default and the best "
+            "maintained task-specific package; Python rendering requires an explicit "
+            "user request or a documented specialist capability that materially "
+            "improves scientific fidelity or display quality"
+        )
         acceptance_tests = [
             (
                 "Every supported substantive claim links to an exact retrieved URL "
@@ -4621,6 +4627,13 @@ def _prepare_task_spec(
             )
             for test in task.acceptance_tests
         ]
+        acceptance_tests.append(
+            "Every reader-facing figure states its estimand and display purpose, "
+            "uses reproducible exact-size publication export and accessible encoding, "
+            "passes native visual review, and records any justified Python-renderer "
+            "exception; missing R packages are installed from canonical CRAN or "
+            "Bioconductor sources or fail visibly"
+        )
         return task.model_copy(
             update={
                 "constraints": constraints,

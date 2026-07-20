@@ -125,6 +125,31 @@ omitted with a machine-readable reason instead of breaking finalization.
   below `/output/tables`. A misplaced non-display artifact is preserved and
   reported as a nonblocking path-hygiene finding rather than creating an
   impossible registration demand.
+- **Scientific figures are R-first.** The plan must state the estimand, intended
+  message, and why a figure adds information beyond a table before selecting a
+  geometry or library. General statistical plots use `ggplot2`; exact-size raster
+  export uses `ragg`; multi-panel composition uses `patchwork >= 1.2.0`; fonts,
+  labels, scales, and accessible palettes use `systemfonts`, `ggrepel`, `scales`,
+  `viridisLite`, or `colorspace` as appropriate. The renderer uses the best
+  maintained task-specific R package for the actual scientific display—for
+  example `ggsurvfit`/`tidycmprsk` for time-to-event displays,
+  `marginaleffects`/`emmeans` for adjusted effects, `forestploter` for forest
+  plots, `dcurves` for decision curves, or `ComplexHeatmap` for omics—rather than
+  forcing a generic plotting primitive. Python may render the final figure only
+  when the user requests it or the run records a concrete specialist capability
+  that materially improves scientific fidelity or display quality.
+- **Dependencies never downgrade silently.** The image contains the stable R
+  publication baseline. A missing, outdated, or specialist package is installed
+  from canonical CRAN or Bioconductor into the run's isolated, version-recorded
+  workspace environment. If installation fails, the figure remains unresolved;
+  the workflow does not substitute a weaker package or switch to Python without
+  the documented exception.
+- **Plotting does not select inference.** Tests, estimates, intervals, and tidy
+  result tables are computed in governed analysis code before the plotting layer
+  reads them. Final figures use exact physical dimensions, a white background,
+  legible final-size typography, colorblind-safe encodings reinforced by shape or
+  line type, at least 300-DPI metadata, and no burned-in figure number or review
+  status. Gemma then reviews the actual raster bytes independently.
 - **Figures** must be PNG, JPEG, or WebP (`FIGURE_MEDIA_TYPES`), 1 byte–20 MB,
   with dimensions between 240×160 and 20,000×20,000, and the file extension
   must match the actual encoded format (`inspect_figure`). When raster DPI

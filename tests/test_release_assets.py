@@ -5,6 +5,8 @@ from pathlib import Path
 
 import yaml
 
+from scientific_agent.execution import R_ANALYSIS_BASELINE_PACKAGES
+
 
 def test_public_release_assets_share_the_project_version():
     project_version = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))[
@@ -74,3 +76,11 @@ def test_runtime_image_has_no_setuid_bubblewrap_and_privilege_model_is_documente
     assert "SYS_ADMIN" in threat_model
     assert "unconfined Docker\n  seccomp/AppArmor" in threat_model
     assert "does not install a setuid bubblewrap binary" in threat_model
+
+
+def test_runtime_image_includes_publication_figure_r_baseline():
+    dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
+
+    assert "fonts-open-sans" in dockerfile
+    for package in R_ANALYSIS_BASELINE_PACKAGES:
+        assert f"r-cran-{package.lower()}" in dockerfile

@@ -6,6 +6,7 @@ import pytest
 from scientific_agent.config import SandboxSettings
 from scientific_agent.execution import (
     AnalysisExecutor,
+    R_ANALYSIS_BASELINE_PACKAGES,
     RemoteAnalysisExecutor,
     _python_static_violations,
     _unavailable_prior_reference_violations,
@@ -633,7 +634,7 @@ def test_preflight_probes_advertised_python_and_r_packages(tmp_path, monkeypatch
     result = sandbox_preflight(settings, tmp_path)
     assert result["probes"] == {"python": "succeeded", "r": "succeeded"}
     assert "import matplotlib,numpy,pandas,scipy,sklearn,statsmodels" in seen[0][1]
-    assert "ggplot2" in seen[1][1] and "data.table" in seen[1][1]
+    assert all(f"'{package}'" in seen[1][1] for package in R_ANALYSIS_BASELINE_PACKAGES)
 
 
 @pytest.mark.live

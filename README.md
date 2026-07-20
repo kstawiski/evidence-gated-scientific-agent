@@ -36,6 +36,10 @@ provenance in one browser application and an Agent2Agent (A2A) 1.0 service.
   consistency, display registration, and final status.
 - **Real scientific computing.** Python and R run in confined workers with
   read-only inputs, offline execution, resource limits, and append-only outputs.
+- **R-first scientific figures.** Reader-facing plots default to R with
+  `ggplot2`, exact-size `ragg` export, accessible styling, and the best maintained
+  task-specific package. Python rendering is reserved for an explicit request or
+  a documented specialist capability, never a quiet fallback.
 - **Grounded literature work.** Typed PubMed acquisition, an instance-local
   knowledge library, managed Chromium research, and optional Model Context
   Protocol (MCP) connections preserve the exact evidence used by a report.
@@ -66,7 +70,9 @@ flowchart LR
 2. **Lock the method.** Qwen proposes a plan; deterministic linting and an
    independent Gemma audit must accept it before outcome-directed work begins.
 3. **Gather evidence.** Qwen uses approved retrieval tools and confined Python/R
-   workers. Every successful call records code, logs, artifacts, and hashes.
+   workers. Scientific figures are planned from the estimand and rendered in R by
+   default; current CRAN/Bioconductor packages can be installed into the isolated
+   workspace. Every successful call records code, logs, artifacts, and hashes.
 4. **Validate the report.** Claims must resolve to exact computation artifacts or
    acquired sources. Tables and figures must match registered evidence.
 5. **Audit independently.** Gemma reviews the scientific argument and the actual
@@ -85,7 +91,7 @@ claim peer review, clinical authority, science lock, or submission readiness.
 | Area | Product behavior |
 |---|---|
 | Workspaces | Isolated files, sources, runs, revisions, and bundles |
-| Analysis | Confined Python/R, scripts, typed results, package environments |
+| Analysis | Confined Python/R, R-first figures, scripts, typed results, package environments |
 | Evidence | PubMed/PMC, local knowledge, Brave, Context7, managed Chromium |
 | Validation | Method lock, statistics, provenance, claims, and display checks |
 | Review | Independent plan, report, raster, OCR/geometry, and table audit |

@@ -168,7 +168,9 @@ R_REPAIR_EXECUTION_GUIDANCE = (
     "in a right-edge annotation that can be clipped. Use base R or the native |> "
     "pipe unless dplyr/magrittr is loaded explicitly; never emit an unloaded %>% "
     "operator. End rowwise dplyr pipelines with dplyr::ungroup(); there is no "
-    "unrowwise() function. Do not mix factor/discrete and numeric positions on "
+    "unrowwise() function. There is also no bind_lapply(); combine data frames "
+    "with dplyr::bind_rows(lapply(...)) or purrr::map_dfr(...). Do not mix "
+    "factor/discrete and numeric positions on "
     "the same plot axis. If raw replicate rows and a summary row share discrete "
     "y, construct one ordered factor/character row field used by every layer; "
     "never combine numeric y=replicate with a literal y='Mean diff'. Preserve "
@@ -573,6 +575,7 @@ _R_SYSTEMFONTS_GOOGLE = re.compile(
 )
 _R_MAGRITTR_PIPE = re.compile(r"%>%")
 _R_NONEXISTENT_UNROWWISE = re.compile(r"\bunrowwise\s*\(", re.IGNORECASE)
+_R_NONEXISTENT_BIND_LAPPLY = re.compile(r"\bbind_lapply\s*\(", re.IGNORECASE)
 _R_REPLICATE_Y_MAPPING = re.compile(
     r"\baes\s*\([^)]*\by\s*=\s*(?:replicate|replicate_id)\b",
     re.IGNORECASE | re.DOTALL,
@@ -712,6 +715,11 @@ def _r_scientific_preflight(
         issues.append(
             "R/dplyr has no unrowwise() function; end a rowwise pipeline with "
             "dplyr::ungroup()"
+        )
+    if _R_NONEXISTENT_BIND_LAPPLY.search(source):
+        issues.append(
+            "R has no bind_lapply() function; use dplyr::bind_rows(lapply(...)) "
+            "or purrr::map_dfr(...)"
         )
     if (
         _R_REPLICATE_Y_MAPPING.search(code)

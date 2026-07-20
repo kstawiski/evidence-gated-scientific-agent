@@ -902,6 +902,10 @@ def test_r_survival_code_preflight_requires_controller_grounded_time_origin():
             "no unrowwise() function",
         ),
         (
+            "summary <- bind_lapply(results, function(x) data.frame(value=x))",
+            "no bind_lapply() function",
+        ),
+        (
             "ggplot() + geom_point(data=raw, aes(x=difference, y=replicate)) + "
             'geom_point(data=summary, aes(x=estimate, y="Mean diff")) + '
             "scale_y_discrete()",

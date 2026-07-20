@@ -466,6 +466,8 @@ versus baseline/reference, default to optimized/intervention minus
 baseline/reference unless the task specifies another estimand.
 If `rowwise()` is used while constructing paired differences, end that grouping
 with `dplyr::ungroup()`; there is no dplyr `unrowwise()` function.
+To combine per-item data frames, use `dplyr::bind_rows(lapply(...))` or
+`purrr::map_dfr(...)`; there is no `bind_lapply()` function.
 When `pivot_wider()` receives multiple `values_from` columns and downstream code
 uses condition-prefixed names such as `baseline_error_rate`, set an explicit
 `names_glue` that places the engine label before the value-column placeholder;

@@ -92,6 +92,7 @@ RUN apt-get update \
         r-cran-systemfonts \
         r-cran-tibble \
         r-cran-tidyr \
+        r-cran-tidyverse \
         r-cran-viridislite \
         tesseract-ocr \
         tini \
@@ -101,8 +102,13 @@ RUN apt-get update \
     && /usr/sbin/useradd --uid "$APP_UID" --gid "$APP_GID" --no-create-home --shell /usr/sbin/nologin evidence \
     && install -d -o evidence -g evidence -m 0700 /data /tmp/home
 
-RUN Rscript --vanilla -e \
-    "install.packages('https://cloud.r-project.org/src/contrib/Archive/patchwork/patchwork_1.2.0.tar.gz', repos=NULL, type='source'); stopifnot(packageVersion('patchwork') >= '1.2.0')"
+# R's INSTALL launcher intentionally has no shebang. Calling it through
+# /bin/sh avoids an exec-format failure during arm64 emulated builds.
+RUN python -c "import urllib.request; urllib.request.urlretrieve('https://cloud.r-project.org/src/contrib/Archive/patchwork/patchwork_1.2.0.tar.gz', '/tmp/patchwork_1.2.0.tar.gz')" \
+    && echo "cc31ea13560c424de9bfe2287d926a7d9e6cc8da2d5561402bb145b4f51b68a1  /tmp/patchwork_1.2.0.tar.gz" | sha256sum -c - \
+    && /bin/sh /usr/lib/R/bin/INSTALL /tmp/patchwork_1.2.0.tar.gz \
+    && rm /tmp/patchwork_1.2.0.tar.gz \
+    && Rscript --vanilla -e "stopifnot(packageVersion('patchwork') >= '1.2.0')"
 
 COPY --from=uv /uv /uvx /usr/local/bin/
 COPY --from=node-build /usr/local/bin/node /usr/local/bin/node

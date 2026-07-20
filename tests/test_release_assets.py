@@ -57,6 +57,13 @@ def test_container_smoke_is_isolated_from_the_production_compose_project():
     assert "mktemp -d" in smoke
 
 
+def test_ci_builds_the_runtime_for_arm64_before_release():
+    ci = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+
+    assert "arm64-runtime-container:" in ci
+    assert "platforms: linux/arm64" in ci
+
+
 def test_wheel_and_container_include_webui_integration_sources():
     project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
     forced = project["tool"]["hatch"]["build"]["targets"]["wheel"]["force-include"]
@@ -83,6 +90,10 @@ def test_runtime_image_includes_publication_figure_r_baseline():
 
     assert "fonts-open-sans" in dockerfile
     assert "patchwork_1.2.0.tar.gz" in dockerfile
+    assert "/bin/sh /usr/lib/R/bin/INSTALL" in dockerfile
+    assert (
+        "cc31ea13560c424de9bfe2287d926a7d9e6cc8da2d5561402bb145b4f51b68a1" in dockerfile
+    )
     for package in R_ANALYSIS_BASELINE_PACKAGES:
         apt_package = (
             "r-bioc-complexheatmap"

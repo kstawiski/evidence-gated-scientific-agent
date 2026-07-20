@@ -38,7 +38,7 @@ provenance in one browser application and an Agent2Agent (A2A) 1.0 service.
   read-only inputs, offline execution, resource limits, and append-only outputs.
 - **R-first scientific figures.** Reader-facing plots default to R with
   `ggplot2`, exact-size `ragg` export, accessible styling, and the best maintained
-  task-specific package. The image preinstalls the publication, tidy-data, Excel,
+  task-specific package. The image preinstalls `tidyverse` plus the publication, Excel,
   regression, survival, performance, survey, and imputation stack; isolated
   installation is reserved for missing specialist or version-specific packages.
   Python rendering is reserved for an explicit request or a documented specialist

@@ -139,7 +139,7 @@ omitted with a machine-readable reason instead of breaking finalization.
   when the user requests it or the run records a concrete specialist capability
   that materially improves scientific fidelity or display quality.
 - **Dependencies never downgrade silently.** The image contains the stable R
-  publication baseline: rendering and composition, tidy data/import, Excel,
+  publication baseline: `tidyverse`, rendering and composition, data import, Excel,
   regression, survival, diagnostic performance, surveys, and multiple imputation
   are preinstalled and verified by deployment preflight. A missing, outdated, or
   specialist package is installed from canonical CRAN or Bioconductor into the

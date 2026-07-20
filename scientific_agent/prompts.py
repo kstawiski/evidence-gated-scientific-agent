@@ -520,6 +520,11 @@ requiring those points in the final figure. `geom_jitter()` does not accept
 jitter is genuinely needed, use
 `position=position_jitter(width=..., height=..., seed=...)`. When every
 categorical y position is already unique, use `geom_point()` without jitter.
+When raw replicate rows and an estimate/CI summary row share a discrete y-axis,
+construct one explicitly ordered factor/character row field for every layer;
+never map a numeric `replicate` field in one layer and a literal `"Mean diff"`
+label in another. Preserve readable tick labels and enough scale expansion that
+the first and last markers are fully inside the native render.
 If tied values would share identical x/y coordinates and the caption claims one
 dot per observation, use deterministic categorical-axis jitter such as
 `geom_point(position=position_jitter(width=0, height=0.08, seed=42))`, or encode

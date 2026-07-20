@@ -169,8 +169,11 @@ R_REPAIR_EXECUTION_GUIDANCE = (
     "pipe unless dplyr/magrittr is loaded explicitly; never emit an unloaded %>% "
     "operator. End rowwise dplyr pipelines with dplyr::ungroup(); there is no "
     "unrowwise() function. Do not mix factor/discrete and numeric positions on "
-    "the same plot "
-    "axis. Write machine-readable R results with "
+    "the same plot axis. If raw replicate rows and a summary row share discrete "
+    "y, construct one ordered factor/character row field used by every layer; "
+    "never combine numeric y=replicate with a literal y='Mean diff'. Preserve "
+    "tick labels and enough expansion to keep the first and last markers fully "
+    "visible. Write machine-readable R results with "
     "jsonlite::write_json(..., auto_unbox=TRUE, digits=16) (or digits=NA); the "
     "default digits=4 is not full precision. Write raw plot/source data CSVs "
     "below /output/data, never /output/tables; only reader-facing summaries "
@@ -566,6 +569,20 @@ _R_SYSTEMFONTS_GOOGLE = re.compile(
 )
 _R_MAGRITTR_PIPE = re.compile(r"%>%")
 _R_NONEXISTENT_UNROWWISE = re.compile(r"\bunrowwise\s*\(", re.IGNORECASE)
+_R_REPLICATE_Y_MAPPING = re.compile(
+    r"\baes\s*\([^)]*\by\s*=\s*(?:replicate|replicate_id)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_R_LITERAL_SUMMARY_Y_MAPPING = re.compile(
+    r"\baes\s*\([^)]*\by\s*=\s*(['\"])"
+    r"(?:mean(?:\s+|_)?diff(?:erence)?|summary|estimate)\1",
+    re.IGNORECASE | re.DOTALL,
+)
+_R_REPLICATE_CATEGORICAL_COERCION = re.compile(
+    r"\b(?:replicate|replicate_id)\s*=\s*"
+    r"(?:factor|as\.factor|as\.character)\s*\(",
+    re.IGNORECASE,
+)
 _R_PIPE_PROVIDER_IMPORT = re.compile(
     r"\b(?:library|require)\s*\(\s*(?:['\"])?"
     r"(?:dplyr|magrittr|tidyverse)(?:['\"])?\s*\)",
@@ -691,6 +708,17 @@ def _r_scientific_preflight(
         issues.append(
             "R/dplyr has no unrowwise() function; end a rowwise pipeline with "
             "dplyr::ungroup()"
+        )
+    if (
+        _R_REPLICATE_Y_MAPPING.search(code)
+        and _R_LITERAL_SUMMARY_Y_MAPPING.search(code)
+        and not _R_REPLICATE_CATEGORICAL_COERCION.search(source)
+    ):
+        issues.append(
+            "Do not combine an uncoerced replicate y mapping with a literal "
+            "summary-row y label; build one ordered factor/character row field "
+            "shared by raw and summary layers so discrete labels and expansion "
+            "remain correct"
         )
     if _R_PLOT_DATA_IN_TABLES.search(code):
         issues.append(

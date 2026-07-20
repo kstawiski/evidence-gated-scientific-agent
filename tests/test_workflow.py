@@ -901,6 +901,12 @@ def test_r_survival_code_preflight_requires_controller_grounded_time_origin():
             "diffs <- data %>% rowwise() %>% mutate(delta = after - before) %>% unrowwise()",
             "no unrowwise() function",
         ),
+        (
+            "ggplot() + geom_point(data=raw, aes(x=difference, y=replicate)) + "
+            'geom_point(data=summary, aes(x=estimate, y="Mean diff")) + '
+            "scale_y_discrete()",
+            "one ordered factor/character row field",
+        ),
     ],
 )
 def test_r_code_preflight_rejects_known_generated_api_defects(code, expected):
@@ -932,6 +938,26 @@ utils::zip(zipfile="/output/deliverables/results.zip",
            files=c("/output/data/results.json", target))
 jsonlite::write_json(results, "/output/data/results.json",
                      auto_unbox=TRUE, digits=16)
+"""
+    gate = ScientificToolOrderGate(frozenset())
+
+    denied = gate.before_tool(
+        "run_r_analysis", ComputationEvidence(), arguments={"code": code}
+    )
+
+    assert denied is None
+
+
+def test_r_code_preflight_accepts_shared_categorical_replicate_summary_axis():
+    code = """
+library(dplyr)
+raw <- raw %>% mutate(replicate = factor(
+    replicate, levels=c(as.character(1:12), "Mean diff")
+))
+ggplot() +
+  geom_point(data=raw, aes(x=difference, y=replicate)) +
+  geom_point(data=summary, aes(x=estimate, y="Mean diff")) +
+  scale_y_discrete(expand=expansion(add=0.6))
 """
     gate = ScientificToolOrderGate(frozenset())
 

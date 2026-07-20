@@ -450,12 +450,24 @@ def test_unregistered_final_display_artifact_is_blocking(tmp_path: Path):
 def test_unregistered_displays_are_still_sent_to_first_visual_audit(tmp_path: Path):
     report, computation = _fixture(tmp_path)
     report.displays.clear()
+    workbook = (
+        tmp_path / "computations" / "exec-001" / "output" / "tables" / "results.xlsx"
+    )
+    workbook.write_bytes(b"PK\x03\x04not-a-display")
+    computation.artifacts.append(
+        ArtifactRef(
+            path=str(workbook.resolve()),
+            sha256=sha256_file(workbook),
+            description="sandbox-generated analysis artifact",
+        )
+    )
 
     images, inputs = prepare_display_audit(report, computation)
 
     assert len(images) == 1
     assert {item["kind"] for item in inputs} == {"figure", "table"}
     assert all(item["registered"] is False for item in inputs)
+    assert all(not item["artifact_path"].endswith(".xlsx") for item in inputs)
     assert all(item["display_id"].startswith("unregistered:") for item in inputs)
     figure_input = next(item for item in inputs if item["kind"] == "figure")
     assert "ocr" in figure_input

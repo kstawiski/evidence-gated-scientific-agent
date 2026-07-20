@@ -810,6 +810,8 @@ def prepare_display_audit(
         kind = key.split("/", 1)[0]
         display_id = f"unregistered:{key}"
         if kind == "figures":
+            if resolved.suffix.lower() not in FIGURE_MEDIA_TYPES:
+                continue
             figure_number += 1
             metadata = inspect_figure(resolved)
             ocr = extract_figure_ocr(resolved)
@@ -833,6 +835,8 @@ def prepare_display_audit(
                 }
             )
         else:
+            if resolved.suffix.lower() not in TABLE_DELIMITERS:
+                continue
             table_number += 1
             tables.append(
                 {

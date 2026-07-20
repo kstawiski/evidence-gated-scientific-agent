@@ -454,6 +454,21 @@ def test_pubmed_classifier_does_not_match_gene_inside_generic_words(objective, d
     assert not _requires_pubmed_literature(task)
 
 
+def test_pubmed_classifier_ignores_explicit_no_clinical_claim_instruction():
+    task = _task().model_copy(
+        update={
+            "objective": (
+                "Analyze a synthetic software validation dataset and do not make "
+                "clinical claims."
+            ),
+            "scientific_domain": "general",
+            "task_type": "mixed",
+        }
+    )
+
+    assert not _requires_pubmed_literature(task)
+
+
 @pytest.mark.parametrize(
     "objective,domain",
     [
@@ -3411,6 +3426,9 @@ async def test_invalid_display_preparation_preserves_completed_article_audit(
     assert display_audit["critic_model"] is None
     assert display_audit["review_source"] == "controller_gate"
     assert display_audit["review_mode"] == "invalid_display_inputs"
+    assert display_audit["input_error"] == (
+        "ValueError: TIFF is not an inline report format"
+    )
 
 
 @pytest.mark.anyio

@@ -961,7 +961,9 @@ _TASK_DESIGN_CLASSIFICATION = {
         r"\bexperimental\s+(?:data|dataset|design|study)\b", re.IGNORECASE
     ),
     "synthetic": re.compile(
-        r"\bsynthetic\s+(?:data|dataset|fixture|study)\b", re.IGNORECASE
+        r"\bsynthetic\s+(?:(?:software|validation|benchmark|test)\s+)?"
+        r"(?:data|dataset|fixture|study)\b",
+        re.IGNORECASE,
     ),
     "representative": re.compile(
         r"\brepresentative\s+(?:cohort|population|sample)\b", re.IGNORECASE

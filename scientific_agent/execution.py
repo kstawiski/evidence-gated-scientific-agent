@@ -1264,7 +1264,7 @@ def sandbox_preflight(settings: SandboxSettings, workspace: Path | None = None) 
         data = Path(os.environ.get("SCIENTIFIC_AGENT_DATA_DIR", "/data")).resolve()
         managed_base = data / "workspaces" / str(uuid.uuid4())
         probe_workspace = managed_base / "files"
-        probe_root = managed_base / "runs" / "preflight" / "computations"
+        probe_root = managed_base / "runs" / "preflight" / "computations" / "attempt-1"
         probe_workspace.mkdir(parents=True, mode=0o700)
         probe_root.mkdir(parents=True, mode=0o700)
         executor: AnalysisRunner = RemoteAnalysisExecutor(

@@ -82,5 +82,11 @@ def test_runtime_image_includes_publication_figure_r_baseline():
     dockerfile = Path("Dockerfile").read_text(encoding="utf-8")
 
     assert "fonts-open-sans" in dockerfile
+    assert "patchwork_1.2.0.tar.gz" in dockerfile
     for package in R_ANALYSIS_BASELINE_PACKAGES:
-        assert f"r-cran-{package.lower()}" in dockerfile
+        apt_package = (
+            "r-bioc-complexheatmap"
+            if package == "ComplexHeatmap"
+            else f"r-cran-{package.lower()}"
+        )
+        assert apt_package in dockerfile

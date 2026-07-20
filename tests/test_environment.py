@@ -110,6 +110,48 @@ def test_package_install_subprocess_receives_only_configured_proxy(
     assert "--setenv NO_PROXY  " in command_text
 
 
+def test_r_package_installs_are_serial_and_failed_staging_is_not_reported_active(
+    tmp_path, monkeypatch
+):
+    state = EnvironmentWorkerState(tmp_path / "environments", "x" * 32)
+    workspace_id = str(uuid.uuid4())
+    request = InstallRequest(
+        request_id=str(uuid.uuid4()),
+        workspace_id=workspace_id,
+        language="r",
+        repository="cran",
+        packages=["needed", "missing"],
+        timeout_seconds=30,
+    )
+    command, _ = state._command(
+        request,
+        request.packages,
+        tmp_path / "packages",
+        tmp_path / "temporary",
+    )
+    assert "Ncpus=1" in " ".join(command)
+
+    monkeypatch.setattr(
+        state,
+        "_command",
+        lambda request, packages, package_dir, temporary: (
+            ["/bin/sh", "-c", "true"],
+            {"PATH": "/usr/bin:/bin"},
+        ),
+    )
+    monkeypatch.setattr(
+        state,
+        "_inventory",
+        lambda language, path: [{"name": "needed", "version": "1.0.0"}],
+    )
+    result = state.install(request)
+
+    assert result["status"] == "failed"
+    assert result["installed"] == []
+    assert "No packages were activated" in result["stderr"]
+    assert not (state.workspace_root(workspace_id, create=False) / "r").exists()
+
+
 def test_package_proxy_rejects_credentials(tmp_path, monkeypatch):
     state = EnvironmentWorkerState(tmp_path / "environments", "x" * 32)
     request = InstallRequest(

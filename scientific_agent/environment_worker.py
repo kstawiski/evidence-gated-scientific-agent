@@ -524,8 +524,9 @@ class EnvironmentWorkerState:
                     "stdout": _bounded(stdout),
                     "stderr": _bounded(stderr)
                     + "\nUnsafe package filesystem entry: "
-                    + ", ".join(unsafe_entries[:8]),
-                    "installed": inventory,
+                    + ", ".join(unsafe_entries[:8])
+                    + "\nNo packages were activated; transactional staging was discarded.",
+                    "installed": [],
                 }
             try:
                 (
@@ -543,8 +544,9 @@ class EnvironmentWorkerState:
                     "exit_code": 1,
                     "stdout": _bounded(stdout),
                     "stderr": _bounded(stderr)
-                    + f"\nEnvironment exceeds {self.max_environment_bytes} bytes",
-                    "installed": inventory,
+                    + f"\nEnvironment exceeds {self.max_environment_bytes} bytes"
+                    + "\nNo packages were activated; transactional staging was discarded.",
+                    "installed": [],
                 }
             if package_tree_entries > self.max_environment_entries:
                 shutil.rmtree(staging, ignore_errors=True)
@@ -554,8 +556,9 @@ class EnvironmentWorkerState:
                     "stdout": _bounded(stdout),
                     "stderr": _bounded(stderr)
                     + "\nEnvironment exceeds "
-                    + f"{self.max_environment_entries} entries",
-                    "installed": inventory,
+                    + f"{self.max_environment_entries} entries"
+                    + "\nNo packages were activated; transactional staging was discarded.",
+                    "installed": [],
                 }
             missing = self._missing_requested(request.language, packages, inventory)
             if missing:
@@ -566,8 +569,9 @@ class EnvironmentWorkerState:
                     "stdout": _bounded(stdout),
                     "stderr": _bounded(stderr)
                     + "\nRequested package(s) absent after install: "
-                    + ", ".join(missing),
-                    "installed": inventory,
+                    + ", ".join(missing)
+                    + "\nNo packages were activated; transactional staging was discarded.",
+                    "installed": [],
                 }
 
             requested = list(packages)
@@ -883,12 +887,12 @@ class EnvironmentWorkerState:
             f"pkgs <- c({quoted}); "
         )
         if repository == "cran":
-            script += "install.packages(pkgs, lib=lib, Ncpus=2);"
+            script += "install.packages(pkgs, lib=lib, Ncpus=1);"
         else:
             script += (
                 "if (!requireNamespace('BiocManager', quietly=TRUE)) "
                 "install.packages('BiocManager', lib=lib); "
-                "BiocManager::install(pkgs, lib=lib, ask=FALSE, update=FALSE, Ncpus=2);"
+                "BiocManager::install(pkgs, lib=lib, ask=FALSE, update=FALSE, Ncpus=1);"
             )
         inner = ["/usr/bin/Rscript", "--vanilla", "-e", script]
         return self._sandbox_command(inner, environment, package_dir, temporary)

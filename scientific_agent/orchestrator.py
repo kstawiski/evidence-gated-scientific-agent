@@ -175,8 +175,9 @@ R_REPAIR_EXECUTION_GUIDANCE = (
     "tick labels and enough expansion to keep the first and last markers fully "
     "visible. Write machine-readable R results with "
     "When pivot_wider has multiple values_from columns and downstream code uses "
-    "condition_metric names, provide explicit names_glue='{engine}_{.value}'; "
-    "tidyr otherwise creates metric_condition names. "
+    "condition_metric names, provide explicit names_glue that places the "
+    "condition label before the value-column placeholder; tidyr otherwise "
+    "creates metric_condition names. "
     "jsonlite::write_json(..., auto_unbox=TRUE, digits=16) (or digits=NA); the "
     "default digits=4 is not full precision. Write raw plot/source data CSVs "
     "below /output/data, never /output/tables; only reader-facing summaries "
@@ -755,8 +756,9 @@ def _r_scientific_preflight(
             issues.append(
                 "pivot_wider with multiple values_from columns defaults to "
                 "metric_condition names, but the code references "
-                "condition_metric columns; provide explicit names_glue such as "
-                "'{engine}_{.value}' or use the actual generated column order"
+                "condition_metric columns; provide explicit names_glue that "
+                "places the condition label before the value-column placeholder "
+                "or use the actual generated column order"
             )
     for arguments in _r_call_arguments(source, r"(?:jsonlite\s*::\s*)?write_json"):
         if not re.search(r"\bdigits\s*=", arguments, re.IGNORECASE):

@@ -1,3 +1,5 @@
+import re
+
 from scientific_agent.prompts import (
     DISPLAY_AUDITOR,
     INPUT_VISUAL_AUDITOR,
@@ -14,6 +16,10 @@ from scientific_agent.prompts import (
     SIMPLE_REPORTER,
     SIMPLE_PLANNER,
 )
+
+
+def test_researcher_instruction_has_no_unbound_adk_state_placeholders():
+    assert re.findall(r"{([A-Za-z_][A-Za-z0-9_]*)}", RESEARCHER) == []
 
 
 def test_researcher_forbids_mixed_effect_scales_and_zero_rounded_p_values():

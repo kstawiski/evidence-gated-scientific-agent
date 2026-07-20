@@ -907,6 +907,12 @@ def test_r_survival_code_preflight_requires_controller_grounded_time_origin():
             "scale_y_discrete()",
             "one ordered factor/character row field",
         ),
+        (
+            "wide <- pivot_wider(data, names_from=engine, "
+            "values_from=c(error_rate, runtime_ms))\n"
+            "wide <- mutate(wide, delta=optimized_error_rate-baseline_error_rate)",
+            "defaults to metric_condition names",
+        ),
     ],
 )
 def test_r_code_preflight_rejects_known_generated_api_defects(code, expected):
@@ -958,6 +964,24 @@ ggplot() +
   geom_point(data=raw, aes(x=difference, y=replicate)) +
   geom_point(data=summary, aes(x=estimate, y="Mean diff")) +
   scale_y_discrete(expand=expansion(add=0.6))
+"""
+    gate = ScientificToolOrderGate(frozenset())
+
+    denied = gate.before_tool(
+        "run_r_analysis", ComputationEvidence(), arguments={"code": code}
+    )
+
+    assert denied is None
+
+
+def test_r_code_preflight_accepts_explicit_pivot_wider_names_glue():
+    code = """
+library(dplyr)
+library(tidyr)
+wide <- pivot_wider(data, names_from=engine,
+    values_from=c(error_rate, runtime_ms),
+    names_glue="{engine}_{.value}")
+wide <- mutate(wide, delta=optimized_error_rate-baseline_error_rate)
 """
     gate = ScientificToolOrderGate(frozenset())
 

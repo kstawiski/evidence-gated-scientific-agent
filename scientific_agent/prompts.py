@@ -466,6 +466,9 @@ versus baseline/reference, default to optimized/intervention minus
 baseline/reference unless the task specifies another estimand.
 If `rowwise()` is used while constructing paired differences, end that grouping
 with `dplyr::ungroup()`; there is no dplyr `unrowwise()` function.
+When `pivot_wider()` receives multiple `values_from` columns and downstream code
+uses condition-prefixed names such as `baseline_error_rate`, set an explicit
+`names_glue="{engine}_{.value}"`; tidyr otherwise defaults to value-prefixed names.
 In R, obtain paired-difference inference from one
 `stats::t.test(differences, mu=0)` object and extract its estimate, confidence
 interval, statistic, parameter, and p-value together. If a two-sided t p-value

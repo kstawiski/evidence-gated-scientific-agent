@@ -174,6 +174,9 @@ R_REPAIR_EXECUTION_GUIDANCE = (
     "never combine numeric y=replicate with a literal y='Mean diff'. Preserve "
     "tick labels and enough expansion to keep the first and last markers fully "
     "visible. Write machine-readable R results with "
+    "When pivot_wider has multiple values_from columns and downstream code uses "
+    "condition_metric names, provide explicit names_glue='{engine}_{.value}'; "
+    "tidyr otherwise creates metric_condition names. "
     "jsonlite::write_json(..., auto_unbox=TRUE, digits=16) (or digits=NA); the "
     "default digits=4 is not full precision. Write raw plot/source data CSVs "
     "below /output/data, never /output/tables; only reader-facing summaries "
@@ -736,6 +739,24 @@ def _r_scientific_preflight(
                 + ", ".join(f"{name}=" for name in sorted(set(unsupported)))
                 + "; use utils::zip(zipfile=target_zip, files=files) and arrange "
                 "member paths before the call"
+            )
+    for arguments in _r_call_arguments(source, r"(?:tidyr\s*::\s*)?pivot_wider"):
+        if (
+            re.search(r"\bvalues_from\s*=\s*c\s*\(", arguments, re.IGNORECASE)
+            and re.search(r"\bnames_from\s*=", arguments, re.IGNORECASE)
+            and not re.search(r"\bnames_glue\s*=", arguments, re.IGNORECASE)
+            and re.search(
+                r"\b(?:baseline|optimized|control|intervention|reference)_"
+                r"[A-Za-z.][A-Za-z0-9._]*\b",
+                source,
+                re.IGNORECASE,
+            )
+        ):
+            issues.append(
+                "pivot_wider with multiple values_from columns defaults to "
+                "metric_condition names, but the code references "
+                "condition_metric columns; provide explicit names_glue such as "
+                "'{engine}_{.value}' or use the actual generated column order"
             )
     for arguments in _r_call_arguments(source, r"(?:jsonlite\s*::\s*)?write_json"):
         if not re.search(r"\bdigits\s*=", arguments, re.IGNORECASE):

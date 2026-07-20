@@ -852,6 +852,10 @@ def materialize_displays(
     run_dir: Path,
     report: ScientificReport,
     computation: ComputationEvidence,
+    *,
+    validated: bool = True,
+    quality_status: str | None = None,
+    allow_partial: bool = False,
 ) -> dict[str, Any]:
     """Copy registered displays into a portable, path-confined report bundle."""
 
@@ -860,29 +864,93 @@ def materialize_displays(
         shutil.rmtree(destination_root)
     destination_root.mkdir(parents=True, mode=0o700)
     entries: list[dict[str, Any]] = []
+    omissions: list[dict[str, str]] = []
     counters = {"figure": 0, "table": 0}
     for display in report.displays:
-        source = resolve_display_artifact(display, computation)
         counters[display.kind] += 1
-        suffix = source.suffix.lower()
-        destination = destination_root / f"{display.display_id}{suffix}"
-        shutil.copy2(source, destination)
-        destination.chmod(0o600)
-        entry: dict[str, Any] = {
-            **display.model_dump(mode="json"),
-            "number": counters[display.kind],
-            "path": destination.relative_to(run_dir).as_posix(),
-            "sha256": sha256_file(destination),
-            "bytes": destination.stat().st_size,
-        }
-        if display.kind == "figure":
-            entry.update(inspect_figure(destination))
-        else:
-            entry.update(read_table_preview(destination))
-        entries.append(entry)
-    manifest = {"version": 1, "displays": entries}
+        try:
+            source = resolve_display_artifact(display, computation)
+            suffix = source.suffix.lower()
+            destination = destination_root / f"{display.display_id}{suffix}"
+            shutil.copy2(source, destination)
+            destination.chmod(0o600)
+            entry: dict[str, Any] = {
+                **display.model_dump(mode="json"),
+                "number": counters[display.kind],
+                "path": destination.relative_to(run_dir).as_posix(),
+                "sha256": sha256_file(destination),
+                "bytes": destination.stat().st_size,
+            }
+            if display.kind == "figure":
+                entry.update(inspect_figure(destination))
+            else:
+                entry.update(read_table_preview(destination))
+            entries.append(entry)
+        except (OSError, ValueError):
+            if not allow_partial:
+                raise
+            omissions.append(
+                {
+                    "display_id": display.display_id,
+                    "kind": display.kind,
+                    "reason": "artifact unavailable or invalid",
+                }
+            )
+    manifest = {
+        "version": 1,
+        "validated": validated,
+        "quality_status": quality_status,
+        "displays": entries,
+        "omissions": omissions,
+    }
     write_json(run_dir / "display_manifest.json", manifest)
     return manifest
+
+
+def describe_available_displays(
+    report: ScientificReport,
+    computation: ComputationEvidence,
+    *,
+    validated: bool,
+    quality_status: str,
+) -> dict[str, Any]:
+    """Describe valid displays without mutating a completed historical run."""
+
+    entries: list[dict[str, Any]] = []
+    omissions: list[dict[str, str]] = []
+    counters = {"figure": 0, "table": 0}
+    for display in report.displays:
+        counters[display.kind] += 1
+        try:
+            source = resolve_display_artifact(display, computation)
+            entry: dict[str, Any] = {
+                **display.model_dump(mode="json"),
+                "number": counters[display.kind],
+                "path": None,
+                "sha256": sha256_file(source),
+                "bytes": source.stat().st_size,
+            }
+            if display.kind == "figure":
+                entry.update(inspect_figure(source))
+            else:
+                entry.update(read_table_preview(source))
+            entries.append(entry)
+        except (OSError, ValueError):
+            omissions.append(
+                {
+                    "display_id": display.display_id,
+                    "kind": display.kind,
+                    "reason": "artifact unavailable or invalid",
+                }
+            )
+    return {
+        "version": 1,
+        "validated": validated,
+        "quality_status": quality_status,
+        "virtual": True,
+        "displays": entries,
+        "omissions": omissions,
+    }
 
 
 def _escape_table_cell(value: str) -> str:

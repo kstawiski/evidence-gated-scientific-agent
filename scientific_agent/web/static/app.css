@@ -289,6 +289,7 @@ legend { padding: 0 7px; color: var(--muted); font-size: 10px; font-weight: 700;
 .report-figure { margin: 24px 0; padding: 15px; border: 1px solid var(--line); border-radius: 14px; background: #fff; box-shadow: var(--soft-shadow); }
 .report-figure img { display: block; width: auto; max-width: 100%; height: auto; max-height: 720px; margin: 0 auto; }
 .report-figure figcaption { margin-top: 12px; font-size: 11px; line-height: 1.55; }
+.report-figure > .display-download { display: inline-block; margin-top: 8px; font-size: 10px; }
 .display-evidence { display: block; margin-top: 8px; color: var(--muted); font-size: 9px; }
 .report-table-block { margin: 22px 0; }
 .report-table-scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: #fff; }

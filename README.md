@@ -25,6 +25,9 @@ provenance in one browser application and an Agent2Agent (A2A) 1.0 service.
 - **Auditable analysis workspaces.** Inputs, protocols, computation artifacts,
   sources, displays, reviews, and manifests remain together in an immutable run
   record.
+- **Reader-ready result delivery.** Registered figures and full tables render in
+  the article, while one consolidated `Results.xlsx`, portable Markdown report,
+  and provenance bundle remain directly downloadable.
 - **Independent execution and review.** Qwen plans, retrieves, computes, and
   drafts. Gemma independently audits the plan, scientific report, tables, and
   rendered figures.
@@ -53,7 +56,7 @@ flowchart LR
     D --> F[Deterministic evidence checks]
     E --> F
     F --> G[Gemma scientific + visual audit]
-    G --> H[Report, displays, provenance bundle]
+    G --> H[Report, displays, Results.xlsx, provenance bundle]
     F -. blocking finding .-> C
     G -. falsifiable finding .-> C
 ```

@@ -13,7 +13,13 @@ from PIL import Image
 import scientific_agent.web.app as web_app_module
 from scientific_agent.config import Settings
 from scientific_agent.provenance import sha256_file
-from scientific_agent.schemas import ReportDiscussionResponse
+from scientific_agent.schemas import (
+    ArtifactRef,
+    ComputationEvidence,
+    ReportDiscussionResponse,
+    ReportDisplay,
+    ScientificReport,
+)
 from scientific_agent.web.a2a import _run_options
 from scientific_agent.web.app import create_app
 from scientific_agent.web.settings import WebSettings
@@ -1076,6 +1082,112 @@ def test_registered_display_endpoints_are_integrity_gated(tmp_path):
             ).status_code
             == 404
         )
+
+
+def test_historical_provisional_report_exposes_displays_and_results_workbook(tmp_path):
+    with _client(tmp_path) as client:
+        auth = ("researcher", "correct horse")
+        workspace = client.post(
+            "/api/workspaces", auth=auth, json={"name": "Historical report"}
+        ).json()
+        store = client.app.state.store
+        run = store.create_run(workspace["id"], "Recover report outputs", True, ())
+        _, runs_dir = store.paths(workspace["id"])
+        root = runs_dir / "historical-run"
+        external = tmp_path / "parent-run" / "output"
+        figures = external / "figures"
+        tables = external / "tables"
+        figures.mkdir(parents=True)
+        tables.mkdir(parents=True)
+        image = figures / "effect.png"
+        Image.new("RGB", (640, 400), color=(240, 248, 246)).save(image)
+        table = tables / "effects.csv"
+        table.write_text("group,estimate\nA,1.25\nB,0.75\n", encoding="utf-8")
+        computation = ComputationEvidence(
+            successful_calls=1,
+            artifacts=[
+                ArtifactRef(
+                    path=str(path.resolve()),
+                    sha256=sha256_file(path),
+                    description="sandbox-generated analysis artifact",
+                )
+                for path in (image, table)
+            ],
+        )
+        report = ScientificReport(
+            title="Provisional historical result",
+            executive_summary="The historical result remains provisional.",
+            introduction="The fixture evaluates compatibility rendering.",
+            methods=["A bounded computation generated reader-facing outputs."],
+            results="Figure 1 and Table 1 contain the available result.",
+            discussion="Human review remains required.",
+            conclusions="The result must not be treated as validated.",
+            displays=[
+                ReportDisplay(
+                    display_id="effect-plot",
+                    kind="figure",
+                    title="Effect plot",
+                    caption="Reader-facing provisional effect plot.",
+                    artifact_path=str(image.resolve()),
+                    alt_text="Plot of the provisional group effect.",
+                ),
+                ReportDisplay(
+                    display_id="effect-table",
+                    kind="table",
+                    title="Effect estimates",
+                    caption="Complete provisional group estimates.",
+                    artifact_path=str(table.resolve()),
+                ),
+            ],
+            claims=[],
+            sources=[],
+            limitations=["The independent review did not pass."],
+        )
+        root.mkdir(parents=True)
+        (root / "scientific_report.json").write_text(
+            report.model_dump_json(), encoding="utf-8"
+        )
+        (root / "computation_evidence.json").write_text(
+            computation.model_dump_json(), encoding="utf-8"
+        )
+        (root / "run_result.json").write_text(
+            json.dumps(
+                {
+                    "deterministic_validation": {"passed": False},
+                    "scientific_review": {"verdict": "fail"},
+                }
+            ),
+            encoding="utf-8",
+        )
+        store.finish_run(
+            run["id"],
+            status="requires_human_decision",
+            phase="complete",
+            message="Human review required",
+            finished_at="2026-07-20T00:00:00Z",
+            provenance_dir=str(root),
+        )
+
+        detail = client.get(f"/api/runs/{run['id']}", auth=auth).json()
+        assert detail["display_manifest"]["virtual"] is True
+        assert detail["display_manifest"]["validated"] is False
+        assert len(detail["display_manifest"]["displays"]) == 2
+        assert (
+            client.get(
+                f"/api/runs/{run['id']}/displays/effect-plot/image", auth=auth
+            ).status_code
+            == 200
+        )
+        download = client.get(
+            f"/api/runs/{run['id']}/displays/effect-table/download", auth=auth
+        )
+        assert download.content == table.read_bytes()
+        workbook = client.get(f"/api/runs/{run['id']}/results.xlsx", auth=auth)
+        assert workbook.status_code == 200
+        assert workbook.content.startswith(b"PK")
+        with zipfile.ZipFile(BytesIO(workbook.content)) as archive:
+            archive.testzip()
+            assert "Effect estimates" in archive.read("xl/workbook.xml").decode("utf-8")
 
 
 def test_follow_up_creates_immutable_child_with_inherited_settings(tmp_path):

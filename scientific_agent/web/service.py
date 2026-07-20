@@ -15,7 +15,8 @@ from ..config import Settings
 from ..knowledge import KnowledgeLibrary
 from ..orchestrator import run_scientific_task
 from ..provenance import build_manifest, utc_now, write_json
-from ..schemas import RunResult
+from ..reporting import describe_available_displays
+from ..schemas import ComputationEvidence, RunResult, ScientificReport
 from .store import ACTIVE_RUN_STATES, WorkspaceStore
 
 if TYPE_CHECKING:
@@ -468,6 +469,31 @@ class TaskService:
             if displays_path.is_file()
             else None
         )
+        if display_manifest is None and report is not None:
+            computation_path = root / "computation_evidence.json"
+            try:
+                computation = ComputationEvidence.model_validate_json(
+                    computation_path.read_text(encoding="utf-8")
+                )
+                report_model = ScientificReport.model_validate(report)
+                deterministic_passed = bool(
+                    result
+                    and result.get("deterministic_validation", {}).get("passed") is True
+                )
+                review_passed = bool(
+                    result
+                    and result.get("scientific_review", {}).get("verdict") == "pass"
+                )
+                display_manifest = describe_available_displays(
+                    report_model,
+                    computation,
+                    validated=deterministic_passed and review_passed,
+                    quality_status=run["status"],
+                )
+            except (OSError, ValueError, json.JSONDecodeError):
+                logger.warning(
+                    "Could not describe historical displays for run %s", run_id
+                )
         reference_manifest = (
             json.loads(references_path.read_text(encoding="utf-8"))
             if references_path.is_file()

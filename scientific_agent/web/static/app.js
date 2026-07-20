@@ -965,6 +965,7 @@ function renderRun() {
   el("result-status").className = `panel-state ${statusClass(run.status)}`;
   el("report-title").textContent = run.report.title;
   el("report-download").href = artifactUrl("report.md", run.id);
+  el("results-download").href = `/api/runs/${encodeURIComponent(run.id)}/results.xlsx`;
   el("bundle-download").href = `/api/runs/${run.id}/bundle`;
   renderRevisionLineage();
   renderTab();
@@ -1476,7 +1477,11 @@ function renderFigure(display, runId) {
   link.append(image);
   const caption = document.createElement("figcaption");
   caption.append(displayCaption(display));
-  figure.append(link, caption, evidenceLine(display));
+  const download = document.createElement("a");
+  download.className = "display-download";
+  download.href = `/api/runs/${encodeURIComponent(runId)}/displays/${encodeURIComponent(display.display_id)}/download`;
+  download.textContent = "Download figure";
+  figure.append(link, caption, evidenceLine(display), download);
   return figure;
 }
 
@@ -1507,7 +1512,7 @@ function renderTable(display, runId) {
   table.append(head, body);
   scroll.append(table);
   const complete = document.createElement("a");
-  complete.href = artifactUrl(display.path, runId);
+  complete.href = `/api/runs/${encodeURIComponent(runId)}/displays/${encodeURIComponent(display.display_id)}/download`;
   complete.textContent = display.truncated ? "Download complete table (preview truncated)" : "Download table";
   block.append(scroll, evidenceLine(display), complete);
   return block;

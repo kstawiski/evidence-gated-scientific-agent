@@ -44,7 +44,12 @@ from ..knowledge import (
 from ..knowledge_indexing import KnowledgeIndexService, KnowledgeSemanticIndexer
 from ..orchestrator import run_scientific_task
 from ..provenance import sha256_file
-from ..reporting import FIGURE_MEDIA_TYPES
+from ..reporting import (
+    FIGURE_MEDIA_TYPES,
+    resolve_display_artifact,
+)
+from ..results_workbook import build_results_workbook
+from ..schemas import ComputationEvidence, ScientificReport
 from .a2a import ALLOWED_MCP_SERVERS, EvidenceBenchExecutor, build_agent_card
 from .integrations import IntegrationArchive, build_a2a_archive, build_skill_archive
 from .model_status import (
@@ -1091,11 +1096,13 @@ def create_app(
     ) -> tuple[Path, dict]:
         root = store.run_root(run_id)
         manifest_path = root / "display_manifest.json"
-        if not manifest_path.is_file():
+        manifest = (
+            json.loads(manifest_path.read_text(encoding="utf-8"))
+            if manifest_path.is_file()
+            else service.detail(run_id).get("display_manifest")
+        )
+        if not isinstance(manifest, dict):
             raise KeyError("display not found")
-        import json
-
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         entry = next(
             (
                 item
@@ -1106,7 +1113,27 @@ def create_app(
         )
         if entry is None:
             raise KeyError("display not found")
-        path = store.run_artifact(run_id, str(entry.get("path", "")))
+        relative_path = entry.get("path")
+        if isinstance(relative_path, str) and relative_path:
+            path = store.run_artifact(run_id, relative_path)
+        else:
+            report = ScientificReport.model_validate_json(
+                (root / "scientific_report.json").read_text(encoding="utf-8")
+            )
+            computation = ComputationEvidence.model_validate_json(
+                (root / "computation_evidence.json").read_text(encoding="utf-8")
+            )
+            display = next(
+                (
+                    item
+                    for item in report.displays
+                    if item.display_id == display_id and item.kind == kind
+                ),
+                None,
+            )
+            if display is None:
+                raise KeyError("display not found")
+            path = resolve_display_artifact(display, computation)
         if sha256_file(path) != entry.get("sha256"):
             raise KeyError("display integrity check failed")
         return path, entry
@@ -1146,6 +1173,79 @@ def create_app(
             )
             if key in entry
         }
+
+    @app.get("/api/runs/{run_id}/displays/{display_id}/download")
+    async def download_display(run_id: str, display_id: str) -> FileResponse:
+        detail = service.detail(run_id)
+        entry = next(
+            (
+                item
+                for item in (detail.get("display_manifest") or {}).get("displays", [])
+                if item.get("display_id") == display_id
+            ),
+            None,
+        )
+        if not isinstance(entry, dict) or entry.get("kind") not in {"figure", "table"}:
+            raise KeyError("display not found")
+        path, _ = registered_display(run_id, display_id, entry["kind"])
+        return FileResponse(
+            path,
+            filename=path.name,
+            media_type=mimetypes.guess_type(path.name)[0],
+            headers={"Cache-Control": "private, max-age=3600"},
+        )
+
+    @app.get("/api/runs/{run_id}/results.xlsx")
+    async def download_results_workbook(run_id: str):
+        root = store.run_root(run_id)
+        persisted = root / "results.xlsx"
+        if persisted.is_file() and not persisted.is_symlink():
+            return FileResponse(
+                persisted,
+                filename=f"evidence-bench-results-{run_id[:8]}.xlsx",
+                media_type=(
+                    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                ),
+                headers={"Cache-Control": "private, max-age=3600"},
+            )
+        detail = service.detail(run_id)
+        if not isinstance(detail.get("report"), dict):
+            raise KeyError("results workbook not available")
+        report = ScientificReport.model_validate(detail["report"])
+        computation = ComputationEvidence.model_validate_json(
+            (root / "computation_evidence.json").read_text(encoding="utf-8")
+        )
+        table_entries = {
+            entry["display_id"]: entry
+            for entry in (detail.get("display_manifest") or {}).get("displays", [])
+            if entry.get("kind") == "table"
+        }
+        table_sources = [
+            (
+                table_entries[display.display_id],
+                resolve_display_artifact(display, computation),
+            )
+            for display in report.displays
+            if display.kind == "table" and display.display_id in table_entries
+        ]
+        content = build_results_workbook(
+            report,
+            table_sources,
+            run_id=run_id,
+            quality_status=detail["status"],
+        )
+        return Response(
+            content=content,
+            media_type=(
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            ),
+            headers={
+                "Content-Disposition": (
+                    f'attachment; filename="evidence-bench-results-{run_id[:8]}.xlsx"'
+                ),
+                "Cache-Control": "private, max-age=3600",
+            },
+        )
 
     @app.get("/api/runs/{run_id}/bundle")
     async def download_bundle(run_id: str, background: BackgroundTasks) -> FileResponse:

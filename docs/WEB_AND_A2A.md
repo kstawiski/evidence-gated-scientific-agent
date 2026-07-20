@@ -251,6 +251,13 @@ individually and by kind:
 - `GET /api/runs/{run_id}/displays/{display_id}/table` — returns the
   registered table's bounded preview (columns, rows, totals, `truncated`
   flag) and metadata as JSON.
+- `GET /api/runs/{run_id}/displays/{display_id}/download` — downloads the
+  complete registered figure or table after the same provenance and SHA-256
+  checks.
+- `GET /api/runs/{run_id}/results.xlsx` — downloads one consolidated Excel
+  workbook with the report status, report sections, claim ledger, and complete
+  registered result tables. Historical provisional reports are supported without
+  rewriting their completed provenance directory.
 - `GET /api/runs/{run_id}/references/{source_id}/pdf` — streams a cited,
   controller-verified PDF inline after rechecking its SHA-256 against
   `reference_manifest.json`. The Sources tab opens each local article Markdown

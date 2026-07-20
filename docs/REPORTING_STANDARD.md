@@ -100,9 +100,14 @@ fixable blocking defect and enters the bounded repair/re-audit loop.
 ## Registered displays: figures and tables
 
 A figure or table only appears in the article if it is registered as a
-`ReportDisplay` (`scientific_agent/schemas.py`) and passes deterministic
-validation in `linting.py` and `reporting.py` — the model cannot embed
-arbitrary images or inline data.
+`ReportDisplay` (`scientific_agent/schemas.py`) and its exact artifact passes the
+deterministic format, provenance, and integrity checks in `linting.py` and
+`reporting.py` — the model cannot embed arbitrary images or inline data. A valid
+registered exhibit remains visible when the overall report is provisional or
+requires human adjudication; the article-level **NOT VALIDATED** warning and the
+manifest's `validated: false` flag prevent that availability from being mistaken
+for scientific acceptance. An unavailable, tampered, or invalid exhibit is
+omitted with a machine-readable reason instead of breaking finalization.
 
 - `artifact_path` must resolve to the **exact path of a file produced by a
   successful sandbox computation** (`resolve_display_artifact`); an
@@ -147,11 +152,22 @@ arbitrary images or inline data.
 
 Registered displays are copied into a path-confined `displays/` directory
 under the run's provenance root and recorded in `display_manifest.json`
-(`version`, and one entry per display with its assigned number, relative
-path, SHA-256, and byte size). The web API exposes each registered display
-individually — see
+(`version`, overall validation/status metadata, any omissions, and one entry per
+display with its assigned number, relative path, SHA-256, and byte size). The web
+API also reconstructs this view read-only for historical reports created before
+the manifest was retained for provisional results; source hashes are rechecked and
+the completed provenance directory is not rewritten. Each registered display is
+exposed individually — see
 [`docs/WEB_AND_A2A.md`](WEB_AND_A2A.md#live-artifact-access) — and
 `render_report_markdown()` embeds the same manifest paths into `report.md`.
+
+Every completed report also provides `results.xlsx`. This controller-generated
+workbook includes a quality-status README, report sections, the claim/evidence
+ledger, and a separate worksheet containing the complete rows of every registered
+result table. It never silently upgrades provisional claims: the workbook records
+the same terminal quality status shown in the article. Current runs store the
+workbook in provenance; the API generates the same deterministic workbook on
+demand for compatible historical runs.
 
 ## Source images and visual documents
 

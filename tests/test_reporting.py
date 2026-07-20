@@ -1,3 +1,4 @@
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -8,12 +9,14 @@ from scientific_agent.provenance import sha256_file
 from scientific_agent.reporting import (
     _figure_layout_review_questions,
     _parse_tesseract_tsv,
+    describe_available_displays,
     figure_annotation_overlap_candidates,
     inspect_figure,
     materialize_displays,
     prepare_display_audit,
     render_report_markdown,
 )
+from scientific_agent.results_workbook import build_results_workbook
 from scientific_agent.schemas import (
     ArtifactRef,
     ClaimRecord,
@@ -107,6 +110,58 @@ def test_registered_displays_validate_and_render_portably(tmp_path: Path):
     assert "![Point plot" in markdown
     assert "A\\|B" in markdown
     assert str(tmp_path) not in markdown
+
+
+def test_provisional_displays_remain_available_without_mutating_run(tmp_path: Path):
+    report, computation = _fixture(tmp_path)
+
+    manifest = describe_available_displays(
+        report,
+        computation,
+        validated=False,
+        quality_status="requires_human_decision",
+    )
+
+    assert manifest["validated"] is False
+    assert manifest["virtual"] is True
+    assert manifest["omissions"] == []
+    assert [item["kind"] for item in manifest["displays"]] == ["figure", "table"]
+    assert all(item["path"] is None for item in manifest["displays"])
+    assert not (tmp_path / "run").exists()
+
+
+def test_results_workbook_contains_claim_ledger_and_full_tables(tmp_path: Path):
+    report, computation = _fixture(tmp_path)
+    table_display = report.displays[1]
+    table_path = Path(table_display.artifact_path)
+    content = build_results_workbook(
+        report,
+        [
+            (
+                {"display_id": table_display.display_id, "title": table_display.title},
+                table_path,
+            )
+        ],
+        run_id="run-1234",
+        quality_status="requires_human_decision",
+    )
+    workbook = tmp_path / "results.xlsx"
+    workbook.write_bytes(content)
+
+    assert content.startswith(b"PK")
+    with zipfile.ZipFile(workbook) as archive:
+        archive.testzip()
+        workbook_xml = archive.read("xl/workbook.xml").decode("utf-8")
+        sheets = "".join(
+            archive.read(name).decode("utf-8")
+            for name in archive.namelist()
+            if name.startswith("xl/worksheets/sheet")
+        )
+    assert 'name="README"' in workbook_xml
+    assert 'name="Claims"' in workbook_xml
+    assert "Exact group estimates" in workbook_xml
+    assert "requires_human_decision" in sheets
+    assert "A|B" in sheets
 
 
 def test_unvalidated_markdown_never_presents_model_claim_labels_as_gate_status(

@@ -66,11 +66,13 @@ from .provenance import (
     write_json,
 )
 from .reporting import (
-    materialize_references,
     materialize_displays,
+    materialize_references,
     prepare_display_audit,
     render_report_markdown,
+    resolve_display_artifact,
 )
+from .results_workbook import build_results_workbook
 from .runtime import run_text, run_typed
 from .schemas import (
     ArtifactRef,
@@ -5688,10 +5690,13 @@ async def run_scientific_task(
     )
     report_progress("finalizing", "Writing the report, evidence ledger, and manifest")
     write_json(run_dir / "scientific_report.json", report)
-    display_manifest = (
-        materialize_displays(run_dir, report, computation)
-        if validation.passed
-        else None
+    display_manifest = materialize_displays(
+        run_dir,
+        report,
+        computation,
+        validated=status in {"supported", "supported_with_comments"},
+        quality_status=status,
+        allow_partial=not validation.passed,
     )
     reference_manifest = (
         materialize_references(run_dir, report, retrieval)
@@ -5707,6 +5712,32 @@ async def run_scientific_task(
         ),
         encoding="utf-8",
     )
+    available_table_ids = {
+        entry["display_id"]
+        for entry in display_manifest.get("displays", [])
+        if entry.get("kind") == "table"
+    }
+    table_sources = [
+        (
+            next(
+                entry
+                for entry in display_manifest["displays"]
+                if entry["display_id"] == display.display_id
+            ),
+            resolve_display_artifact(display, computation),
+        )
+        for display in report.displays
+        if display.kind == "table" and display.display_id in available_table_ids
+    ]
+    (run_dir / "results.xlsx").write_bytes(
+        build_results_workbook(
+            report,
+            table_sources,
+            run_id=run_id,
+            quality_status=status,
+        )
+    )
+    (run_dir / "results.xlsx").chmod(0o600)
     write_json(run_dir / "deterministic_validation.json", validation)
     write_json(run_dir / "retrieval_evidence.json", retrieval)
     write_json(run_dir / "computation_evidence.json", computation)

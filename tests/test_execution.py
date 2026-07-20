@@ -30,6 +30,21 @@ def test_r_runtime_preflight_rejects_ggplot_removed_rows_warning():
     )
 
 
+def test_runtime_preflight_rejects_unknown_r_parameters_and_fontconfig_errors():
+    unknown = "Ignoring unknown parameters: `seed`"
+    font_error = "Fontconfig error: Cannot load default config file"
+
+    assert any(
+        "unknown parameters" in item
+        for item in _scientific_stderr_violations("r", unknown)
+    )
+    assert _scientific_stderr_violations("python", unknown) == []
+    assert any(
+        "Fontconfig failed" in item
+        for item in _scientific_stderr_violations("r", font_error)
+    )
+
+
 def _executor(tmp_path: Path, **overrides) -> AnalysisExecutor:
     workspace = tmp_path / "workspace"
     workspace.mkdir(parents=True)

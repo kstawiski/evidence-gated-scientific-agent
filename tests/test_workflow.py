@@ -852,6 +852,10 @@ def test_r_survival_code_preflight_requires_controller_grounded_time_origin():
             "geom_errorbarh(aes(x=estimate, xmin=ci_low, xmax=ci_high))",
             "does not accept an x aesthetic",
         ),
+        (
+            "geom_jitter(aes(x=value, y=group), width=0, height=.1, seed=42)",
+            "geom_jitter does not accept seed=",
+        ),
         ("stopifnot(ci[1] < estimate < ci[2])", "does not support chained"),
         (
             'systemfonts::font_add_google("Open Sans", "OpenSans")',

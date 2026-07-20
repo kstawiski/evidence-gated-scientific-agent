@@ -509,7 +509,16 @@ differences likewise belong on x, with any deterministic jitter applied only to
 the categorical y coordinate. Do not add raw paired differences to a tight
 estimate/CI panel unless every raw observation is inside the displayed scale;
 an R/ggplot warning that rows were removed is a blocking defect, not an
-acceptable render. Never supply an `x` aesthetic to `geom_errorbarh`, and never
+acceptable render. If scale limits caused the warning, derive them from every
+plotted raw value plus the estimate and interval endpoints, or remove the raw
+layer from an estimate/CI-focused figure; changing only y positions cannot fix
+x-axis omission. A `plot_data.csv` artifact can preserve raw differences without
+requiring those points in the final figure. `geom_jitter()` does not accept
+`seed=`; when deterministic
+jitter is genuinely needed, use
+`position=position_jitter(width=..., height=..., seed=...)`. When every
+categorical y position is already unique, use `geom_point()` without jitter.
+Never supply an `x` aesthetic to `geom_errorbarh`, and never
 map a literal label such as `"difference"`
 to x while placing the estimate on y; that transposes the scientific scale and
 can combine discrete x values with continuous interval endpoints.

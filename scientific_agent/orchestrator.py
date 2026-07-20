@@ -152,6 +152,13 @@ R_REPAIR_EXECUTION_GUIDANCE = (
     "inside geom_errorbarh. Do not overlay raw observations on a tight "
     "estimate/CI axis unless every observation is inside the displayed scale; "
     "any ggplot warning that rows were removed is a blocking execution defect. "
+    "When that warning follows scale limits, compute limits from the union of "
+    "all plotted raw values, estimates, and interval endpoints, or remove the raw "
+    "layer from an estimate/CI-focused figure; changing only y positions does not "
+    "repair x-axis omission. plot_data.csv can preserve raw differences without "
+    "requiring them to appear in the figure. "
+    "geom_jitter does not accept seed=; when deterministic jitter is actually "
+    "needed, pass position=position_jitter(width=..., height=..., seed=...). "
     "Prefer scales::label_number_auto() and ensure every rendered continuous-axis "
     "tick label is unique. Put long p-values in a panel subtitle or caption, not "
     "in a right-edge annotation that can be clipped. Use base R or the native |> "
@@ -713,6 +720,13 @@ def _r_scientific_preflight(
                 "geom_errorbarh does not accept an x aesthetic; map xmin, xmax, "
                 "and y, for example geom_errorbarh(aes(xmin=ci_low, "
                 "xmax=ci_high, y=metric))"
+            )
+    for arguments in _r_call_arguments(source, r"(?:ggplot2\s*::\s*)?geom_jitter"):
+        if re.search(r"\bseed\s*=", arguments, re.IGNORECASE):
+            issues.append(
+                "geom_jitter does not accept seed=; use "
+                "position=position_jitter(width=..., height=..., seed=...) when "
+                "deterministic jitter is needed"
             )
     if _R_SYSTEMFONTS_GOOGLE.search(source):
         issues.append(

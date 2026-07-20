@@ -1794,6 +1794,21 @@ def test_report_validator_rejects_design_site_and_reconciliation_overclaims():
     }
 
 
+def test_report_validator_accepts_explicit_synthetic_validation_data_design():
+    report_task = task().model_copy(
+        update={"objective": "Analyze this synthetic validation data fixture."}
+    )
+    report = article_report(
+        discussion="This is synthetic data for software validation only."
+    )
+
+    validation = validate_report(report, task=report_task)
+
+    assert "unsupported_report_design_classification" not in {
+        finding.code for finding in validation.findings
+    }
+
+
 def test_report_validator_requires_each_locked_computation_language(tmp_path):
     output = tmp_path / "summary.csv"
     output.write_text("estimate\n5\n", encoding="utf-8")

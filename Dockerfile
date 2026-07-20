@@ -56,19 +56,43 @@ RUN apt-get update \
         passwd \
         poppler-utils \
         r-base \
+        r-bioc-complexheatmap \
+        r-cran-broom \
+        r-cran-cmprsk \
+        r-cran-colorspace \
+        r-cran-cowplot \
         r-cran-data.table \
         r-cran-dplyr \
+        r-cran-emmeans \
+        r-cran-forcats \
+        r-cran-ggbeeswarm \
         r-cran-ggplot2 \
         r-cran-ggrepel \
+        r-cran-ggridges \
+        r-cran-glmnet \
         r-cran-jsonlite \
+        r-cran-lme4 \
+        r-cran-lubridate \
+        r-cran-mice \
+        r-cran-openxlsx \
         r-cran-patchwork \
+        r-cran-pheatmap \
+        r-cran-proc \
+        r-cran-purrr \
         r-cran-ragg \
+        r-cran-readr \
+        r-cran-readxl \
+        r-cran-rstatix \
         r-cran-scales \
+        r-cran-stringr \
         r-cran-survival \
+        r-cran-survminer \
         r-cran-svglite \
+        r-cran-survey \
         r-cran-systemfonts \
+        r-cran-tibble \
+        r-cran-tidyr \
         r-cran-viridislite \
-        r-cran-colorspace \
         tesseract-ocr \
         tini \
         util-linux \
@@ -76,6 +100,9 @@ RUN apt-get update \
     && /usr/sbin/groupadd --gid "$APP_GID" evidence \
     && /usr/sbin/useradd --uid "$APP_UID" --gid "$APP_GID" --no-create-home --shell /usr/sbin/nologin evidence \
     && install -d -o evidence -g evidence -m 0700 /data /tmp/home
+
+RUN Rscript --vanilla -e \
+    "install.packages('https://cloud.r-project.org/src/contrib/Archive/patchwork/patchwork_1.2.0.tar.gz', repos=NULL, type='source'); stopifnot(packageVersion('patchwork') >= '1.2.0')"
 
 COPY --from=uv /uv /uvx /usr/local/bin/
 COPY --from=node-build /usr/local/bin/node /usr/local/bin/node

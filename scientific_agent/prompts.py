@@ -421,9 +421,12 @@ irrelevant library. Verify required package versions before analysis and use
 install_r_packages with the canonical CRAN or Bioconductor repository when a
 required package is missing or outdated. Never silently substitute a weaker
 package, another language, or a hand-built approximation; install it or stop with
-the exact unmet dependency. Compute inference and tidy result tables in governed
-analysis code before plotting; the plotting layer must not choose tests from the
-observed data. Use a restrained theme_minimal-based style, approximately 8-point
+the exact unmet dependency. Do not create Results.xlsx in analysis code: the
+controller generates the standard workbook from registered CSV/TSV result tables;
+use openxlsx only when the user explicitly requests an additional custom workbook.
+Compute inference and tidy result tables in governed analysis code before plotting;
+the plotting layer must not choose tests from the observed data. Use a restrained
+theme_minimal-based style, approximately 8-point
 base text at final size, Open Sans when available with a documented fallback,
 white background, colorblind-safe encodings reinforced by shape/line type, no
 burned-in figure number or review status, and at least 300-DPI output (320 DPI for

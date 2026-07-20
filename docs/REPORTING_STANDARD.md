@@ -139,11 +139,13 @@ omitted with a machine-readable reason instead of breaking finalization.
   when the user requests it or the run records a concrete specialist capability
   that materially improves scientific fidelity or display quality.
 - **Dependencies never downgrade silently.** The image contains the stable R
-  publication baseline. A missing, outdated, or specialist package is installed
-  from canonical CRAN or Bioconductor into the run's isolated, version-recorded
-  workspace environment. If installation fails, the figure remains unresolved;
-  the workflow does not substitute a weaker package or switch to Python without
-  the documented exception.
+  publication baseline: rendering and composition, tidy data/import, Excel,
+  regression, survival, diagnostic performance, surveys, and multiple imputation
+  are preinstalled and verified by deployment preflight. A missing, outdated, or
+  specialist package is installed from canonical CRAN or Bioconductor into the
+  run's isolated, version-recorded workspace environment. If installation fails,
+  the figure remains unresolved; the workflow does not substitute a weaker
+  package or switch to Python without the documented exception.
 - **Plotting does not select inference.** Tests, estimates, intervals, and tidy
   result tables are computed in governed analysis code before the plotting layer
   reads them. Final figures use exact physical dimensions, a white background,

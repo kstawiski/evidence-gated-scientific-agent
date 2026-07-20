@@ -32,15 +32,40 @@ R_ANALYSIS_BASELINE_PACKAGES = (
     "systemfonts",
     "svglite",
     "patchwork",
+    "cowplot",
     "ggrepel",
+    "ggbeeswarm",
+    "ggridges",
     "scales",
     "viridisLite",
     "colorspace",
+    "pheatmap",
+    "ComplexHeatmap",
     "dplyr",
+    "tidyr",
+    "tibble",
+    "purrr",
+    "stringr",
+    "forcats",
+    "lubridate",
+    "readr",
+    "readxl",
+    "openxlsx",
     "survival",
+    "survminer",
+    "broom",
+    "rstatix",
+    "emmeans",
+    "lme4",
+    "pROC",
+    "glmnet",
+    "cmprsk",
+    "survey",
+    "mice",
     "data.table",
     "jsonlite",
 )
+R_ANALYSIS_BASELINE_MINIMUM_VERSIONS = {"patchwork": "1.2.0"}
 RETURN_TEXT_BYTES = 32 * 1024
 PREVIEW_TEXT_BYTES = 8 * 1024
 PREVIEW_SUFFIXES = {".csv", ".json", ".md", ".tsv", ".txt"}
@@ -1214,10 +1239,12 @@ def build_analysis_tools(executor: AnalysisExecutor):
         read-only at /prior/<execution-id>/output, and prior repair attempts at
         /history/attempt-N/<execution-id>/output. Write all tables,
         figures, and machine-readable results below /output. The curated R figure
-        baseline includes ggplot2, ragg, systemfonts, svglite, patchwork, ggrepel,
-        scales, viridisLite, and colorspace alongside dplyr, survival, data.table,
-        and workspace-installed R libraries. Verify version-sensitive requirements
-        and use the isolated package installer for current specialist packages.
+        baseline includes publication rendering, tidy data/import, Excel,
+        regression, survival, diagnostic-performance, survey, and imputation
+        packages. It includes ggplot2, ragg, patchwork, ComplexHeatmap, dplyr,
+        tidyr, openxlsx, broom, survival, survminer, pROC, survey, and mice. Verify
+        version-sensitive requirements and use the isolated package installer only
+        for missing, outdated, or genuinely specialist packages.
 
         Args:
             code: Complete R script to execute.
@@ -1291,11 +1318,16 @@ def sandbox_preflight(settings: SandboxSettings, workspace: Path | None = None) 
         r_packages = ",".join(
             f"'{package}'" for package in R_ANALYSIS_BASELINE_PACKAGES
         )
+        r_version_checks = ";".join(
+            f"stopifnot(packageVersion('{package}') >= '{version}')"
+            for package, version in R_ANALYSIS_BASELINE_MINIMUM_VERSIONS.items()
+        )
         r_probe = executor.execute(
             "r",
             (
                 f"stopifnot(all(vapply(c({r_packages}), "
                 "requireNamespace, logical(1), quietly=TRUE)));"
+                f"{r_version_checks};"
                 "writeLines('ok', '/output/r-ok.txt')"
             ),
             timeout_seconds=15,

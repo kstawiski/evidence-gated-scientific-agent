@@ -73,6 +73,7 @@ def test_scientific_figure_policy_is_r_first_and_task_specific():
     assert "patchwork >= 1.2.0" in normalized_researcher
     assert "ragg for exact-size raster export" in normalized_researcher
     assert "ComplexHeatmap/circlize for omics" in normalized_researcher
+    assert "controller generates the standard workbook" in normalized_researcher
     assert "the plotting layer must not choose tests" in normalized_researcher
     assert "A Python exception must name that capability" in normalized_researcher
     assert "use a separate R rendering call" in normalized_researcher

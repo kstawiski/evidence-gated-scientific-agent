@@ -7,6 +7,7 @@ from scientific_agent.config import SandboxSettings
 from scientific_agent.execution import (
     AnalysisExecutor,
     R_ANALYSIS_BASELINE_PACKAGES,
+    R_ANALYSIS_BASELINE_MINIMUM_VERSIONS,
     RemoteAnalysisExecutor,
     _python_static_violations,
     _unavailable_prior_reference_violations,
@@ -636,6 +637,10 @@ def test_preflight_probes_advertised_python_and_r_packages(tmp_path, monkeypatch
     assert result["probes"] == {"python": "succeeded", "r": "succeeded"}
     assert "import matplotlib,numpy,pandas,scipy,sklearn,statsmodels" in seen[0][1]
     assert all(f"'{package}'" in seen[1][1] for package in R_ANALYSIS_BASELINE_PACKAGES)
+    assert all(
+        f"packageVersion('{package}') >= '{version}'" in seen[1][1]
+        for package, version in R_ANALYSIS_BASELINE_MINIMUM_VERSIONS.items()
+    )
 
 
 @pytest.mark.live

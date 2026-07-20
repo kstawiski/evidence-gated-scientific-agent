@@ -4103,6 +4103,9 @@ async def _audit_report(
     except (OSError, ValueError, Image.DecompressionBombError) as exc:
         if audit_metadata is not None:
             audit_metadata["display_inputs_invalid"] = 1
+            audit_metadata["display_input_error"] = (
+                f"{type(exc).__name__}: {str(exc)[:500]}"
+            )
         display_result = VerificationReport(
             verdict="inconclusive",
             unsupported_claims=[
@@ -4311,6 +4314,7 @@ async def _audit_report_resilient(
             "figure_text_inputs": [],
             "table_previews": [],
             "figures_missing_ocr": [],
+            "display_input_error": None,
         }
         result = await _audit_report(
             settings,
@@ -4397,6 +4401,7 @@ async def _audit_report_resilient(
                         ),
                         "figure_text_inputs": figure_text_inputs,
                         "table_previews": table_previews,
+                        "input_error": audit_metadata["display_input_error"],
                     },
                 )
             if activity is not None:
@@ -4433,7 +4438,15 @@ async def _audit_report_resilient(
 def _requires_pubmed_literature(task: TaskSpec) -> bool:
     if task.task_type == "software_engineering":
         return False
-    context = f"{task.scientific_domain} {task.objective}".casefold()
+    objective = task.objective.casefold()
+    objective = re.sub(
+        r"\b(?:do\s+not|don't|must\s+not|no)\s+"
+        r"(?:make|draw|state|include)?\s*(?:any\s+)?clinical\s+claims?\b",
+        " ",
+        objective,
+    )
+    objective = re.sub(r"\bnon[- ]clinical\b", " ", objective)
+    context = f"{task.scientific_domain.casefold()} {objective}"
     words = set(re.findall(r"[a-z0-9]+", context))
     biomedical_words = {
         "biomedical",

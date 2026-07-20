@@ -961,7 +961,7 @@ _TASK_DESIGN_CLASSIFICATION = {
         r"\bexperimental\s+(?:data|dataset|design|study)\b", re.IGNORECASE
     ),
     "synthetic": re.compile(
-        r"\bsynthetic\s+(?:(?:software|validation|benchmark|test)\s+)?"
+        r"\bsynthetic\s+(?:(?:software[-\s]+validation|software|validation|benchmark|test)[-\s]+)?"
         r"(?:data|dataset|fixture|study)\b",
         re.IGNORECASE,
     ),
@@ -1192,6 +1192,19 @@ _WELCH_NORMALITY_OVERCLAIM = re.compile(
     r"remain(?:s|ed)?\s+applicable|robust)\b",
     re.IGNORECASE,
 )
+_T_METHOD = re.compile(
+    r"\b(?:paired\s+)?t(?:[- ]?(?:test|interval)|\s+distribution|\s+statistic)s?\b",
+    re.IGNORECASE,
+)
+_DISTRIBUTION_FREE_CLAIM = re.compile(
+    r"\bdistribution[- ]free\b|"
+    r"\bwithout\s+assuming\s+(?:any\s+)?distributional\s+"
+    r"(?:assumptions?|properties)\b|"
+    r"\b(?:no|without(?:\s+any)?)\s+distributional\s+assumptions?\b|"
+    r"\bdoes\s+not\s+(?:require|assume)\s+(?:a\s+)?"
+    r"(?:normal|gaussian)\s+distribution\b",
+    re.IGNORECASE,
+)
 
 
 def _is_report_output(path: Path, directory: str) -> bool:
@@ -1204,6 +1217,22 @@ def _is_report_output(path: Path, directory: str) -> bool:
 
 def _terms(text: str) -> set[str]:
     return set(_WORD.findall(text.lower()))
+
+
+def _deliverable_is_mapped(deliverable: str, produced_text: str) -> bool:
+    """Match plan outputs, including controller-owned and short file formats."""
+
+    normalized = " ".join(deliverable.lower().split())
+    if normalized == "evidence-backed scientific report with claim and source ledgers":
+        return True
+    wanted = _terms(deliverable)
+    if wanted & _terms(produced_text):
+        return True
+    for extension in ("zip", "xlsx", "pptx", "docx", "csv", "json", "png", "svg"):
+        marker = f".{extension}"
+        if marker in deliverable.lower() and marker in produced_text.lower():
+            return True
+    return False
 
 
 def _grounding_terms(text: str) -> set[str]:
@@ -1628,10 +1657,9 @@ def lint_plan(
             *(output for step in plan.steps for output in step.outputs),
         ]
     )
-    produced_terms = _terms(produced_text)
     for index, deliverable in enumerate(task.deliverables):
         wanted = _terms(deliverable)
-        if wanted and not (wanted & produced_terms):
+        if wanted and not _deliverable_is_mapped(deliverable, produced_text):
             findings.append(
                 LintFinding(
                     code="unmapped_deliverable",
@@ -2978,6 +3006,20 @@ def validate_report(
                     "from normality. Remove claims that Welch itself accommodates "
                     "non-normality; retain the diagnostic as a limitation or support "
                     "a separately scoped robustness analysis with direct evidence."
+                ),
+            )
+        )
+    if _T_METHOD.search(report_text) and _DISTRIBUTION_FREE_CLAIM.search(report_text):
+        findings.append(
+            LintFinding(
+                code="t_method_distribution_free_overclaim",
+                location="report",
+                message=(
+                    "Student/paired t inference is not distribution-free. Remove "
+                    "claims that it requires no distributional assumptions; for a "
+                    "paired analysis, retain approximate normality of the paired "
+                    "differences as an unverified limitation when diagnostics or a "
+                    "prespecified robustness analysis were not performed."
                 ),
             )
         )

@@ -122,6 +122,33 @@ def test_plan_linter_accepts_complete_read_only_plan():
     assert lint_plan(task(), good_plan()).passed
 
 
+def test_plan_linter_maps_controller_report_and_short_zip_extension():
+    requested = task().model_copy(
+        update={
+            "deliverables": [
+                "Evidence-backed scientific report with claim and source ledgers",
+                "Machine-readable result bundle (.zip)",
+            ]
+        }
+    )
+    plan = good_plan().model_copy(
+        update={
+            "expected_artifacts": ["/output/deliverables/validation_results.zip"],
+            "steps": [
+                good_plan()
+                .steps[0]
+                .model_copy(
+                    update={"outputs": ["/output/deliverables/validation_results.zip"]}
+                )
+            ],
+        }
+    )
+
+    report = lint_plan(requested, plan)
+
+    assert "unmapped_deliverable" not in {item.code for item in report.findings}
+
+
 def test_locked_reader_displays_cannot_disappear_from_report():
     validation = validate_report(
         article_report(), required_display_kinds=("figure", "table")
@@ -1593,6 +1620,21 @@ def test_report_validator_rejects_untested_normality_reassurance_and_robust_cont
     }
 
 
+def test_report_validator_rejects_distribution_free_paired_t_overclaim():
+    report = article_report(
+        introduction=(
+            "Paired effects were estimated without assuming distributional properties."
+        ),
+        methods=["Mean differences used paired t-intervals with 95% confidence."],
+    )
+
+    validation = validate_report(report)
+
+    assert "t_method_distribution_free_overclaim" in {
+        finding.code for finding in validation.findings
+    }
+
+
 def test_report_validator_rejects_unqualified_robust_association():
     report = article_report(
         conclusions=(
@@ -1800,6 +1842,26 @@ def test_report_validator_accepts_explicit_synthetic_validation_data_design():
     )
     report = article_report(
         discussion="This is synthetic data for software validation only."
+    )
+
+    validation = validate_report(report, task=report_task)
+
+    assert "unsupported_report_design_classification" not in {
+        finding.code for finding in validation.findings
+    }
+
+
+def test_report_validator_accepts_hyphenated_synthetic_software_validation_scope():
+    report_task = task().model_copy(
+        update={
+            "objective": (
+                "Analyze validation.csv as synthetic software-validation data. "
+                "It is not biomedical or clinical evidence."
+            )
+        }
+    )
+    report = article_report(
+        discussion="This is synthetic software-validation data only."
     )
 
     validation = validate_report(report, task=report_task)

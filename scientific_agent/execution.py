@@ -72,10 +72,39 @@ RETURN_TEXT_BYTES = 32 * 1024
 PREVIEW_TEXT_BYTES = 8 * 1024
 PREVIEW_SUFFIXES = {".csv", ".json", ".md", ".tsv", ".txt"}
 PRIOR_EXECUTION_REFERENCE = re.compile(r"/prior/(?P<execution_id>exec-[0-9]{3})/")
+R_GGPLOT_REMOVED_ROWS = re.compile(
+    r"Removed\s+\d+\s+rows?\s+containing\s+(?:missing|non-finite)\s+values",
+    re.IGNORECASE,
+)
+R_UNKNOWN_PARAMETERS = re.compile(r"Ignoring unknown parameters?:", re.IGNORECASE)
+FONTCONFIG_ERROR = re.compile(r"Fontconfig error:", re.IGNORECASE)
 
 
 def _reject_nonfinite_json(value: str):
     raise ValueError(f"non-finite JSON constant: {value}")
+
+
+def _scientific_stderr_violations(language: Language, stderr: str) -> list[str]:
+    """Return fail-closed scientific rendering defects emitted at runtime."""
+
+    violations: list[str] = []
+    if language == "r" and R_GGPLOT_REMOVED_ROWS.search(stderr):
+        violations.append(
+            "ggplot removed rows while rendering; explicitly resolve missing or "
+            "non-finite values and scale limits so every intended observation is "
+            "represented before accepting the figure"
+        )
+    if language == "r" and R_UNKNOWN_PARAMETERS.search(stderr):
+        violations.append(
+            "R plotting code supplied unknown parameters; use arguments supported "
+            "by the installed plotting API before accepting the figure"
+        )
+    if FONTCONFIG_ERROR.search(stderr):
+        violations.append(
+            "Fontconfig failed while rendering; the requested font cannot be "
+            "trusted until the font configuration error is resolved"
+        )
+    return violations
 
 
 def _python_static_violations(code: str) -> list[str]:
@@ -698,7 +727,13 @@ class AnalysisExecutor:
         os.chmod(self.root, 0o700)
 
     def _required_paths(self, language: Language) -> list[Path]:
-        common = [self.settings.bwrap, self.settings.prlimit, Path("/usr")]
+        common = [
+            self.settings.bwrap,
+            self.settings.prlimit,
+            Path("/usr"),
+            Path("/etc/fonts"),
+            Path("/var/cache/fontconfig"),
+        ]
         if language == "python":
             return [
                 *common,
@@ -749,6 +784,16 @@ class AnalysisExecutor:
             "--ro-bind",
             "/etc/ld.so.cache",
             "/etc/ld.so.cache",
+            "--ro-bind",
+            "/etc/fonts",
+            "/etc/fonts",
+            "--dir",
+            "/var",
+            "--dir",
+            "/var/cache",
+            "--ro-bind",
+            "/var/cache/fontconfig",
+            "/var/cache/fontconfig",
             "--dir",
             "/proc",
             "--dev",
@@ -1107,6 +1152,13 @@ class AnalysisExecutor:
                 exit_code = process.returncode
             output_artifacts, output_violations = self._inspect_outputs(output_dir)
             violations.extend(output_violations)
+            try:
+                captured_stderr = stderr_path.read_text(
+                    encoding="utf-8", errors="replace"
+                )
+            except OSError:
+                captured_stderr = ""
+            violations.extend(_scientific_stderr_violations(language, captured_stderr))
             if cancelled:
                 status = "cancelled"
             elif timed_out:

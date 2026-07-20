@@ -82,7 +82,9 @@ from .schemas import (
     Finding,
     InputProfile,
     KnowledgeVisualEvidence,
+    LintFinding,
     MasterPlan,
+    PlanLintReport,
     PlanningResult,
     RunResult,
     RetrievalEvidence,
@@ -128,6 +130,57 @@ TABLE_PRECISION_REPAIR_GUIDANCE = (
     "accordingly (for example, 10.897 -> 10.9 or 10.90; 0.980132 -> 0.9801; "
     "5.0000 -> 5.000). Keep exact values in JSON and express very small p-values "
     "as inequalities such as p < 0.001 rather than rounding them to zero."
+)
+
+R_REPAIR_EXECUTION_GUIDANCE = (
+    "For R repairs, keep the call in R syntax: create directories with "
+    "dir.create(dirname(target), recursive=TRUE, showWarnings=FALSE), never "
+    "Python Path(...).mkdir. Create a base-R archive only with "
+    "utils::zip(zipfile=target_zip, files=files); junk.paths and recurse are not "
+    "utils::zip arguments. With absolute /output/... input paths, archive members "
+    "normally retain output/data/... path components; verify actual stored paths "
+    "or compare basename(zip_list$Name), never assume bare member names. Export "
+    "through ragg::agg_png with units='in' and "
+    "res=320, then print the plot and call dev.off(). Extract paired-t statistics "
+    "from one stats::t.test result. R comparisons must use lower < estimate && "
+    "estimate < upper, never a chained lower < estimate < upper expression. "
+    "Use the system-installed Open Sans font; never call "
+    "systemfonts::font_add_google. For different metric units, use independent "
+    "panels with tight readable ranges; do not force a distant zero into a panel. "
+    "For horizontal intervals, use "
+    "geom_errorbarh(aes(xmin=ci_low, xmax=ci_high, y=metric)); never map x= "
+    "inside geom_errorbarh. Do not overlay raw observations on a tight "
+    "estimate/CI axis unless every observation is inside the displayed scale; "
+    "any ggplot warning that rows were removed is a blocking execution defect. "
+    "When that warning follows scale limits, compute limits from the union of "
+    "all plotted raw values, estimates, and interval endpoints, or remove the raw "
+    "layer from an estimate/CI-focused figure; changing only y positions does not "
+    "repair x-axis omission. plot_data.csv can preserve raw differences without "
+    "requiring them to appear in the figure. "
+    "Never pad range endpoints multiplicatively with range(x) * c(0.95, 1.05): "
+    "for an all-negative range this can reverse or truncate the limits. Use "
+    "axis_range <- range(x); span <- diff(axis_range); limits <- axis_range + "
+    "c(-1, 1) * 0.15 * span, and assert limits[1] < limits[2]. "
+    "geom_jitter does not accept seed=; when deterministic jitter is actually "
+    "needed, pass position=position_jitter(width=..., height=..., seed=...). "
+    "Prefer scales::label_number_auto() and ensure every rendered continuous-axis "
+    "tick label is unique. Put long p-values in a panel subtitle or caption, not "
+    "in a right-edge annotation that can be clipped. Use base R or the native |> "
+    "pipe unless dplyr/magrittr is loaded explicitly; never emit an unloaded %>% "
+    "operator. Do not mix factor/discrete and numeric positions on the same plot "
+    "axis. Write machine-readable R results with "
+    "jsonlite::write_json(..., auto_unbox=TRUE, digits=16) (or digits=NA); the "
+    "default digits=4 is not full precision. Write raw plot/source data CSVs "
+    "below /output/data, never /output/tables; only reader-facing summaries "
+    "belong below /output/tables. "
+    "Keep numeric result objects and ggplot objects under distinct names (for "
+    "example p_value_error and plot_error); never overwrite a p-value with a "
+    "plot. ggplot2::annotate uses data coordinates, so never pass grid::unit or "
+    "unit values as x/y. When compound metric names contain underscores, reshape "
+    "with an explicit names_pattern or construct the long data directly rather "
+    "than splitting every underscore with names_sep='_'. "
+    "Preserve already verified full-precision JSON and regenerate only artifacts "
+    "implicated by the findings."
 )
 
 REPORT_AUDIT_JSON_MAX_FILES = 8
@@ -501,6 +554,263 @@ _R_SURVIVAL_ESTIMATION = re.compile(
     r"(?:<-|=|\[|\()",
     re.IGNORECASE,
 )
+_R_PYTHON_PATH_MKDIR = re.compile(
+    r"\bPath\s*\([^\n]{0,500}?\)\s*(?:\.parent\s*)?\.mkdir\s*\(",
+    re.IGNORECASE,
+)
+_R_RAGG_PNG = re.compile(r"\bragg\s*::\s*png\s*\(", re.IGNORECASE)
+_R_SYSTEMFONTS_GOOGLE = re.compile(
+    r"\bsystemfonts\s*::\s*font_add_google\s*\(", re.IGNORECASE
+)
+_R_MAGRITTR_PIPE = re.compile(r"%>%")
+_R_PIPE_PROVIDER_IMPORT = re.compile(
+    r"\b(?:library|require)\s*\(\s*(?:['\"])?"
+    r"(?:dplyr|magrittr|tidyverse)(?:['\"])?\s*\)",
+    re.IGNORECASE,
+)
+_R_PLOT_DATA_IN_TABLES = re.compile(
+    r"(['\"])/output/tables/(?:plot[_-]?data|figure[_-]?data|source[_-]?data)"
+    r"[^'\"]*\.csv\1",
+    re.IGNORECASE,
+)
+_R_PVALUE_ASSIGNMENT = re.compile(
+    r"(?m)^\s*([A-Za-z.][A-Za-z0-9._]*)\s*<-\s*[^\n;]*\$\s*p\.value\b"
+)
+_R_GGPLOT_ASSIGNMENT = re.compile(
+    r"(?m)^\s*([A-Za-z.][A-Za-z0-9._]*)\s*<-\s*(?:ggplot2\s*::\s*)?ggplot\s*\("
+)
+_R_COMPARISON_VALUE = (
+    r"(?:[A-Za-z.][A-Za-z0-9._$]*(?:\s*\[[^\]\n]+\])?"
+    r"|-?(?:\d+(?:\.\d*)?|\.\d+)|\([^()\n]+\))"
+)
+_R_CHAINED_COMPARISON = re.compile(
+    rf"{_R_COMPARISON_VALUE}\s*(?:<=|>=|<|>)\s*"
+    rf"{_R_COMPARISON_VALUE}\s*(?:<=|>=|<|>)\s*{_R_COMPARISON_VALUE}"
+)
+
+
+def _r_mask_noncode(code: str) -> str:
+    """Mask R comments and quoted strings while preserving offsets and newlines."""
+
+    masked = list(code)
+    quote: str | None = None
+    escaped = False
+    in_comment = False
+    for index, char in enumerate(code):
+        if in_comment:
+            if char == "\n":
+                in_comment = False
+            else:
+                masked[index] = " "
+            continue
+        if quote is not None:
+            masked[index] = " "
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            continue
+        if char in {"'", '"'}:
+            quote = char
+            masked[index] = " "
+        elif char == "#":
+            in_comment = True
+            masked[index] = " "
+    return "".join(masked)
+
+
+def _r_call_arguments(code: str, call_pattern: str) -> list[str]:
+    """Return balanced argument text for named R calls, ignoring quoted parens."""
+
+    starts = re.finditer(rf"(?<![\w.]){call_pattern}\s*\(", code, re.IGNORECASE)
+    arguments: list[str] = []
+    for match in starts:
+        start = match.end()
+        depth = 1
+        quote: str | None = None
+        escaped = False
+        in_comment = False
+        for index in range(start, len(code)):
+            char = code[index]
+            if in_comment:
+                if char == "\n":
+                    in_comment = False
+                continue
+            if quote is not None:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == quote:
+                    quote = None
+                continue
+            if char in {"'", '"', "`"}:
+                quote = char
+            elif char == "#":
+                in_comment = True
+            elif char == "(":
+                depth += 1
+            elif char == ")":
+                depth -= 1
+                if depth == 0:
+                    arguments.append(code[start:index])
+                    break
+    return arguments
+
+
+def _r_scientific_preflight(
+    code: str, *, survival_task: bool, survival_time_origin_grounded: bool
+) -> list[str]:
+    """Reject high-confidence R API and cross-language generation defects."""
+
+    issues: list[str] = []
+    source = _r_mask_noncode(code)
+    if _R_PYTHON_PATH_MKDIR.search(source):
+        issues.append(
+            "R code cannot use Python Path(...).mkdir syntax; create output "
+            "directories with dir.create(dirname(target), recursive=TRUE, "
+            "showWarnings=FALSE)"
+        )
+    if _R_CHAINED_COMPARISON.search(source):
+        issues.append(
+            "R does not support chained comparisons such as lower < estimate < "
+            "upper; write lower < estimate && estimate < upper"
+        )
+    if _R_MAGRITTR_PIPE.search(source) and not _R_PIPE_PROVIDER_IMPORT.search(code):
+        issues.append(
+            "R code uses the magrittr %>% pipe without loading dplyr, magrittr, "
+            "or tidyverse; use base R/native |> syntax or load the required "
+            "package explicitly"
+        )
+    if _R_PLOT_DATA_IN_TABLES.search(code):
+        issues.append(
+            "Raw plot/source data CSV files belong below /output/data, not "
+            "/output/tables; reserve /output/tables for reader-facing summary "
+            "tables that will be embedded in the report"
+        )
+    for arguments in _r_call_arguments(source, r"utils\s*::\s*zip"):
+        unsupported = re.findall(
+            r"\b(junk\.paths|recurse)\s*=", arguments, re.IGNORECASE
+        )
+        if unsupported:
+            issues.append(
+                "utils::zip does not accept "
+                + ", ".join(f"{name}=" for name in sorted(set(unsupported)))
+                + "; use utils::zip(zipfile=target_zip, files=files) and arrange "
+                "member paths before the call"
+            )
+    for arguments in _r_call_arguments(source, r"(?:jsonlite\s*::\s*)?write_json"):
+        if not re.search(r"\bdigits\s*=", arguments, re.IGNORECASE):
+            issues.append(
+                "jsonlite::write_json defaults to digits=4 and cannot preserve "
+                "full-precision machine results; provide digits=16 (or digits=NA) "
+                "together with auto_unbox=TRUE"
+            )
+    if _R_RAGG_PNG.search(source):
+        issues.append(
+            "ragg does not export png(); use ragg::agg_png(..., units='in', "
+            "res=320), print the plot, and call dev.off()"
+        )
+    for arguments in _r_call_arguments(source, r"ragg\s*::\s*agg_png"):
+        if re.search(r"\bdpi\s*=", arguments, re.IGNORECASE):
+            issues.append(
+                "ragg::agg_png uses res=, not dpi=; provide units='in' and res=320"
+            )
+    for arguments in _r_call_arguments(source, r"(?:ggplot2\s*::\s*)?geom_errorbarh"):
+        if re.search(r"(?<![A-Za-z0-9._])x\s*=", arguments, re.IGNORECASE):
+            issues.append(
+                "geom_errorbarh does not accept an x aesthetic; map xmin, xmax, "
+                "and y, for example geom_errorbarh(aes(xmin=ci_low, "
+                "xmax=ci_high, y=metric))"
+            )
+    for arguments in _r_call_arguments(source, r"(?:ggplot2\s*::\s*)?geom_jitter"):
+        if re.search(r"\bseed\s*=", arguments, re.IGNORECASE):
+            issues.append(
+                "geom_jitter does not accept seed=; use "
+                "position=position_jitter(width=..., height=..., seed=...) when "
+                "deterministic jitter is needed"
+            )
+    for arguments in _r_call_arguments(
+        source, r"(?:ggplot2\s*::\s*)?scale_[xy]_continuous"
+    ):
+        if re.search(
+            r"\blimits\s*=\s*range\s*\([\s\S]{1,800}\)\s*\*\s*c\s*\(",
+            arguments,
+            re.IGNORECASE,
+        ):
+            issues.append(
+                "multiplying range endpoints by c(...) is unsafe for negative "
+                "values and can reverse or truncate the axis; pad additively "
+                "from span <- diff(axis_range), then assert limits[1] < limits[2]"
+            )
+    if _R_SYSTEMFONTS_GOOGLE.search(source):
+        issues.append(
+            "systemfonts does not export font_add_google and sandbox code has no "
+            "network; use the system-installed Open Sans font and optionally verify "
+            "it with systemfonts::match_font('Open Sans')"
+        )
+    numeric_p_values = set(_R_PVALUE_ASSIGNMENT.findall(source))
+    plot_objects = set(_R_GGPLOT_ASSIGNMENT.findall(source))
+    shadowed = sorted(numeric_p_values & plot_objects)
+    if shadowed:
+        issues.append(
+            "R code overwrites numeric p-value object(s) "
+            + ", ".join(shadowed)
+            + " with ggplot objects; keep distinct names such as p_value_error "
+            "and plot_error so annotations receive numeric values"
+        )
+    for arguments in _r_call_arguments(source, r"(?:ggplot2\s*::\s*)?annotate"):
+        if re.search(
+            r"\b[xy]\s*=\s*(?:grid\s*::\s*)?unit\s*\(",
+            arguments,
+            re.IGNORECASE,
+        ):
+            issues.append(
+                "ggplot2::annotate x/y positions use data coordinates and cannot "
+                "be grid::unit/unit values; use numeric data coordinates or place "
+                "the p-value in a subtitle/caption"
+            )
+        upper_limit_fraction = re.search(
+            r"\bx\s*=\s*[A-Za-z.][A-Za-z0-9._]*limits"
+            r"\s*\[\s*2(?:L)?\s*\]\s*\*\s*(0?\.\d+)",
+            arguments,
+            re.IGNORECASE,
+        )
+        if upper_limit_fraction and 0 < float(upper_limit_fraction.group(1)) < 1:
+            issues.append(
+                "placing annotation x at limits[2] times a fraction below one is "
+                "unsafe for negative axes because it moves beyond the upper limit; "
+                "use a subtitle/caption or interpolate from limits[1] plus a "
+                "fraction of diff(limits)"
+            )
+    for arguments in _r_call_arguments(code, r"(?:tidyr\s*::\s*)?pivot_longer"):
+        if re.search(
+            r"\bnames_sep\s*=\s*(['\"])_\1", arguments, re.IGNORECASE
+        ) and re.search(
+            r"\b[A-Za-z.][A-Za-z0-9.]*_[A-Za-z0-9.]+_[A-Za-z0-9.]+\b",
+            _r_mask_noncode(arguments),
+        ):
+            issues.append(
+                "pivot_longer(names_sep='_') is ambiguous because selected "
+                "compound column names contain multiple underscores; use an "
+                "explicit names_pattern that preserves the full metric name or "
+                "construct the long data directly"
+            )
+    if (
+        survival_task
+        and not survival_time_origin_grounded
+        and _R_SURVIVAL_ESTIMATION.search(source)
+    ):
+        issues.append(
+            "survival estimation is denied until the exact task text or an uploaded "
+            "source file in the immutable input manifest defines the time origin. "
+            "External retrieval and unrelated workspace references cannot establish "
+            "it; report the analysis as not estimable instead of searching or "
+            "retrying estimation"
+        )
+    return issues
 
 
 def _python_uses_survival_estimation(tree: ast.AST) -> bool:
@@ -794,25 +1104,23 @@ class ScientificToolOrderGate:
                         "reason": "Correct every high-confidence issue before execution.",
                         "issues": issues,
                     }
-        if (
-            tool_name == "run_r_analysis"
-            and isinstance(arguments, dict)
-            and self.survival_task
-            and not self.survival_time_origin_grounded
-        ):
+        if tool_name == "run_r_analysis" and isinstance(arguments, dict):
             code = arguments.get("code")
-            if isinstance(code, str) and _R_SURVIVAL_ESTIMATION.search(code):
+            issues = (
+                _r_scientific_preflight(
+                    code,
+                    survival_task=self.survival_task,
+                    survival_time_origin_grounded=self.survival_time_origin_grounded,
+                )
+                if isinstance(code, str)
+                else []
+            )
+            if issues:
                 return {
                     "status": "policy_denied",
                     "error": "SCIENTIFIC_CODE_PREFLIGHT_FAILED",
                     "reason": "Correct every high-confidence issue before execution.",
-                    "issues": [
-                        "survival estimation is denied until the exact task text or an "
-                        "uploaded source file in the immutable input manifest defines "
-                        "the time origin. External retrieval and unrelated workspace "
-                        "references cannot establish it; report the analysis as not "
-                        "estimable instead of searching or retrying estimation"
-                    ],
+                    "issues": issues,
                 }
         if (
             tool_name == "search_pubmed"
@@ -3220,24 +3528,47 @@ def _merge_plan_repair_findings(
     return tuple(merged)
 
 
+def _merge_plan_repair_lints(
+    existing: tuple[LintFinding, ...], reports: list[PlanLintReport]
+) -> tuple[LintFinding, ...]:
+    """Retain distinct deterministic lint findings across repair rounds."""
+
+    merged: list[LintFinding] = []
+    seen: set[tuple[str, str, str]] = set()
+    current = (finding for report in reports for finding in report.findings)
+    for finding in (*existing, *current):
+        key = (finding.code, finding.location, finding.message)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(finding)
+    return tuple(merged)
+
+
 async def _repair_plan(
     settings: Settings,
     planning: PlanningResult,
     on_visible_text: Callable[[str, str], None] | None = None,
     *,
     repair_findings: tuple[Finding, ...] = (),
+    repair_lints: tuple[LintFinding, ...] = (),
 ) -> PlanningResult:
     cumulative_findings = _merge_plan_repair_findings(repair_findings, planning.audit)
+    cumulative_lints = _merge_plan_repair_lints(repair_lints, planning.plan_lints)
     bundle = {
         "master_plan": planning.master_plan.model_dump(mode="json"),
         "audit": planning.audit.model_dump(mode="json"),
         "cumulative_repair_findings": [
             finding.model_dump(mode="json") for finding in cumulative_findings
         ],
+        "cumulative_plan_lints": [
+            finding.model_dump(mode="json") for finding in cumulative_lints
+        ],
         "instruction": (
-            "Correct every current blocking finding and every concrete, "
-            "correctable cumulative finding. Preserve every previously satisfied "
-            "repair requirement and genuine uncertainty."
+            "Correct every current blocking finding, every concrete correctable "
+            "cumulative finding, and every deterministic cumulative plan lint. "
+            "Preserve every previously satisfied repair requirement and genuine "
+            "uncertainty."
         ),
     }
     master = await request_structured(
@@ -3650,7 +3981,14 @@ async def _produce_report(
                     "reconciliation, or provenance generation. If that call fails, "
                     "make at most one direct retry from stderr. Execute only a "
                     "falsification test, display correction, or missing analysis "
-                    "required by a concrete finding. " + TABLE_PRECISION_REPAIR_GUIDANCE
+                    "required by a concrete finding. "
+                    "A controller-display-clearance-missing finding without a visible "
+                    "figure defect is an audit-attestation failure, not an artifact "
+                    "defect: preserve the existing figure so Gemma can re-audit the "
+                    "same raster. "
+                    + R_REPAIR_EXECUTION_GUIDANCE
+                    + " "
+                    + TABLE_PRECISION_REPAIR_GUIDANCE
                 ),
             }
         )
@@ -4439,6 +4777,19 @@ def _requires_pubmed_literature(task: TaskSpec) -> bool:
     if task.task_type == "software_engineering":
         return False
     objective = task.objective.casefold()
+    explicitly_nonbiomedical_software = bool(
+        re.search(r"\bsoftware(?:[- ]validation)?\b", objective)
+    ) and bool(
+        re.search(
+            r"\b(?:is|are)\s+(?:explicitly\s+)?not\s+"
+            r"(?:biomedical(?:\s+or\s+clinical)?|"
+            r"clinical(?:\s+or\s+biomedical)?)\s+"
+            r"(?:data|evidence|research|study|analysis)\b",
+            objective,
+        )
+    )
+    if explicitly_nonbiomedical_software:
+        return False
     objective = re.sub(
         r"\b(?:do\s+not|don't|must\s+not|no)\s+"
         r"(?:make|draw|state|include)?\s*(?:any\s+)?clinical\s+claims?\b",
@@ -5013,6 +5364,7 @@ async def run_scientific_task(
         _cancel_checkpoint(cancel_event)
         plan_repair_history = []
         plan_repair_findings: tuple[Finding, ...] = ()
+        plan_repair_lints: tuple[LintFinding, ...] = ()
         while (
             candidate.status == "requires_revision"
             and len(plan_repair_history) < settings.max_repair_rounds
@@ -5021,6 +5373,9 @@ async def run_scientific_task(
             previous = candidate
             plan_repair_findings = _merge_plan_repair_findings(
                 plan_repair_findings, candidate.audit
+            )
+            plan_repair_lints = _merge_plan_repair_lints(
+                plan_repair_lints, candidate.plan_lints
             )
             report_progress(
                 "plan-review",
@@ -5035,6 +5390,7 @@ async def run_scientific_task(
                 candidate,
                 record_planning_visible_text,
                 repair_findings=plan_repair_findings,
+                repair_lints=plan_repair_lints,
             )
             plan_repair_history.append(
                 {
@@ -5042,6 +5398,9 @@ async def run_scientific_task(
                     "cumulative_repair_findings": [
                         finding.model_dump(mode="json")
                         for finding in plan_repair_findings
+                    ],
+                    "cumulative_plan_lints": [
+                        finding.model_dump(mode="json") for finding in plan_repair_lints
                     ],
                     "rejected_planning": previous.model_dump(mode="json"),
                     "repaired_status": candidate.status,

@@ -1,38 +1,38 @@
 services:
   evidence-bench:
-    image: ghcr.io/kstawiski/evidence-gated-scientific-agent:${EVIDENCE_BENCH_VERSION:-0.4.24}
+    image: ghcr.io/kstawiski/evidence-gated-scientific-agent:${EVIDENCE_BENCH_VERSION:-0.4.25}
     pull_policy: always
 
   browser:
-    image: ghcr.io/kstawiski/evidence-gated-scientific-agent-browser:${EVIDENCE_BENCH_VERSION:-0.4.24}
+    image: ghcr.io/kstawiski/evidence-gated-scientific-agent-browser:${EVIDENCE_BENCH_VERSION:-0.4.25}
     pull_policy: always
 
   browser-egress:
-    image: ghcr.io/kstawiski/evidence-gated-scientific-agent-browser:${EVIDENCE_BENCH_VERSION:-0.4.24}
+    image: ghcr.io/kstawiski/evidence-gated-scientific-agent-browser:${EVIDENCE_BENCH_VERSION:-0.4.25}
     pull_policy: always
 
   browser-cdp-gateway:
-    image: ghcr.io/kstawiski/evidence-gated-scientific-agent-browser:${EVIDENCE_BENCH_VERSION:-0.4.24}
+    image: ghcr.io/kstawiski/evidence-gated-scientific-agent-browser:${EVIDENCE_BENCH_VERSION:-0.4.25}
     pull_policy: always
 
   browser-ui-gateway:
-    image: ghcr.io/kstawiski/evidence-gated-scientific-agent-browser:${EVIDENCE_BENCH_VERSION:-0.4.24}
+    image: ghcr.io/kstawiski/evidence-gated-scientific-agent-browser:${EVIDENCE_BENCH_VERSION:-0.4.25}
     pull_policy: always
 
   sandbox-gateway:
-    image: ghcr.io/kstawiski/evidence-gated-scientific-agent-browser:${EVIDENCE_BENCH_VERSION:-0.4.24}
+    image: ghcr.io/kstawiski/evidence-gated-scientific-agent-browser:${EVIDENCE_BENCH_VERSION:-0.4.25}
     pull_policy: always
 
   environment-gateway:
-    image: ghcr.io/kstawiski/evidence-gated-scientific-agent-browser:${EVIDENCE_BENCH_VERSION:-0.4.24}
+    image: ghcr.io/kstawiski/evidence-gated-scientific-agent-browser:${EVIDENCE_BENCH_VERSION:-0.4.25}
     pull_policy: always
 
   sandbox-worker:
-    image: ghcr.io/kstawiski/evidence-gated-scientific-agent:${EVIDENCE_BENCH_VERSION:-0.4.24}
+    image: ghcr.io/kstawiski/evidence-gated-scientific-agent:${EVIDENCE_BENCH_VERSION:-0.4.25}
     pull_policy: always
 
   environment-worker:
-    image: ghcr.io/kstawiski/evidence-gated-scientific-agent-packages:${EVIDENCE_BENCH_VERSION:-0.4.24}
+    image: ghcr.io/kstawiski/evidence-gated-scientific-agent-packages:${EVIDENCE_BENCH_VERSION:-0.4.25}
     pull_policy: always
     environment:
-      SCIENTIFIC_AGENT_WORKER_IMAGE_ID: ghcr.io/kstawiski/evidence-gated-scientific-agent-packages:${EVIDENCE_BENCH_VERSION:-0.4.24}
+      SCIENTIFIC_AGENT_WORKER_IMAGE_ID: ghcr.io/kstawiski/evidence-gated-scientific-agent-packages:${EVIDENCE_BENCH_VERSION:-0.4.25}

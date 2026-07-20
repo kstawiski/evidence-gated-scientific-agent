@@ -52,7 +52,7 @@ def test_researcher_forbids_mixed_effect_scales_and_zero_rounded_p_values():
     assert "use\ndesign-unspecified language" in SIMPLE_PLANNER
     assert "require design-unspecified language instead" in PLAN_AUDITOR
     assert "including booleans, to native Python scalars" in RESEARCHER
-    assert "`jsonlite::write_json(..., auto_unbox = TRUE)`" in RESEARCHER
+    assert "`jsonlite::write_json(..., auto_unbox=TRUE, digits=16)`" in RESEARCHER
     assert "never length-one arrays such as `[5.0]`" in RESEARCHER
     assert "never emit a non-null full_text_status" in REPORTER
 
@@ -75,6 +75,30 @@ def test_scientific_figure_policy_is_r_first_and_task_specific():
     assert "ragg::agg_png(filename" in normalized_researcher
     assert "does not export `png()`" in normalized_researcher
     assert "`agg_png()` uses `res`, not `dpi`" in normalized_researcher
+    assert "must never\nuse Python expressions" in RESEARCHER
+    assert "`utils::zip()` supports neither" in RESEARCHER
+    assert "compare `basename(zip_list$Name)`" in RESEARCHER
+    assert "`2 * stats::pt(abs(t_statistic), df, lower.tail=FALSE)`" in RESEARCHER
+    assert "force a far-away null value" in RESEARCHER
+    assert "`scales::breaks_pretty(n=4)`" in RESEARCHER
+    assert "`scales::label_number_auto()`" in RESEARCHER
+    assert "right-edge data annotation" in RESEARCHER
+    assert "explicitly load dplyr or magrittr" in RESEARCHER
+    assert "default `digits=4`" in RESEARCHER
+    assert "Raw plot data, source data" in RESEARCHER
+    assert "Reserve `/output/tables` for reader-facing" in RESEARCHER
+    assert "`ci[1] < estimate && estimate < ci[2]`" in RESEARCHER
+    assert "never\ncall nonexistent `systemfonts::font_add_google()`" in RESEARCHER
+    assert "`geom_point(aes(x=estimate, y=metric))`" in RESEARCHER
+    assert "never overwrite a p-value with a\nplot object" in RESEARCHER
+    assert "never pass\n`grid::unit()` or `unit()` values as x/y" in RESEARCHER
+    assert "do not split every underscore" in RESEARCHER
+    assert "default to optimized/intervention minus\nbaseline/reference" in RESEARCHER
+    assert "`cumulative_plan_lints`" in PLAN_REPAIRER
+    assert (
+        "deterministic jitter applied only to\nthe categorical y coordinate"
+        in RESEARCHER
+    )
     assert "Never call `install.packages()`" in normalized_researcher
     assert "Do not\nfit an equivalent blocked regression" in RESEARCHER
     assert "`Results.xlsx` and `scientific_report.md` are always" in SIMPLE_PLANNER
@@ -93,6 +117,19 @@ def test_scientific_figure_policy_is_r_first_and_task_specific():
     assert "any justified exception to the R-first figure policy" in " ".join(
         REPORTER.split()
     )
+
+
+def test_report_auditor_recomputes_two_sided_t_and_respects_task_scope():
+    assert "`2 * pt(abs(t), df, lower.tail=FALSE)`" in REPORT_AUDITOR
+    assert "both are approximately `8.89e-22`" in REPORT_AUDITOR
+    assert "`-0.09858` and `-0.0986` are compatible rounding" in REPORT_AUDITOR
+    assert "explicit TaskSpec description such as synthetic" in REPORT_AUDITOR
+
+
+def test_visual_critic_attests_absent_legends_and_annotations():
+    assert "confirm its\nabsence by direct inspection" in DISPLAY_AUDITOR
+    assert "still add the `legend-data` clearance reference" in DISPLAY_AUDITOR
+    assert "still add the `annotation-data` clearance reference" in DISPLAY_AUDITOR
 
 
 def test_researcher_documents_matplotlib_hlines_return_type():
@@ -119,9 +156,10 @@ def test_researcher_documents_matplotlib_hlines_return_type():
     assert "jitter only the categorical position coordinate" in RESEARCHER
     assert "consecutive integer centers" in RESEARCHER
     assert "jitter\nenvelopes overlap" in RESEARCHER
-    assert "point estimate, and both confidence-interval endpoints" in RESEARCHER
-    assert "visible numeric ticks" in RESEARCHER
-    assert "never\nerase the scale with set_xticks([])" in RESEARCHER
+    assert "point estimate and both confidence-interval endpoints" in RESEARCHER
+    assert "off-range null" in RESEARCHER
+    assert "visible, nonoverlapping numeric ticks" in RESEARCHER
+    assert "never erase the scale with set_xticks([])" in RESEARCHER
     assert "without `openssl`, `digest`" in RESEARCHER
     assert "shifted or duplicated contrast interval" in REPORT_AUDITOR
     assert "Shared boolean quality-control\nfields" in RESEARCHER

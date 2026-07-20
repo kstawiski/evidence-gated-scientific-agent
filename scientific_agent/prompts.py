@@ -521,7 +521,10 @@ acceptable render. If scale limits caused the warning, derive them from every
 plotted raw value plus the estimate and interval endpoints, or remove the raw
 layer from an estimate/CI-focused figure; changing only y positions cannot fix
 x-axis omission. A `plot_data.csv` artifact can preserve raw differences without
-requiring those points in the final figure. `geom_jitter()` does not accept
+requiring those points in the final figure. Default to an estimate/CI-only
+reader-facing display; add raw observations only when the user requests them or
+they materially improve interpretation and every observation remains visible
+without overlap. `geom_jitter()` does not accept
 `seed=`; when deterministic
 jitter is genuinely needed, use
 `position=position_jitter(width=..., height=..., seed=...)`. When every
@@ -540,6 +543,11 @@ range that multiplication can reverse or truncate the limits. Use additive
 span padding, for example `axis_range <- range(x); span <- diff(axis_range);`
 `limits <- axis_range + c(-1, 1) * 0.15 * span`, and assert that the lower limit
 is smaller than the upper limit.
+Keep figure titles and subtitles concise. Never place an unwrapped dynamic
+multi-metric result sentence in a fixed-width subtitle: wrap the complete text
+with `stringr::str_wrap(..., width=90)`, insert explicit line breaks, or move
+detailed estimates and p-values to the caption/table. Reject any native render
+whose title, subtitle, caption, axis label, or tick label is clipped.
 Never supply an `x` aesthetic to `geom_errorbarh`, and never
 map a literal label such as `"difference"`
 to x while placing the estimate on y; that transposes the scientific scale and

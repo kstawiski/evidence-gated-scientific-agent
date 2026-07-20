@@ -156,13 +156,18 @@ R_REPAIR_EXECUTION_GUIDANCE = (
     "all plotted raw values, estimates, and interval endpoints, or remove the raw "
     "layer from an estimate/CI-focused figure; changing only y positions does not "
     "repair x-axis omission. plot_data.csv can preserve raw differences without "
-    "requiring them to appear in the figure. "
+    "requiring them to appear in the figure. Default to an estimate/CI-only "
+    "display; include raw observations only when requested or materially useful "
+    "and when every point remains visible without overlap. "
     "Never pad range endpoints multiplicatively with range(x) * c(0.95, 1.05): "
     "for an all-negative range this can reverse or truncate the limits. Use "
     "axis_range <- range(x); span <- diff(axis_range); limits <- axis_range + "
     "c(-1, 1) * 0.15 * span, and assert limits[1] < limits[2]. "
     "geom_jitter does not accept seed=; when deterministic jitter is actually "
     "needed, pass position=position_jitter(width=..., height=..., seed=...). "
+    "Never use an unwrapped paste0() multi-metric subtitle in a fixed-size "
+    "figure; wrap the complete subtitle with stringr::str_wrap(..., width=90), "
+    "add explicit line breaks, or move details to the caption/table. "
     "Prefer scales::label_number_auto() and ensure every rendered continuous-axis "
     "tick label is unique. Put long p-values in a panel subtitle or caption, not "
     "in a right-edge annotation that can be clipped. Use base R or the native |> "
@@ -798,6 +803,21 @@ def _r_scientific_preflight(
                 "geom_jitter does not accept seed=; use "
                 "position=position_jitter(width=..., height=..., seed=...) when "
                 "deterministic jitter is needed"
+            )
+    for arguments in _r_call_arguments(
+        source,
+        r"(?:(?:patchwork\s*::\s*)?plot_annotation|(?:ggplot2\s*::\s*)?labs)",
+    ):
+        if re.search(
+            r"\bsubtitle\s*=\s*paste0\s*\(", arguments, re.IGNORECASE
+        ) and not re.search(
+            r"(?:stringr\s*::\s*)?str_wrap\s*\(", arguments, re.IGNORECASE
+        ):
+            issues.append(
+                "A dynamic paste0() figure subtitle can overflow the fixed-size "
+                "render; wrap the complete subtitle with "
+                "stringr::str_wrap(..., width=90), insert explicit line breaks, "
+                "or move detailed values to the caption/table"
             )
     for arguments in _r_call_arguments(
         source, r"(?:ggplot2\s*::\s*)?scale_[xy]_continuous"

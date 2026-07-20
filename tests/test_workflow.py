@@ -906,6 +906,10 @@ def test_r_survival_code_preflight_requires_controller_grounded_time_origin():
             "no bind_lapply() function",
         ),
         (
+            'combined <- plot_annotation(subtitle=paste0("error=", err, " runtime=", rt))',
+            "dynamic paste0() figure subtitle",
+        ),
+        (
             "ggplot() + geom_point(data=raw, aes(x=difference, y=replicate)) + "
             'geom_point(data=summary, aes(x=estimate, y="Mean diff")) + '
             "scale_y_discrete()",
@@ -986,6 +990,21 @@ wide <- pivot_wider(data, names_from=engine,
     values_from=c(error_rate, runtime_ms),
     names_glue="{engine}_{.value}")
 wide <- mutate(wide, delta=optimized_error_rate-baseline_error_rate)
+"""
+    gate = ScientificToolOrderGate(frozenset())
+
+    denied = gate.before_tool(
+        "run_r_analysis", ComputationEvidence(), arguments={"code": code}
+    )
+
+    assert denied is None
+
+
+def test_r_code_preflight_accepts_wrapped_dynamic_subtitle():
+    code = """
+combined <- plot_annotation(
+    subtitle=stringr::str_wrap(paste0("error=", err, " runtime=", rt), width=90)
+)
 """
     gate = ScientificToolOrderGate(frozenset())
 

@@ -167,7 +167,9 @@ R_REPAIR_EXECUTION_GUIDANCE = (
     "tick label is unique. Put long p-values in a panel subtitle or caption, not "
     "in a right-edge annotation that can be clipped. Use base R or the native |> "
     "pipe unless dplyr/magrittr is loaded explicitly; never emit an unloaded %>% "
-    "operator. Do not mix factor/discrete and numeric positions on the same plot "
+    "operator. End rowwise dplyr pipelines with dplyr::ungroup(); there is no "
+    "unrowwise() function. Do not mix factor/discrete and numeric positions on "
+    "the same plot "
     "axis. Write machine-readable R results with "
     "jsonlite::write_json(..., auto_unbox=TRUE, digits=16) (or digits=NA); the "
     "default digits=4 is not full precision. Write raw plot/source data CSVs "
@@ -563,6 +565,7 @@ _R_SYSTEMFONTS_GOOGLE = re.compile(
     r"\bsystemfonts\s*::\s*font_add_google\s*\(", re.IGNORECASE
 )
 _R_MAGRITTR_PIPE = re.compile(r"%>%")
+_R_NONEXISTENT_UNROWWISE = re.compile(r"\bunrowwise\s*\(", re.IGNORECASE)
 _R_PIPE_PROVIDER_IMPORT = re.compile(
     r"\b(?:library|require)\s*\(\s*(?:['\"])?"
     r"(?:dplyr|magrittr|tidyverse)(?:['\"])?\s*\)",
@@ -683,6 +686,11 @@ def _r_scientific_preflight(
             "R code uses the magrittr %>% pipe without loading dplyr, magrittr, "
             "or tidyverse; use base R/native |> syntax or load the required "
             "package explicitly"
+        )
+    if _R_NONEXISTENT_UNROWWISE.search(source):
+        issues.append(
+            "R/dplyr has no unrowwise() function; end a rowwise pipeline with "
+            "dplyr::ungroup()"
         )
     if _R_PLOT_DATA_IN_TABLES.search(code):
         issues.append(

@@ -464,6 +464,8 @@ State the subtraction direction before calculation and use it consistently in
 code, tables, figures, JSON, and prose; for a named optimized/intervention level
 versus baseline/reference, default to optimized/intervention minus
 baseline/reference unless the task specifies another estimand.
+If `rowwise()` is used while constructing paired differences, end that grouping
+with `dplyr::ungroup()`; there is no dplyr `unrowwise()` function.
 In R, obtain paired-difference inference from one
 `stats::t.test(differences, mu=0)` object and extract its estimate, confidence
 interval, statistic, parameter, and p-value together. If a two-sided t p-value

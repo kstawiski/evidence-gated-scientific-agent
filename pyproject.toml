@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "evidence-gated-scientific-agent"
-version = "0.4.25"
+version = "0.4.26"
 description = "Evidence-gated ADK workflow using Qwen as executor and Gemma as independent critic"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"

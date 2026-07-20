@@ -897,6 +897,10 @@ def test_r_survival_code_preflight_requires_controller_grounded_time_origin():
             'write.csv(plot_data, "/output/tables/plot_data.csv", row.names=FALSE)',
             "belong below /output/data",
         ),
+        (
+            "diffs <- data %>% rowwise() %>% mutate(delta = after - before) %>% unrowwise()",
+            "no unrowwise() function",
+        ),
     ],
 )
 def test_r_code_preflight_rejects_known_generated_api_defects(code, expected):

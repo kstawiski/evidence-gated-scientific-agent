@@ -157,6 +157,10 @@ R_REPAIR_EXECUTION_GUIDANCE = (
     "layer from an estimate/CI-focused figure; changing only y positions does not "
     "repair x-axis omission. plot_data.csv can preserve raw differences without "
     "requiring them to appear in the figure. "
+    "Never pad range endpoints multiplicatively with range(x) * c(0.95, 1.05): "
+    "for an all-negative range this can reverse or truncate the limits. Use "
+    "axis_range <- range(x); span <- diff(axis_range); limits <- axis_range + "
+    "c(-1, 1) * 0.15 * span, and assert limits[1] < limits[2]. "
     "geom_jitter does not accept seed=; when deterministic jitter is actually "
     "needed, pass position=position_jitter(width=..., height=..., seed=...). "
     "Prefer scales::label_number_auto() and ensure every rendered continuous-axis "
@@ -727,6 +731,19 @@ def _r_scientific_preflight(
                 "geom_jitter does not accept seed=; use "
                 "position=position_jitter(width=..., height=..., seed=...) when "
                 "deterministic jitter is needed"
+            )
+    for arguments in _r_call_arguments(
+        source, r"(?:ggplot2\s*::\s*)?scale_[xy]_continuous"
+    ):
+        if re.search(
+            r"\blimits\s*=\s*range\s*\([\s\S]{1,800}\)\s*\*\s*c\s*\(",
+            arguments,
+            re.IGNORECASE,
+        ):
+            issues.append(
+                "multiplying range endpoints by c(...) is unsafe for negative "
+                "values and can reverse or truncate the axis; pad additively "
+                "from span <- diff(axis_range), then assert limits[1] < limits[2]"
             )
     if _R_SYSTEMFONTS_GOOGLE.search(source):
         issues.append(

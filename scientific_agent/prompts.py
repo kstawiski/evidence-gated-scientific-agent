@@ -518,6 +518,11 @@ requiring those points in the final figure. `geom_jitter()` does not accept
 jitter is genuinely needed, use
 `position=position_jitter(width=..., height=..., seed=...)`. When every
 categorical y position is already unique, use `geom_point()` without jitter.
+Never pad axis endpoints with `range(x) * c(0.95, 1.05)`: for an all-negative
+range that multiplication can reverse or truncate the limits. Use additive
+span padding, for example `axis_range <- range(x); span <- diff(axis_range);`
+`limits <- axis_range + c(-1, 1) * 0.15 * span`, and assert that the lower limit
+is smaller than the upper limit.
 Never supply an `x` aesthetic to `geom_errorbarh`, and never
 map a literal label such as `"difference"`
 to x while placing the estimate on y; that transposes the scientific scale and

@@ -856,6 +856,10 @@ def test_r_survival_code_preflight_requires_controller_grounded_time_origin():
             "geom_jitter(aes(x=value, y=group), width=0, height=.1, seed=42)",
             "geom_jitter does not accept seed=",
         ),
+        (
+            "scale_x_continuous(limits=range(c(raw, ci_low, ci_high)) * c(0.95, 1.05))",
+            "unsafe for negative values",
+        ),
         ("stopifnot(ci[1] < estimate < ci[2])", "does not support chained"),
         (
             'systemfonts::font_add_google("Open Sans", "OpenSans")',

@@ -56,6 +56,7 @@ from scientific_agent.schemas import (
     LintFinding,
     KnowledgeVisualEvidence,
     PLAN_AUDIT_CRITERIA,
+    PlanLintReport,
     PlanAuditChecklist,
     PlanAuditFinding,
     PlanAuditReview,
@@ -469,6 +470,22 @@ def test_pubmed_classifier_ignores_explicit_no_clinical_claim_instruction():
     assert not _requires_pubmed_literature(task)
 
 
+def test_pubmed_classifier_honors_explicit_nonbiomedical_software_scope():
+    task = _task().model_copy(
+        update={
+            "objective": (
+                "Analyze validation.csv as synthetic software-validation data. "
+                "It is not biomedical or clinical evidence; do not make clinical "
+                "claims and do not search the literature."
+            ),
+            "scientific_domain": "general",
+            "task_type": "mixed",
+        }
+    )
+
+    assert not _requires_pubmed_literature(task)
+
+
 @pytest.mark.parametrize(
     "objective,domain",
     [
@@ -809,6 +826,82 @@ def test_r_survival_code_preflight_requires_controller_grounded_time_origin():
     assert denied is not None
     assert denied["error"] == "SCIENTIFIC_CODE_PREFLIGHT_FAILED"
     assert "defines the time origin" in " ".join(denied["issues"])
+
+
+@pytest.mark.parametrize(
+    "code, expected",
+    [
+        (
+            'Path("/output/data").mkdir(parents=True, exist_ok=True)',
+            "dir.create",
+        ),
+        (
+            "utils::zip(zipfile=target, files=c(a, b), junk.paths=FALSE)",
+            "junk.paths=",
+        ),
+        (
+            "utils::zip(\n  zipfile=target,\n  files=c(a, b),\n  recurse=FALSE\n)",
+            "recurse=",
+        ),
+        ('ragg::png("figure.png")', "does not export png"),
+        (
+            'ragg::agg_png("figure.png", width=6, height=4, units="in", dpi=320)',
+            "uses res=",
+        ),
+        ("stopifnot(ci[1] < estimate < ci[2])", "does not support chained"),
+        (
+            'systemfonts::font_add_google("Open Sans", "OpenSans")',
+            "does not export font_add_google",
+        ),
+        (
+            "p_err <- test_result$p.value\np_err <- ggplot(results, aes(x, y))",
+            "overwrites numeric p-value",
+        ),
+        (
+            'ggplot2::annotate("text", x=grid::unit(0.9, "npc"), y=1, label="p")',
+            "use data coordinates",
+        ),
+        (
+            'plot_data <- tidyr::pivot_longer(data, cols=c(baseline_error_rate, optimized_error_rate), names_to=c("engine", "metric"), names_sep="_")',
+            "multiple underscores",
+        ),
+    ],
+)
+def test_r_code_preflight_rejects_known_generated_api_defects(code, expected):
+    gate = ScientificToolOrderGate(frozenset())
+
+    denied = gate.before_tool(
+        "run_r_analysis", ComputationEvidence(), arguments={"code": code}
+    )
+
+    assert denied is not None
+    assert denied["error"] == "SCIENTIFIC_CODE_PREFLIGHT_FAILED"
+    assert expected in " ".join(denied["issues"])
+
+
+def test_r_code_preflight_accepts_supported_output_apis():
+    code = """
+target <- "/output/figures/result.png"
+dir.create(dirname(target), recursive=TRUE, showWarnings=FALSE)
+stopifnot(ci[1] < estimate && estimate < ci[2])
+systemfonts::match_font("Open Sans")
+p_value_error <- test_result$p.value
+plot_error <- ggplot(results, aes(x=estimate, y=metric))
+plot_error <- plot_error + annotate("text", x=0.1, y=1, label="p < 0.001")
+ragg::agg_png(target, width=6, height=4, units="in", res=320,
+              background="white")
+print(plot_object)
+dev.off()
+utils::zip(zipfile="/output/deliverables/results.zip",
+           files=c("/output/data/results.json", target))
+"""
+    gate = ScientificToolOrderGate(frozenset())
+
+    denied = gate.before_tool(
+        "run_r_analysis", ComputationEvidence(), arguments={"code": code}
+    )
+
+    assert denied is None
 
 
 def test_r_survival_code_preflight_denies_manual_cif_without_time_origin():
@@ -1618,7 +1711,18 @@ async def test_plan_repair_preserves_controller_task_and_uses_dedicated_prompt(
                 )
             ],
         ),
-        plan_lints=[],
+        plan_lints=[
+            PlanLintReport(
+                passed=False,
+                findings=[
+                    LintFinding(
+                        code="unmapped_deliverable",
+                        location="task.deliverables[0]",
+                        message="No declared output produces the requested bundle.",
+                    )
+                ],
+            )
+        ],
         status="requires_revision",
     )
 
@@ -1631,6 +1735,26 @@ async def test_plan_repair_preserves_controller_task_and_uses_dedicated_prompt(
     assert [
         item["finding_id"] for item in seen["payload"]["cumulative_repair_findings"]
     ] == ["plan-1", "plan-output"]
+    assert seen["payload"]["cumulative_plan_lints"] == [
+        {
+            "code": "unmapped_deliverable",
+            "location": "task.deliverables[0]",
+            "message": "No declared output produces the requested bundle.",
+            "blocking": True,
+        }
+    ]
+
+
+def test_plan_repair_lints_accumulate_and_deduplicate():
+    first = LintFinding(code="lint-a", location="plan", message="Fix A")
+    second = LintFinding(code="lint-b", location="plan.steps[0]", message="Fix B")
+
+    merged = orchestrator_module._merge_plan_repair_lints(
+        (first,),
+        [PlanLintReport(passed=False, findings=[first, second])],
+    )
+
+    assert merged == (first, second)
 
 
 def test_plan_repair_findings_accumulate_without_losing_same_criterion():
@@ -4322,6 +4446,15 @@ def test_research_repair_instruction_disambiguates_significant_digits():
 
     assert "at most four significant digits, not four decimal places" in guidance
     assert "10.897 -> 10.9 or 10.90" in guidance
+    assert "utils::zip(zipfile=target_zip, files=files)" in (
+        orchestrator_module.R_REPAIR_EXECUTION_GUIDANCE
+    )
+    assert "do not force a distant zero" in (
+        orchestrator_module.R_REPAIR_EXECUTION_GUIDANCE
+    )
+    assert "never a chained lower < estimate < upper" in (
+        orchestrator_module.R_REPAIR_EXECUTION_GUIDANCE
+    )
 
 
 @pytest.mark.anyio

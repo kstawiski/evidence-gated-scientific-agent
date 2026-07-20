@@ -105,10 +105,11 @@ do not narrate the synthesis."""
 
 PLAN_REPAIRER = (
     """Repair the supplied MasterPlan against every concrete blocking
-finding in the current independent audit and every concrete, correctable finding
-in `cumulative_repair_findings`. The cumulative list includes earlier requirements
-that may already be satisfied and nonblocking comments observed while a blocking
-repair cycle was active. Verify and preserve every satisfied earlier requirement;
+finding in the current independent audit, every concrete correctable finding in
+`cumulative_repair_findings`, and every deterministic finding in
+`cumulative_plan_lints`. The cumulative lists include earlier requirements that
+may already be satisfied and nonblocking comments observed while a blocking repair
+cycle was active. Verify and preserve every satisfied earlier requirement;
 never silently drop or regress one while addressing a later finding. Operationally
 resolve a correctable nonblocking comment when the controller task and inspected
 input profile supply enough information, but do not invent scientific assumptions,
@@ -418,6 +419,15 @@ Put final report figures below /output/figures and final report tables below
 The output subdirectories are not precreated: before every write, Python must use
 `Path(target).parent.mkdir(parents=True, exist_ok=True)` (or equivalent), and R
 must use `dir.create(dirname(target), recursive=TRUE, showWarnings=FALSE)`.
+Keep the submitted program entirely in its declared language: R code must never
+use Python expressions such as `Path(target).parent.mkdir(...)` or
+`Path(target).mkdir(...)`.
+R does not support Python-style chained comparisons: write
+`ci[1] < estimate && estimate < ci[2]`, never
+`ci[1] < estimate < ci[2]`. Open Sans is already installed in the release image;
+use `systemfonts::match_font("Open Sans")` when verification is useful, and never
+call nonexistent `systemfonts::font_add_google()` or attempt a network font
+download from sandbox code.
 Before plotting, write a one-sentence value gate stating the estimand, intended
 message, and why a figure is more informative than a table. Use R for the final
 reader-facing scientific figure unless the user explicitly requested Python or a
@@ -450,6 +460,16 @@ For an explicit two-level paired comparison keyed by replicate, use the direct
 paired differences and paired estimate/test required by the locked plan. Do not
 fit an equivalent blocked regression only to duplicate that calculation, and do
 not add unrequested normality-triggered method switches or outlier exclusions.
+State the subtraction direction before calculation and use it consistently in
+code, tables, figures, JSON, and prose; for a named optimized/intervention level
+versus baseline/reference, default to optimized/intervention minus
+baseline/reference unless the task specifies another estimand.
+In R, obtain paired-difference inference from one
+`stats::t.test(differences, mu=0)` object and extract its estimate, confidence
+interval, statistic, parameter, and p-value together. If a two-sided t p-value
+must be recomputed, use exactly
+`2 * stats::pt(abs(t_statistic), df, lower.tail=FALSE)`; never subtract that
+already upper-tail probability from one.
 Compute inference and tidy result tables in governed analysis code before plotting;
 the plotting layer must not choose tests from the observed data. Use a restrained
 theme_minimal-based style, approximately 8-point
@@ -470,6 +490,33 @@ nonzero p-value in scientific notation or as an inequality (for example,
 table and figure values to conventional scientific display precision (normally
 3-4 significant figures) while preserving full precision in machine-readable
 JSON.
+When metrics have different units or materially different scales, use separate
+panels with independent numeric axes and human-readable metric labels. Do not
+force a far-away null value into a panel when that would compress the estimate
+and confidence interval into an unreadable mark or create mostly empty space;
+instead use a tight honest range with margin, make the interval visibly occupy a
+meaningful part of the panel, and state in the caption/table that the interval
+excludes the off-range null. Use nonoverlapping pretty breaks (for ggplot2,
+`scales::breaks_pretty(n=4)` is a suitable default) and reject the render if tick
+labels touch or concatenate. For reader-facing table strings, prefer
+`sprintf("%.4g", x)` or an equivalently explicit significant-digit rule; never
+use `formatC()` without an explicit `digits=` value, and assert that displayed
+rounded estimates still agree with the full-precision values.
+For a horizontal R estimation display, map the quantitative value to x and the
+category to y: use `geom_point(aes(x=estimate, y=metric))` with
+`geom_errorbarh(aes(xmin=ci_low, xmax=ci_high, y=metric))`. Raw paired
+differences likewise belong on x, with any deterministic jitter applied only to
+the categorical y coordinate. Never map a literal label such as `"difference"`
+to x while placing the estimate on y; that transposes the scientific scale and
+can combine discrete x values with continuous interval endpoints.
+Keep numeric inferential objects and ggplot objects under distinct semantic names
+(for example `p_value_error` and `plot_error`); never overwrite a p-value with a
+plot object. `ggplot2::annotate()` positions are data coordinates, so never pass
+`grid::unit()` or `unit()` values as x/y; use numeric data positions or a
+subtitle/caption. If source column names contain compound metrics such as
+`error_rate` or `runtime_ms`, do not split every underscore with
+`pivot_longer(names_sep="_")`; use an explicit capturing `names_pattern` that
+preserves the complete metric name or construct the long data directly.
 For survival or competing-risk work, define the time origin, endpoint event,
 censoring rule, analysis population, and competing event before estimation. Two
 outcomes are not competing risks merely because both are recorded: verify that
@@ -560,10 +607,11 @@ duplicate the between-group contrast interval around the individual group means.
 Assert both the group-interval endpoints and the contrast-interval endpoints
 against their separately named machine-result fields before saving.
 If explicit effect-axis limits are set, assert before saving that they enclose the
-scientific null, the point estimate, and both confidence-interval endpoints.
-Keep visible numeric ticks on every quantitative effect-estimate axis, including
-ticks that make the null, estimate, and confidence interval interpretable; never
-erase the scale with set_xticks([]) or blank tick labels.
+point estimate and both confidence-interval endpoints. Include the scientific null
+only when the interval remains legible; otherwise disclose the off-range null in
+the caption or table. Keep visible, nonoverlapping numeric ticks on every
+quantitative effect-estimate axis so the estimate and confidence interval remain
+interpretable; never erase the scale with set_xticks([]) or blank tick labels.
 Keep effect-panel annotations inside the panel: place them in axes-fraction
 coordinates with the matching axes transform, or use annotate() with a bounded
 offset from the estimand. Do not place annotation text at an arbitrary data-space
@@ -593,6 +641,11 @@ the same registered sources, and include the final validated figures/tables. Als
 render deterministic slide previews below /output/visual-review so Gemma—not
 Qwen—can inspect slide text, layout, clipping, and scientific consistency. Do not
 claim a requested deliverable exists until the sandbox returns it as an artifact.
+For a base-R ZIP, use the real API
+`utils::zip(zipfile=target_zip, files=files)` without invented `junk.paths=` or
+`recurse=` arguments; `utils::zip()` supports neither. Arrange member paths before
+the call when a particular archive layout is required, then verify the resulting
+ZIP can be listed and contains every requested file.
 When a task requests one reader-facing figure or table plus independent
 cross-language verification, create the presentation display only once. Every
 required computation language must first emit its numeric JSON and exit
@@ -636,8 +689,10 @@ for example `xerr=[[estimate-low], [high-estimate]]`.
 When an axis is labeled with an effect estimate such as a mean difference, plot
 the estimate on x with `xerr` and use a constant categorical y position. Never
 fix x at zero and put the estimate or its confidence interval on y with `yerr`.
-Keep the scientific null value visible on the effect-estimate axis; when drawing
-a zero reference line, compute explicit axis limits that include zero. Do not call
+Keep the scientific null visible only when it does not destroy interval
+readability. If a far-away null is outside a tight honest plotting range, omit it
+from the domain and disclose that fact in the caption or table. When drawing a
+zero reference line, compute explicit axis limits that include zero. Do not call
 `legend()` on an axis with no honestly labeled artists or leave an empty legend box.
 Do not use `twinx()`, `twiny()`, `secondary_xaxis()`, or `secondary_yaxis()` in a
 scientific display. Put a between-group contrast and its confidence interval in a
@@ -949,6 +1004,17 @@ earlier superseded execution is provenance, not the result. Treat
 `computation_evidence.referenced_json_values` as the bounded, hash-verified values
 from JSON artifacts cited by the report. Use those values for numerical checks;
 do not claim that a cited JSON value is unavailable when it is present there.
+For a two-sided t result, check the p-value with
+`2 * pt(abs(t), df, lower.tail=FALSE)` (or the mathematically identical survival
+function) before alleging inconsistency; compatible numerical tolerance is not a
+defect. If the finding's own recomputation equals the reported value—for example,
+both are approximately `8.89e-22`—omit the finding rather than requesting a no-op
+rerun. Compare a reader table with machine output at the table's displayed
+precision: `-0.09858` and `-0.0986` are compatible rounding, not a contradiction.
+Never demand machine precision in the reader table or call extra compatible
+digits a fidelity error. Treat an explicit TaskSpec description such as synthetic, simulated, or
+nonclinical as controller evidence about task scope, and do not call that label
+unsupported merely because it is not inferable from the uploaded values alone.
 If a required cited JSON appears only in `referenced_json_unavailable`, report the
 specific unavailable reason instead of inventing its contents. Treat
 nonsignificant Shapiro-Wilk or Levene tests as failure to detect a departure,

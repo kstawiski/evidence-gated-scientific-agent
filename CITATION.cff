@@ -5,7 +5,7 @@ type: software
 authors:
   - family-names: Stawiski
     given-names: Konrad
-version: 0.4.24
+version: 0.4.25
 license: Apache-2.0
 repository-code: "https://github.com/kstawiski/evidence-gated-scientific-agent"
 url: "https://github.com/kstawiski/evidence-gated-scientific-agent"

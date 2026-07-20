@@ -531,6 +531,7 @@ def test_remote_preflight_uses_managed_worker_paths(tmp_path, monkeypatch):
     assert [item[0] for item in calls] == ["python", "r"]
     assert all(item[1].parts[-1] == "files" for item in calls)
     assert all("runs" in item[2].parts for item in calls)
+    assert all(item[2].parts[-2:] == ("computations", "attempt-1") for item in calls)
     assert len(released) == 1
     assert not any((tmp_path / "workspaces").iterdir())
 

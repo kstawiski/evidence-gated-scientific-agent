@@ -32,6 +32,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends \
         bubblewrap \
         ca-certificates \
+        fonts-open-sans \
         libcurl4 \
         libfontconfig1 \
         libfreetype6 \
@@ -58,8 +59,16 @@ RUN apt-get update \
         r-cran-data.table \
         r-cran-dplyr \
         r-cran-ggplot2 \
+        r-cran-ggrepel \
         r-cran-jsonlite \
+        r-cran-patchwork \
+        r-cran-ragg \
+        r-cran-scales \
         r-cran-survival \
+        r-cran-svglite \
+        r-cran-systemfonts \
+        r-cran-viridislite \
+        r-cran-colorspace \
         tesseract-ocr \
         tini \
         util-linux \

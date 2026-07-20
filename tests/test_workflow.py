@@ -1389,6 +1389,22 @@ def test_task_spec_exposes_exact_virtual_input_manifest_to_planners():
     ]
 
 
+def test_code_authorization_binds_r_first_figure_policy_to_task_contract():
+    task = _prepare_task_spec(
+        "Analyze the uploaded dataset and create a scientific figure.",
+        enable_code=True,
+    )
+
+    assert any(
+        "Reader-facing scientific figures use R by default" in item
+        for item in task.constraints
+    )
+    assert any(
+        "missing R packages are installed from canonical CRAN" in item
+        for item in task.acceptance_tests
+    )
+
+
 def test_task_spec_exposes_controller_input_profile_to_planners():
     from scientific_agent.schemas import InputProfile
 

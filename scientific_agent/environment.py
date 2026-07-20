@@ -225,6 +225,11 @@ def build_environment_tools(manager: EnvironmentManager):
     def install_r_packages(packages: list[str], repository: str = "cran") -> dict:
         """Install packages from CRAN or Bioconductor for this workspace.
 
+        Use this when a required R package is missing or the image version is too
+        old. The current repository release is installed into a version-recorded,
+        read-only workspace library used by later analysis calls. Do not silently
+        replace the requested scientific method with a weaker package or Python.
+
         Args:
             packages: Canonical R package names.
             repository: Exactly "cran" or "bioconductor".

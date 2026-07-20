@@ -26,6 +26,21 @@ from .schemas import ArtifactRef, ComputationEvidence, ComputationRecord
 
 
 Language = Literal["python", "r"]
+R_ANALYSIS_BASELINE_PACKAGES = (
+    "ggplot2",
+    "ragg",
+    "systemfonts",
+    "svglite",
+    "patchwork",
+    "ggrepel",
+    "scales",
+    "viridisLite",
+    "colorspace",
+    "dplyr",
+    "survival",
+    "data.table",
+    "jsonlite",
+)
 RETURN_TEXT_BYTES = 32 * 1024
 PREVIEW_TEXT_BYTES = 8 * 1024
 PREVIEW_SUFFIXES = {".csv", ".json", ".md", ".tsv", ".txt"}
@@ -1198,8 +1213,11 @@ def build_analysis_tools(executor: AnalysisExecutor):
         The assigned project is read-only at /workspace. Earlier calls are
         read-only at /prior/<execution-id>/output, and prior repair attempts at
         /history/attempt-N/<execution-id>/output. Write all tables,
-        figures, and machine-readable results below /output. ggplot2, dplyr,
-        survival, data.table, and the installed R libraries are available.
+        figures, and machine-readable results below /output. The curated R figure
+        baseline includes ggplot2, ragg, systemfonts, svglite, patchwork, ggrepel,
+        scales, viridisLite, and colorspace alongside dplyr, survival, data.table,
+        and workspace-installed R libraries. Verify version-sensitive requirements
+        and use the isolated package installer for current specialist packages.
 
         Args:
             code: Complete R script to execute.
@@ -1270,10 +1288,13 @@ def sandbox_preflight(settings: SandboxSettings, workspace: Path | None = None) 
             ),
             timeout_seconds=15,
         )
+        r_packages = ",".join(
+            f"'{package}'" for package in R_ANALYSIS_BASELINE_PACKAGES
+        )
         r_probe = executor.execute(
             "r",
             (
-                "stopifnot(all(vapply(c('ggplot2','dplyr','survival','data.table'), "
+                f"stopifnot(all(vapply(c({r_packages}), "
                 "requireNamespace, logical(1), quietly=TRUE)));"
                 "writeLines('ok', '/output/r-ok.txt')"
             ),

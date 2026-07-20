@@ -5,7 +5,7 @@ services:
     build:
       context: .
       target: runtime
-    image: evidence-bench:0.4.18
+    image: evidence-bench:0.4.19
     restart: unless-stopped
     env_file:
       - path: .env
@@ -59,7 +59,7 @@ services:
     build:
       context: .
       dockerfile: browser/Dockerfile
-    image: evidence-bench-browser:0.4.18
+    image: evidence-bench-browser:0.4.19
     user: "${BROWSER_RUNTIME_USER:-0:0}"
     restart: unless-stopped
     environment:
@@ -103,7 +103,7 @@ services:
     build:
       context: .
       dockerfile: browser/Dockerfile
-    image: evidence-bench-browser:0.4.18
+    image: evidence-bench-browser:0.4.19
     entrypoint: ["/usr/bin/tini", "--", "/usr/sbin/squid", "-N", "-f", "/etc/squid/evidence-bench.conf"]
     user: "proxy:proxy"
     restart: unless-stopped
@@ -133,7 +133,7 @@ services:
     build:
       context: .
       dockerfile: browser/Dockerfile
-    image: evidence-bench-browser:0.4.18
+    image: evidence-bench-browser:0.4.19
     entrypoint: ["/usr/bin/tini", "--", "/usr/bin/socat"]
     command: ["TCP-LISTEN:9222,reuseaddr,fork", "TCP:browser:9222"]
     user: "65534:65534"
@@ -167,7 +167,7 @@ services:
     build:
       context: .
       dockerfile: browser/Dockerfile
-    image: evidence-bench-browser:0.4.18
+    image: evidence-bench-browser:0.4.19
     entrypoint: ["/usr/bin/tini", "--", "/usr/bin/socat"]
     command: ["TCP-LISTEN:6080,reuseaddr,fork", "TCP:browser:6080"]
     user: "65534:65534"
@@ -201,7 +201,7 @@ services:
     build:
       context: .
       dockerfile: browser/Dockerfile
-    image: evidence-bench-browser:0.4.18
+    image: evidence-bench-browser:0.4.19
     entrypoint: ["/usr/bin/tini", "--", "/usr/bin/socat"]
     command: ["TCP-LISTEN:8090,reuseaddr,fork", "TCP:sandbox-worker:8090"]
     user: "65534:65534"
@@ -235,7 +235,7 @@ services:
     build:
       context: .
       dockerfile: browser/Dockerfile
-    image: evidence-bench-browser:0.4.18
+    image: evidence-bench-browser:0.4.19
     entrypoint: ["/usr/bin/tini", "--", "/usr/bin/socat"]
     command: ["TCP-LISTEN:8091,reuseaddr,fork", "TCP:environment-worker:8091"]
     user: "65534:65534"
@@ -266,7 +266,7 @@ services:
       retries: 3
 
   sandbox-worker:
-    image: evidence-bench:0.4.18
+    image: evidence-bench:0.4.19
     command: ["scientific-agent-sandbox-worker"]
     user: "0:0"
     restart: unless-stopped
@@ -326,7 +326,7 @@ services:
     build:
       context: .
       target: environment-worker
-    image: evidence-bench-packages:0.4.18
+    image: evidence-bench-packages:0.4.19
     restart: unless-stopped
     user: "0:0"
     depends_on:
@@ -346,7 +346,7 @@ services:
       SCIENTIFIC_AGENT_MAX_ENVIRONMENT_ENTRIES: ${SCIENTIFIC_AGENT_MAX_ENVIRONMENT_ENTRIES:-250000}
       SCIENTIFIC_AGENT_MAX_WORKSPACE_ENVIRONMENT_ENTRIES: ${SCIENTIFIC_AGENT_MAX_WORKSPACE_ENVIRONMENT_ENTRIES:-500000}
       SCIENTIFIC_AGENT_MAX_TOTAL_ENVIRONMENT_ENTRIES: ${SCIENTIFIC_AGENT_MAX_TOTAL_ENVIRONMENT_ENTRIES:-2500000}
-      SCIENTIFIC_AGENT_WORKER_IMAGE_ID: evidence-bench-packages:0.4.18
+      SCIENTIFIC_AGENT_WORKER_IMAGE_ID: evidence-bench-packages:0.4.19
     expose:
       - "8091"
     volumes:

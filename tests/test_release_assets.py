@@ -95,6 +95,7 @@ def test_runtime_image_includes_publication_figure_r_baseline():
         "cc31ea13560c424de9bfe2287d926a7d9e6cc8da2d5561402bb145b4f51b68a1" in dockerfile
     )
     assert "writexl_1.5.4.tar.gz" in dockerfile
+    assert "build-essential zlib1g-dev" in dockerfile
     assert (
         "d0574a29ea22bd78785f50c7cd23c6e10036f65321e26d55a694e931467660d3" in dockerfile
     )

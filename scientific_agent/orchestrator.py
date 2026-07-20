@@ -154,7 +154,9 @@ R_REPAIR_EXECUTION_GUIDANCE = (
     "operator. Do not mix factor/discrete and numeric positions on the same plot "
     "axis. Write machine-readable R results with "
     "jsonlite::write_json(..., auto_unbox=TRUE, digits=16) (or digits=NA); the "
-    "default digits=4 is not full precision. "
+    "default digits=4 is not full precision. Write raw plot/source data CSVs "
+    "below /output/data, never /output/tables; only reader-facing summaries "
+    "belong below /output/tables. "
     "Keep numeric result objects and ggplot objects under distinct names (for "
     "example p_value_error and plot_error); never overwrite a p-value with a "
     "plot. ggplot2::annotate uses data coordinates, so never pass grid::unit or "
@@ -550,6 +552,11 @@ _R_PIPE_PROVIDER_IMPORT = re.compile(
     r"(?:dplyr|magrittr|tidyverse)(?:['\"])?\s*\)",
     re.IGNORECASE,
 )
+_R_PLOT_DATA_IN_TABLES = re.compile(
+    r"(['\"])/output/tables/(?:plot[_-]?data|figure[_-]?data|source[_-]?data)"
+    r"[^'\"]*\.csv\1",
+    re.IGNORECASE,
+)
 _R_PVALUE_ASSIGNMENT = re.compile(
     r"(?m)^\s*([A-Za-z.][A-Za-z0-9._]*)\s*<-\s*[^\n;]*\$\s*p\.value\b"
 )
@@ -660,6 +667,12 @@ def _r_scientific_preflight(
             "R code uses the magrittr %>% pipe without loading dplyr, magrittr, "
             "or tidyverse; use base R/native |> syntax or load the required "
             "package explicitly"
+        )
+    if _R_PLOT_DATA_IN_TABLES.search(code):
+        issues.append(
+            "Raw plot/source data CSV files belong below /output/data, not "
+            "/output/tables; reserve /output/tables for reader-facing summary "
+            "tables that will be embedded in the report"
         )
     for arguments in _r_call_arguments(source, r"utils\s*::\s*zip"):
         unsupported = re.findall(

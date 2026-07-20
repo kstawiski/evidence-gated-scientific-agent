@@ -759,6 +759,10 @@ mandatory display candidate. An unrelated newer artifact never supersedes an
 older figure or table. Register only valid figures and CSV/TSV tables. Never
 register JSON as a table; write full-precision JSON below /output/data and a
 separately rounded CSV/TSV below /output/tables.
+Raw plot data, source data, and replicate-level machine-readable CSVs belong below
+`/output/data`, not `/output/tables`. Reserve `/output/tables` for reader-facing
+summary tables that should be embedded in the report; every successful file there
+must be registered as a display.
 Before returning any CSV/TSV under /output/tables, reopen it with a strict parser
 and assert that the header is nonempty and every row has exactly the header's
 column count. A malformed reader table is rejected as failed output and cannot be

@@ -85,6 +85,8 @@ def test_scientific_figure_policy_is_r_first_and_task_specific():
     assert "right-edge data annotation" in RESEARCHER
     assert "explicitly load dplyr or magrittr" in RESEARCHER
     assert "default `digits=4`" in RESEARCHER
+    assert "Raw plot data, source data" in RESEARCHER
+    assert "Reserve `/output/tables` for reader-facing" in RESEARCHER
     assert "`ci[1] < estimate && estimate < ci[2]`" in RESEARCHER
     assert "never\ncall nonexistent `systemfonts::font_add_google()`" in RESEARCHER
     assert "`geom_point(aes(x=estimate, y=metric))`" in RESEARCHER

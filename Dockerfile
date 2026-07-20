@@ -110,6 +110,18 @@ RUN python -c "import urllib.request; urllib.request.urlretrieve('https://cloud.
     && rm /tmp/patchwork_1.2.0.tar.gz \
     && Rscript --vanilla -e "stopifnot(packageVersion('patchwork') >= '1.2.0')"
 
+# writexl is not packaged in Debian bookworm. Build the checksum-pinned CRAN
+# release for both amd64 and arm64, then remove the temporary compiler stack.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential zlib1g-dev \
+    && python -c "import urllib.request; urllib.request.urlretrieve('https://cloud.r-project.org/src/contrib/writexl_1.5.4.tar.gz', '/tmp/writexl_1.5.4.tar.gz')" \
+    && echo "d0574a29ea22bd78785f50c7cd23c6e10036f65321e26d55a694e931467660d3  /tmp/writexl_1.5.4.tar.gz" | sha256sum -c - \
+    && /bin/sh /usr/lib/R/bin/INSTALL /tmp/writexl_1.5.4.tar.gz \
+    && rm /tmp/writexl_1.5.4.tar.gz \
+    && apt-get purge -y --auto-remove build-essential zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && Rscript --vanilla -e "stopifnot(packageVersion('writexl') == '1.5.4')"
+
 COPY --from=uv /uv /uvx /usr/local/bin/
 COPY --from=node-build /usr/local/bin/node /usr/local/bin/node
 

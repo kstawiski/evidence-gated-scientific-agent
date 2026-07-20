@@ -147,6 +147,11 @@ R_REPAIR_EXECUTION_GUIDANCE = (
     "Use the system-installed Open Sans font; never call "
     "systemfonts::font_add_google. For different metric units, use independent "
     "panels with tight readable ranges; do not force a distant zero into a panel. "
+    "For horizontal intervals, use "
+    "geom_errorbarh(aes(xmin=ci_low, xmax=ci_high, y=metric)); never map x= "
+    "inside geom_errorbarh. Do not overlay raw observations on a tight "
+    "estimate/CI axis unless every observation is inside the displayed scale; "
+    "any ggplot warning that rows were removed is a blocking execution defect. "
     "Prefer scales::label_number_auto() and ensure every rendered continuous-axis "
     "tick label is unique. Put long p-values in a panel subtitle or caption, not "
     "in a right-edge annotation that can be clipped. Use base R or the native |> "
@@ -701,6 +706,13 @@ def _r_scientific_preflight(
         if re.search(r"\bdpi\s*=", arguments, re.IGNORECASE):
             issues.append(
                 "ragg::agg_png uses res=, not dpi=; provide units='in' and res=320"
+            )
+    for arguments in _r_call_arguments(source, r"(?:ggplot2\s*::\s*)?geom_errorbarh"):
+        if re.search(r"(?<![A-Za-z0-9._])x\s*=", arguments, re.IGNORECASE):
+            issues.append(
+                "geom_errorbarh does not accept an x aesthetic; map xmin, xmax, "
+                "and y, for example geom_errorbarh(aes(xmin=ci_low, "
+                "xmax=ci_high, y=metric))"
             )
     if _R_SYSTEMFONTS_GOOGLE.search(source):
         issues.append(

@@ -506,7 +506,11 @@ For a horizontal R estimation display, map the quantitative value to x and the
 category to y: use `geom_point(aes(x=estimate, y=metric))` with
 `geom_errorbarh(aes(xmin=ci_low, xmax=ci_high, y=metric))`. Raw paired
 differences likewise belong on x, with any deterministic jitter applied only to
-the categorical y coordinate. Never map a literal label such as `"difference"`
+the categorical y coordinate. Do not add raw paired differences to a tight
+estimate/CI panel unless every raw observation is inside the displayed scale;
+an R/ggplot warning that rows were removed is a blocking defect, not an
+acceptable render. Never supply an `x` aesthetic to `geom_errorbarh`, and never
+map a literal label such as `"difference"`
 to x while placing the estimate on y; that transposes the scientific scale and
 can combine discrete x values with continuous interval endpoints.
 Keep numeric inferential objects and ggplot objects under distinct semantic names

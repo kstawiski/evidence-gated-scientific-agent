@@ -72,10 +72,26 @@ RETURN_TEXT_BYTES = 32 * 1024
 PREVIEW_TEXT_BYTES = 8 * 1024
 PREVIEW_SUFFIXES = {".csv", ".json", ".md", ".tsv", ".txt"}
 PRIOR_EXECUTION_REFERENCE = re.compile(r"/prior/(?P<execution_id>exec-[0-9]{3})/")
+R_GGPLOT_REMOVED_ROWS = re.compile(
+    r"Removed\s+\d+\s+rows?\s+containing\s+(?:missing|non-finite)\s+values",
+    re.IGNORECASE,
+)
 
 
 def _reject_nonfinite_json(value: str):
     raise ValueError(f"non-finite JSON constant: {value}")
+
+
+def _scientific_stderr_violations(language: Language, stderr: str) -> list[str]:
+    """Return fail-closed scientific rendering defects emitted at runtime."""
+
+    if language == "r" and R_GGPLOT_REMOVED_ROWS.search(stderr):
+        return [
+            "ggplot removed rows while rendering; explicitly resolve missing or "
+            "non-finite values and scale limits so every intended observation is "
+            "represented before accepting the figure"
+        ]
+    return []
 
 
 def _python_static_violations(code: str) -> list[str]:
@@ -1107,6 +1123,13 @@ class AnalysisExecutor:
                 exit_code = process.returncode
             output_artifacts, output_violations = self._inspect_outputs(output_dir)
             violations.extend(output_violations)
+            try:
+                captured_stderr = stderr_path.read_text(
+                    encoding="utf-8", errors="replace"
+                )
+            except OSError:
+                captured_stderr = ""
+            violations.extend(_scientific_stderr_violations(language, captured_stderr))
             if cancelled:
                 status = "cancelled"
             elif timed_out:

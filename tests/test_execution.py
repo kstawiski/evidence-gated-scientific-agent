@@ -10,9 +10,24 @@ from scientific_agent.execution import (
     R_ANALYSIS_BASELINE_MINIMUM_VERSIONS,
     RemoteAnalysisExecutor,
     _python_static_violations,
+    _scientific_stderr_violations,
     _unavailable_prior_reference_violations,
     sandbox_preflight,
 )
+
+
+def test_r_runtime_preflight_rejects_ggplot_removed_rows_warning():
+    warning = (
+        "Warning message:\nRemoved 6 rows containing missing values (`geom_point()`).\n"
+    )
+
+    violations = _scientific_stderr_violations("r", warning)
+
+    assert any("ggplot removed rows" in item for item in violations)
+    assert _scientific_stderr_violations("python", warning) == []
+    assert (
+        _scientific_stderr_violations("r", "Warning: package built under R 4.4") == []
+    )
 
 
 def _executor(tmp_path: Path, **overrides) -> AnalysisExecutor:

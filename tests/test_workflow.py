@@ -848,6 +848,10 @@ def test_r_survival_code_preflight_requires_controller_grounded_time_origin():
             'ragg::agg_png("figure.png", width=6, height=4, units="in", dpi=320)',
             "uses res=",
         ),
+        (
+            "geom_errorbarh(aes(x=estimate, xmin=ci_low, xmax=ci_high))",
+            "does not accept an x aesthetic",
+        ),
         ("stopifnot(ci[1] < estimate < ci[2])", "does not support chained"),
         (
             'systemfonts::font_add_google("Open Sans", "OpenSans")',

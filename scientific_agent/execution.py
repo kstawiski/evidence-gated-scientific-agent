@@ -47,6 +47,7 @@ R_ANALYSIS_BASELINE_PACKAGES = (
     "purrr",
     "stringr",
     "forcats",
+    "tidyverse",
     "lubridate",
     "readr",
     "readxl",

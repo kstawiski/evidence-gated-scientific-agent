@@ -92,6 +92,7 @@ RUN apt-get update \
         r-cran-systemfonts \
         r-cran-tibble \
         r-cran-tidyr \
+        r-cran-tidyverse \
         r-cran-viridislite \
         tesseract-ocr \
         tini \

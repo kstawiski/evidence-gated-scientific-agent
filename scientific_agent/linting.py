@@ -1206,6 +1206,22 @@ def _terms(text: str) -> set[str]:
     return set(_WORD.findall(text.lower()))
 
 
+def _deliverable_is_mapped(deliverable: str, produced_text: str) -> bool:
+    """Match plan outputs, including controller-owned and short file formats."""
+
+    normalized = " ".join(deliverable.lower().split())
+    if normalized == "evidence-backed scientific report with claim and source ledgers":
+        return True
+    wanted = _terms(deliverable)
+    if wanted & _terms(produced_text):
+        return True
+    for extension in ("zip", "xlsx", "pptx", "docx", "csv", "json", "png", "svg"):
+        marker = f".{extension}"
+        if marker in deliverable.lower() and marker in produced_text.lower():
+            return True
+    return False
+
+
 def _grounding_terms(text: str) -> set[str]:
     return _terms(text) - _GROUNDING_STOPWORDS
 
@@ -1628,10 +1644,9 @@ def lint_plan(
             *(output for step in plan.steps for output in step.outputs),
         ]
     )
-    produced_terms = _terms(produced_text)
     for index, deliverable in enumerate(task.deliverables):
         wanted = _terms(deliverable)
-        if wanted and not (wanted & produced_terms):
+        if wanted and not _deliverable_is_mapped(deliverable, produced_text):
             findings.append(
                 LintFinding(
                     code="unmapped_deliverable",

@@ -681,8 +681,10 @@ MultiIndex or group-by tuple keys into named nested objects or explicit string
 labels before calling `json.dump`. Convert NumPy and pandas scalar values,
 including booleans, to native Python scalars with `.item()` (or an equivalent
 explicit conversion) before JSON serialization.
-In R, write result JSON with `jsonlite::write_json(..., auto_unbox = TRUE)` (or
-explicit `jsonlite::unbox()` values): inferential scalars such as estimates,
+In R, write result JSON with
+`jsonlite::write_json(..., auto_unbox=TRUE, digits=16)` (or `digits=NA` plus
+explicit `jsonlite::unbox()` values). The default `digits=4` rounds away machine
+precision and is not acceptable for result JSON. Inferential scalars such as estimates,
 t statistics, degrees of freedom, p-values, interval bounds, and effect sizes
 must be JSON numbers, never length-one arrays such as `[5.0]`. Arrays are reserved
 for genuinely repeated values.
@@ -1096,10 +1098,14 @@ figure additionally add `visual-clearance:<display_id>:top-text` only after zoom
 the top band and confirming that title, subtitle, test label, estimate, and interval
 do not overlap, and add `visual-clearance:<display_id>:legend-data` only after
 tracing the complete legend rectangle and confirming that it covers no point,
-error bar, annotation, or statistical text. Add
+error bar, annotation, or statistical text. If no legend exists, confirm its
+absence by direct inspection and still add the `legend-data` clearance reference.
+Add
 `visual-clearance:<display_id>:annotation-data` only after inspecting every
 in-panel annotation and confirming that no point, interval, error bar, or other
-data mark crosses its text. Copy display_id byte for byte from the
+data mark crosses its text. If there are no in-panel annotations, confirm that
+absence directly and still add the `annotation-data` clearance reference. Copy
+display_id byte for byte from the
 payload. Never emit a clearance string for a region with a defect. A bare pass, a
 generic evidence reference, or one display's clearance applied to another display
 is invalid and will fail closed. A controller geometry warning may be visually

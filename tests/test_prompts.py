@@ -84,6 +84,7 @@ def test_scientific_figure_policy_is_r_first_and_task_specific():
     assert "`scales::label_number_auto()`" in RESEARCHER
     assert "right-edge data annotation" in RESEARCHER
     assert "explicitly load dplyr or magrittr" in RESEARCHER
+    assert "default `digits=4`" in RESEARCHER
     assert "`ci[1] < estimate && estimate < ci[2]`" in RESEARCHER
     assert "never\ncall nonexistent `systemfonts::font_add_google()`" in RESEARCHER
     assert "`geom_point(aes(x=estimate, y=metric))`" in RESEARCHER
@@ -121,6 +122,12 @@ def test_report_auditor_recomputes_two_sided_t_and_respects_task_scope():
     assert "both are approximately `8.89e-22`" in REPORT_AUDITOR
     assert "`-0.09858` and `-0.0986` are compatible rounding" in REPORT_AUDITOR
     assert "explicit TaskSpec description such as synthetic" in REPORT_AUDITOR
+
+
+def test_visual_critic_attests_absent_legends_and_annotations():
+    assert "confirm its\nabsence by direct inspection" in DISPLAY_AUDITOR
+    assert "still add the `legend-data` clearance reference" in DISPLAY_AUDITOR
+    assert "still add the `annotation-data` clearance reference" in DISPLAY_AUDITOR
 
 
 def test_researcher_documents_matplotlib_hlines_return_type():

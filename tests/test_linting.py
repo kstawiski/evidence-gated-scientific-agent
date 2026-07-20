@@ -122,6 +122,33 @@ def test_plan_linter_accepts_complete_read_only_plan():
     assert lint_plan(task(), good_plan()).passed
 
 
+def test_plan_linter_maps_controller_report_and_short_zip_extension():
+    requested = task().model_copy(
+        update={
+            "deliverables": [
+                "Evidence-backed scientific report with claim and source ledgers",
+                "Machine-readable result bundle (.zip)",
+            ]
+        }
+    )
+    plan = good_plan().model_copy(
+        update={
+            "expected_artifacts": ["/output/deliverables/validation_results.zip"],
+            "steps": [
+                good_plan()
+                .steps[0]
+                .model_copy(
+                    update={"outputs": ["/output/deliverables/validation_results.zip"]}
+                )
+            ],
+        }
+    )
+
+    report = lint_plan(requested, plan)
+
+    assert "unmapped_deliverable" not in {item.code for item in report.findings}
+
+
 def test_locked_reader_displays_cannot_disappear_from_report():
     validation = validate_report(
         article_report(), required_display_kinds=("figure", "table")

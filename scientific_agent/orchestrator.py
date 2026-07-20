@@ -152,7 +152,9 @@ R_REPAIR_EXECUTION_GUIDANCE = (
     "in a right-edge annotation that can be clipped. Use base R or the native |> "
     "pipe unless dplyr/magrittr is loaded explicitly; never emit an unloaded %>% "
     "operator. Do not mix factor/discrete and numeric positions on the same plot "
-    "axis. "
+    "axis. Write machine-readable R results with "
+    "jsonlite::write_json(..., auto_unbox=TRUE, digits=16) (or digits=NA); the "
+    "default digits=4 is not full precision. "
     "Keep numeric result objects and ggplot objects under distinct names (for "
     "example p_value_error and plot_error); never overwrite a p-value with a "
     "plot. ggplot2::annotate uses data coordinates, so never pass grid::unit or "
@@ -669,6 +671,13 @@ def _r_scientific_preflight(
                 + ", ".join(f"{name}=" for name in sorted(set(unsupported)))
                 + "; use utils::zip(zipfile=target_zip, files=files) and arrange "
                 "member paths before the call"
+            )
+    for arguments in _r_call_arguments(source, r"(?:jsonlite\s*::\s*)?write_json"):
+        if not re.search(r"\bdigits\s*=", arguments, re.IGNORECASE):
+            issues.append(
+                "jsonlite::write_json defaults to digits=4 and cannot preserve "
+                "full-precision machine results; provide digits=16 (or digits=NA) "
+                "together with auto_unbox=TRUE"
             )
     if _R_RAGG_PNG.search(source):
         issues.append(
@@ -3904,6 +3913,10 @@ async def _produce_report(
                     "make at most one direct retry from stderr. Execute only a "
                     "falsification test, display correction, or missing analysis "
                     "required by a concrete finding. "
+                    "A controller-display-clearance-missing finding without a visible "
+                    "figure defect is an audit-attestation failure, not an artifact "
+                    "defect: preserve the existing figure so Gemma can re-audit the "
+                    "same raster. "
                     + R_REPAIR_EXECUTION_GUIDANCE
                     + " "
                     + TABLE_PRECISION_REPAIR_GUIDANCE

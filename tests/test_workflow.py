@@ -869,6 +869,14 @@ def test_r_survival_code_preflight_requires_controller_grounded_time_origin():
             'filtered <- data %>% subset(metric == "error_rate")',
             "without loading dplyr",
         ),
+        (
+            'jsonlite::write_json(results, "/output/data/results.json", auto_unbox=TRUE)',
+            "defaults to digits=4",
+        ),
+        (
+            'library(jsonlite)\nwrite_json(results, "/output/data/results.json", auto_unbox=TRUE)',
+            "defaults to digits=4",
+        ),
     ],
 )
 def test_r_code_preflight_rejects_known_generated_api_defects(code, expected):
@@ -898,6 +906,8 @@ print(plot_object)
 dev.off()
 utils::zip(zipfile="/output/deliverables/results.zip",
            files=c("/output/data/results.json", target))
+jsonlite::write_json(results, "/output/data/results.json",
+                     auto_unbox=TRUE, digits=16)
 """
     gate = ScientificToolOrderGate(frozenset())
 
@@ -4469,6 +4479,9 @@ def test_research_repair_instruction_disambiguates_significant_digits():
         orchestrator_module.R_REPAIR_EXECUTION_GUIDANCE
     )
     assert "scales::label_number_auto()" in (
+        orchestrator_module.R_REPAIR_EXECUTION_GUIDANCE
+    )
+    assert "default digits=4 is not full precision" in (
         orchestrator_module.R_REPAIR_EXECUTION_GUIDANCE
     )
     assert "do not force a distant zero" in (

@@ -772,6 +772,19 @@ def _r_scientific_preflight(
                 "be grid::unit/unit values; use numeric data coordinates or place "
                 "the p-value in a subtitle/caption"
             )
+        upper_limit_fraction = re.search(
+            r"\bx\s*=\s*[A-Za-z.][A-Za-z0-9._]*limits"
+            r"\s*\[\s*2(?:L)?\s*\]\s*\*\s*(0?\.\d+)",
+            arguments,
+            re.IGNORECASE,
+        )
+        if upper_limit_fraction and 0 < float(upper_limit_fraction.group(1)) < 1:
+            issues.append(
+                "placing annotation x at limits[2] times a fraction below one is "
+                "unsafe for negative axes because it moves beyond the upper limit; "
+                "use a subtitle/caption or interpolate from limits[1] plus a "
+                "fraction of diff(limits)"
+            )
     for arguments in _r_call_arguments(code, r"(?:tidyr\s*::\s*)?pivot_longer"):
         if re.search(
             r"\bnames_sep\s*=\s*(['\"])_\1", arguments, re.IGNORECASE

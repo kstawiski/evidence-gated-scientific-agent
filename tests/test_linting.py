@@ -1620,6 +1620,21 @@ def test_report_validator_rejects_untested_normality_reassurance_and_robust_cont
     }
 
 
+def test_report_validator_rejects_distribution_free_paired_t_overclaim():
+    report = article_report(
+        introduction=(
+            "Paired effects were estimated without assuming distributional properties."
+        ),
+        methods=["Mean differences used paired t-intervals with 95% confidence."],
+    )
+
+    validation = validate_report(report)
+
+    assert "t_method_distribution_free_overclaim" in {
+        finding.code for finding in validation.findings
+    }
+
+
 def test_report_validator_rejects_unqualified_robust_association():
     report = article_report(
         conclusions=(

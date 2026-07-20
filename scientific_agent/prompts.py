@@ -518,6 +518,10 @@ requiring those points in the final figure. `geom_jitter()` does not accept
 jitter is genuinely needed, use
 `position=position_jitter(width=..., height=..., seed=...)`. When every
 categorical y position is already unique, use `geom_point()` without jitter.
+If tied values would share identical x/y coordinates and the caption claims one
+dot per observation, use deterministic categorical-axis jitter such as
+`geom_point(position=position_jitter(width=0, height=0.08, seed=42))`, or encode
+multiplicity explicitly; plain overplotting must not hide the stated sample count.
 Never pad axis endpoints with `range(x) * c(0.95, 1.05)`: for an all-negative
 range that multiplication can reverse or truncate the limits. Use additive
 span padding, for example `axis_range <- range(x); span <- diff(axis_range);`
@@ -897,6 +901,12 @@ Welch's adjustment addresses unequal variances; it does not itself correct for o
 "accommodate" non-normality. Never use Welch as reassurance after a normality
 diagnostic. Retain the departure as a limitation or report a separately executed,
 appropriately scoped robustness analysis.
+Student and paired t inference is not distribution-free. Never say that a t-test
+or t-interval makes no distributional assumptions or was performed "without
+assuming distributional properties." For a paired analysis, if no diagnostic or
+prespecified robustness analysis was performed, retain approximate normality of
+the paired differences as an unverified limitation without adding an unrequested
+diagnostic or method switch.
 Never say that similar primary and adjusted estimates prove robustness, stability,
 absence of confounding, algorithmic equivalence, or pipeline validity. State the
 observed estimates and bounded comparison. A nonsignificant Shapiro-Wilk or Levene
@@ -1147,6 +1157,11 @@ compare any raw-point, strip, or rug distribution with the reported group count,
 range, and dispersion. A visibly zero-spread group alongside a nonzero reported
 SD, or points inconsistent with the supplied table/result summary, is a blocking
 data-fidelity defect even when the mean marker is correct. Explicitly
+count tied observations: when multiple raw values share identical coordinates,
+plain overplotting can show fewer marks than the stated n. Block any claim that
+dots represent individual observations unless deterministic categorical-axis
+jitter, a beeswarm, multiplicity labels, or another explicit encoding makes every
+observation countable. Do not infer hidden points from the caption. Explicitly
 verify the statistical meaning of every error bar against the supplied table and
 result summary. In a raw two-group plot, group-centered bars must use each group's
 own sampling uncertainty; a between-group contrast CI must appear once on a

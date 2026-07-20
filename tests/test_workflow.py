@@ -874,6 +874,10 @@ def test_r_survival_code_preflight_requires_controller_grounded_time_origin():
             "use data coordinates",
         ),
         (
+            'annotate("text", x=err_limits[2] * 0.95, y=1, label="p < 0.001")',
+            "unsafe for negative axes",
+        ),
+        (
             'plot_data <- tidyr::pivot_longer(data, cols=c(baseline_error_rate, optimized_error_rate), names_to=c("engine", "metric"), names_sep="_")',
             "multiple underscores",
         ),

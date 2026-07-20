@@ -52,6 +52,7 @@ R_ANALYSIS_BASELINE_PACKAGES = (
     "readr",
     "readxl",
     "openxlsx",
+    "writexl",
     "survival",
     "survminer",
     "broom",

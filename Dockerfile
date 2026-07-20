@@ -94,6 +94,7 @@ RUN apt-get update \
         r-cran-tidyr \
         r-cran-tidyverse \
         r-cran-viridislite \
+        r-cran-writexl \
         tesseract-ocr \
         tini \
         util-linux \

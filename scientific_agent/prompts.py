@@ -464,6 +464,14 @@ State the subtraction direction before calculation and use it consistently in
 code, tables, figures, JSON, and prose; for a named optimized/intervention level
 versus baseline/reference, default to optimized/intervention minus
 baseline/reference unless the task specifies another estimand.
+If `rowwise()` is used while constructing paired differences, end that grouping
+with `dplyr::ungroup()`; there is no dplyr `unrowwise()` function.
+To combine per-item data frames, use `dplyr::bind_rows(lapply(...))` or
+`purrr::map_dfr(...)`; there is no `bind_lapply()` function.
+When `pivot_wider()` receives multiple `values_from` columns and downstream code
+uses condition-prefixed names such as `baseline_error_rate`, set an explicit
+`names_glue` that places the engine label before the value-column placeholder;
+tidyr otherwise defaults to value-prefixed names.
 In R, obtain paired-difference inference from one
 `stats::t.test(differences, mu=0)` object and extract its estimate, confidence
 interval, statistic, parameter, and p-value together. If a two-sided t p-value
@@ -513,11 +521,19 @@ acceptable render. If scale limits caused the warning, derive them from every
 plotted raw value plus the estimate and interval endpoints, or remove the raw
 layer from an estimate/CI-focused figure; changing only y positions cannot fix
 x-axis omission. A `plot_data.csv` artifact can preserve raw differences without
-requiring those points in the final figure. `geom_jitter()` does not accept
+requiring those points in the final figure. Default to an estimate/CI-only
+reader-facing display; add raw observations only when the user requests them or
+they materially improve interpretation and every observation remains visible
+without overlap. `geom_jitter()` does not accept
 `seed=`; when deterministic
 jitter is genuinely needed, use
 `position=position_jitter(width=..., height=..., seed=...)`. When every
 categorical y position is already unique, use `geom_point()` without jitter.
+When raw replicate rows and an estimate/CI summary row share a discrete y-axis,
+construct one explicitly ordered factor/character row field for every layer;
+never map a numeric `replicate` field in one layer and a literal `"Mean diff"`
+label in another. Preserve readable tick labels and enough scale expansion that
+the first and last markers are fully inside the native render.
 If tied values would share identical x/y coordinates and the caption claims one
 dot per observation, use deterministic categorical-axis jitter such as
 `geom_point(position=position_jitter(width=0, height=0.08, seed=42))`, or encode
@@ -527,6 +543,11 @@ range that multiplication can reverse or truncate the limits. Use additive
 span padding, for example `axis_range <- range(x); span <- diff(axis_range);`
 `limits <- axis_range + c(-1, 1) * 0.15 * span`, and assert that the lower limit
 is smaller than the upper limit.
+Keep figure titles and subtitles concise. Never place an unwrapped dynamic
+multi-metric result sentence in a fixed-width subtitle: wrap the complete text
+with `stringr::str_wrap(..., width=90)`, insert explicit line breaks, or move
+detailed estimates and p-values to the caption/table. Reject any native render
+whose title, subtitle, caption, axis label, or tick label is clipped.
 Never supply an `x` aesthetic to `geom_errorbarh`, and never
 map a literal label such as `"difference"`
 to x while placing the estimate on y; that transposes the scientific scale and

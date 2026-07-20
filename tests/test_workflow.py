@@ -897,6 +897,30 @@ def test_r_survival_code_preflight_requires_controller_grounded_time_origin():
             'write.csv(plot_data, "/output/tables/plot_data.csv", row.names=FALSE)',
             "belong below /output/data",
         ),
+        (
+            "diffs <- data %>% rowwise() %>% mutate(delta = after - before) %>% unrowwise()",
+            "no unrowwise() function",
+        ),
+        (
+            "summary <- bind_lapply(results, function(x) data.frame(value=x))",
+            "no bind_lapply() function",
+        ),
+        (
+            'combined <- plot_annotation(subtitle=paste0("error=", err, " runtime=", rt))',
+            "dynamic paste0() figure subtitle",
+        ),
+        (
+            "ggplot() + geom_point(data=raw, aes(x=difference, y=replicate)) + "
+            'geom_point(data=summary, aes(x=estimate, y="Mean diff")) + '
+            "scale_y_discrete()",
+            "one ordered factor/character row field",
+        ),
+        (
+            "wide <- pivot_wider(data, names_from=engine, "
+            "values_from=c(error_rate, runtime_ms))\n"
+            "wide <- mutate(wide, delta=optimized_error_rate-baseline_error_rate)",
+            "defaults to metric_condition names",
+        ),
     ],
 )
 def test_r_code_preflight_rejects_known_generated_api_defects(code, expected):
@@ -928,6 +952,59 @@ utils::zip(zipfile="/output/deliverables/results.zip",
            files=c("/output/data/results.json", target))
 jsonlite::write_json(results, "/output/data/results.json",
                      auto_unbox=TRUE, digits=16)
+"""
+    gate = ScientificToolOrderGate(frozenset())
+
+    denied = gate.before_tool(
+        "run_r_analysis", ComputationEvidence(), arguments={"code": code}
+    )
+
+    assert denied is None
+
+
+def test_r_code_preflight_accepts_shared_categorical_replicate_summary_axis():
+    code = """
+library(dplyr)
+raw <- raw %>% mutate(replicate = factor(
+    replicate, levels=c(as.character(1:12), "Mean diff")
+))
+ggplot() +
+  geom_point(data=raw, aes(x=difference, y=replicate)) +
+  geom_point(data=summary, aes(x=estimate, y="Mean diff")) +
+  scale_y_discrete(expand=expansion(add=0.6))
+"""
+    gate = ScientificToolOrderGate(frozenset())
+
+    denied = gate.before_tool(
+        "run_r_analysis", ComputationEvidence(), arguments={"code": code}
+    )
+
+    assert denied is None
+
+
+def test_r_code_preflight_accepts_explicit_pivot_wider_names_glue():
+    code = """
+library(dplyr)
+library(tidyr)
+wide <- pivot_wider(data, names_from=engine,
+    values_from=c(error_rate, runtime_ms),
+    names_glue="{engine}_{.value}")
+wide <- mutate(wide, delta=optimized_error_rate-baseline_error_rate)
+"""
+    gate = ScientificToolOrderGate(frozenset())
+
+    denied = gate.before_tool(
+        "run_r_analysis", ComputationEvidence(), arguments={"code": code}
+    )
+
+    assert denied is None
+
+
+def test_r_code_preflight_accepts_wrapped_dynamic_subtitle():
+    code = """
+combined <- plot_annotation(
+    subtitle=stringr::str_wrap(paste0("error=", err, " runtime=", rt), width=90)
+)
 """
     gate = ScientificToolOrderGate(frozenset())
 

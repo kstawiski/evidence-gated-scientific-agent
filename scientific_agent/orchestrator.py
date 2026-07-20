@@ -156,19 +156,35 @@ R_REPAIR_EXECUTION_GUIDANCE = (
     "all plotted raw values, estimates, and interval endpoints, or remove the raw "
     "layer from an estimate/CI-focused figure; changing only y positions does not "
     "repair x-axis omission. plot_data.csv can preserve raw differences without "
-    "requiring them to appear in the figure. "
+    "requiring them to appear in the figure. Default to an estimate/CI-only "
+    "display; include raw observations only when requested or materially useful "
+    "and when every point remains visible without overlap. "
     "Never pad range endpoints multiplicatively with range(x) * c(0.95, 1.05): "
     "for an all-negative range this can reverse or truncate the limits. Use "
     "axis_range <- range(x); span <- diff(axis_range); limits <- axis_range + "
     "c(-1, 1) * 0.15 * span, and assert limits[1] < limits[2]. "
     "geom_jitter does not accept seed=; when deterministic jitter is actually "
     "needed, pass position=position_jitter(width=..., height=..., seed=...). "
+    "Never use an unwrapped paste0() multi-metric subtitle in a fixed-size "
+    "figure; wrap the complete subtitle with stringr::str_wrap(..., width=90), "
+    "add explicit line breaks, or move details to the caption/table. "
     "Prefer scales::label_number_auto() and ensure every rendered continuous-axis "
     "tick label is unique. Put long p-values in a panel subtitle or caption, not "
     "in a right-edge annotation that can be clipped. Use base R or the native |> "
     "pipe unless dplyr/magrittr is loaded explicitly; never emit an unloaded %>% "
-    "operator. Do not mix factor/discrete and numeric positions on the same plot "
-    "axis. Write machine-readable R results with "
+    "operator. End rowwise dplyr pipelines with dplyr::ungroup(); there is no "
+    "unrowwise() function. There is also no bind_lapply(); combine data frames "
+    "with dplyr::bind_rows(lapply(...)) or purrr::map_dfr(...). Do not mix "
+    "factor/discrete and numeric positions on "
+    "the same plot axis. If raw replicate rows and a summary row share discrete "
+    "y, construct one ordered factor/character row field used by every layer; "
+    "never combine numeric y=replicate with a literal y='Mean diff'. Preserve "
+    "tick labels and enough expansion to keep the first and last markers fully "
+    "visible. Write machine-readable R results with "
+    "When pivot_wider has multiple values_from columns and downstream code uses "
+    "condition_metric names, provide explicit names_glue that places the "
+    "condition label before the value-column placeholder; tidyr otherwise "
+    "creates metric_condition names. "
     "jsonlite::write_json(..., auto_unbox=TRUE, digits=16) (or digits=NA); the "
     "default digits=4 is not full precision. Write raw plot/source data CSVs "
     "below /output/data, never /output/tables; only reader-facing summaries "
@@ -563,6 +579,22 @@ _R_SYSTEMFONTS_GOOGLE = re.compile(
     r"\bsystemfonts\s*::\s*font_add_google\s*\(", re.IGNORECASE
 )
 _R_MAGRITTR_PIPE = re.compile(r"%>%")
+_R_NONEXISTENT_UNROWWISE = re.compile(r"\bunrowwise\s*\(", re.IGNORECASE)
+_R_NONEXISTENT_BIND_LAPPLY = re.compile(r"\bbind_lapply\s*\(", re.IGNORECASE)
+_R_REPLICATE_Y_MAPPING = re.compile(
+    r"\baes\s*\([^)]*\by\s*=\s*(?:replicate|replicate_id)\b",
+    re.IGNORECASE | re.DOTALL,
+)
+_R_LITERAL_SUMMARY_Y_MAPPING = re.compile(
+    r"\baes\s*\([^)]*\by\s*=\s*(['\"])"
+    r"(?:mean(?:\s+|_)?diff(?:erence)?|summary|estimate)\1",
+    re.IGNORECASE | re.DOTALL,
+)
+_R_REPLICATE_CATEGORICAL_COERCION = re.compile(
+    r"\b(?:replicate|replicate_id)\s*=\s*"
+    r"(?:factor|as\.factor|as\.character)\s*\(",
+    re.IGNORECASE,
+)
 _R_PIPE_PROVIDER_IMPORT = re.compile(
     r"\b(?:library|require)\s*\(\s*(?:['\"])?"
     r"(?:dplyr|magrittr|tidyverse)(?:['\"])?\s*\)",
@@ -684,6 +716,27 @@ def _r_scientific_preflight(
             "or tidyverse; use base R/native |> syntax or load the required "
             "package explicitly"
         )
+    if _R_NONEXISTENT_UNROWWISE.search(source):
+        issues.append(
+            "R/dplyr has no unrowwise() function; end a rowwise pipeline with "
+            "dplyr::ungroup()"
+        )
+    if _R_NONEXISTENT_BIND_LAPPLY.search(source):
+        issues.append(
+            "R has no bind_lapply() function; use dplyr::bind_rows(lapply(...)) "
+            "or purrr::map_dfr(...)"
+        )
+    if (
+        _R_REPLICATE_Y_MAPPING.search(code)
+        and _R_LITERAL_SUMMARY_Y_MAPPING.search(code)
+        and not _R_REPLICATE_CATEGORICAL_COERCION.search(source)
+    ):
+        issues.append(
+            "Do not combine an uncoerced replicate y mapping with a literal "
+            "summary-row y label; build one ordered factor/character row field "
+            "shared by raw and summary layers so discrete labels and expansion "
+            "remain correct"
+        )
     if _R_PLOT_DATA_IN_TABLES.search(code):
         issues.append(
             "Raw plot/source data CSV files belong below /output/data, not "
@@ -700,6 +753,25 @@ def _r_scientific_preflight(
                 + ", ".join(f"{name}=" for name in sorted(set(unsupported)))
                 + "; use utils::zip(zipfile=target_zip, files=files) and arrange "
                 "member paths before the call"
+            )
+    for arguments in _r_call_arguments(source, r"(?:tidyr\s*::\s*)?pivot_wider"):
+        if (
+            re.search(r"\bvalues_from\s*=\s*c\s*\(", arguments, re.IGNORECASE)
+            and re.search(r"\bnames_from\s*=", arguments, re.IGNORECASE)
+            and not re.search(r"\bnames_glue\s*=", arguments, re.IGNORECASE)
+            and re.search(
+                r"\b(?:baseline|optimized|control|intervention|reference)_"
+                r"[A-Za-z.][A-Za-z0-9._]*\b",
+                source,
+                re.IGNORECASE,
+            )
+        ):
+            issues.append(
+                "pivot_wider with multiple values_from columns defaults to "
+                "metric_condition names, but the code references "
+                "condition_metric columns; provide explicit names_glue that "
+                "places the condition label before the value-column placeholder "
+                "or use the actual generated column order"
             )
     for arguments in _r_call_arguments(source, r"(?:jsonlite\s*::\s*)?write_json"):
         if not re.search(r"\bdigits\s*=", arguments, re.IGNORECASE):
@@ -731,6 +803,21 @@ def _r_scientific_preflight(
                 "geom_jitter does not accept seed=; use "
                 "position=position_jitter(width=..., height=..., seed=...) when "
                 "deterministic jitter is needed"
+            )
+    for arguments in _r_call_arguments(
+        source,
+        r"(?:(?:patchwork\s*::\s*)?plot_annotation|(?:ggplot2\s*::\s*)?labs)",
+    ):
+        if re.search(
+            r"\bsubtitle\s*=\s*paste0\s*\(", arguments, re.IGNORECASE
+        ) and not re.search(
+            r"(?:stringr\s*::\s*)?str_wrap\s*\(", arguments, re.IGNORECASE
+        ):
+            issues.append(
+                "A dynamic paste0() figure subtitle can overflow the fixed-size "
+                "render; wrap the complete subtitle with "
+                "stringr::str_wrap(..., width=90), insert explicit line breaks, "
+                "or move detailed values to the caption/table"
             )
     for arguments in _r_call_arguments(
         source, r"(?:ggplot2\s*::\s*)?scale_[xy]_continuous"

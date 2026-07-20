@@ -137,13 +137,22 @@ R_REPAIR_EXECUTION_GUIDANCE = (
     "dir.create(dirname(target), recursive=TRUE, showWarnings=FALSE), never "
     "Python Path(...).mkdir. Create a base-R archive only with "
     "utils::zip(zipfile=target_zip, files=files); junk.paths and recurse are not "
-    "utils::zip arguments. Export through ragg::agg_png with units='in' and "
+    "utils::zip arguments. With absolute /output/... input paths, archive members "
+    "normally retain output/data/... path components; verify actual stored paths "
+    "or compare basename(zip_list$Name), never assume bare member names. Export "
+    "through ragg::agg_png with units='in' and "
     "res=320, then print the plot and call dev.off(). Extract paired-t statistics "
     "from one stats::t.test result. R comparisons must use lower < estimate && "
     "estimate < upper, never a chained lower < estimate < upper expression. "
     "Use the system-installed Open Sans font; never call "
     "systemfonts::font_add_google. For different metric units, use independent "
     "panels with tight readable ranges; do not force a distant zero into a panel. "
+    "Prefer scales::label_number_auto() and ensure every rendered continuous-axis "
+    "tick label is unique. Put long p-values in a panel subtitle or caption, not "
+    "in a right-edge annotation that can be clipped. Use base R or the native |> "
+    "pipe unless dplyr/magrittr is loaded explicitly; never emit an unloaded %>% "
+    "operator. Do not mix factor/discrete and numeric positions on the same plot "
+    "axis. "
     "Keep numeric result objects and ggplot objects under distinct names (for "
     "example p_value_error and plot_error); never overwrite a p-value with a "
     "plot. ggplot2::annotate uses data coordinates, so never pass grid::unit or "
@@ -533,6 +542,12 @@ _R_RAGG_PNG = re.compile(r"\bragg\s*::\s*png\s*\(", re.IGNORECASE)
 _R_SYSTEMFONTS_GOOGLE = re.compile(
     r"\bsystemfonts\s*::\s*font_add_google\s*\(", re.IGNORECASE
 )
+_R_MAGRITTR_PIPE = re.compile(r"%>%")
+_R_PIPE_PROVIDER_IMPORT = re.compile(
+    r"\b(?:library|require)\s*\(\s*(?:['\"])?"
+    r"(?:dplyr|magrittr|tidyverse)(?:['\"])?\s*\)",
+    re.IGNORECASE,
+)
 _R_PVALUE_ASSIGNMENT = re.compile(
     r"(?m)^\s*([A-Za-z.][A-Za-z0-9._]*)\s*<-\s*[^\n;]*\$\s*p\.value\b"
 )
@@ -637,6 +652,12 @@ def _r_scientific_preflight(
         issues.append(
             "R does not support chained comparisons such as lower < estimate < "
             "upper; write lower < estimate && estimate < upper"
+        )
+    if _R_MAGRITTR_PIPE.search(source) and not _R_PIPE_PROVIDER_IMPORT.search(code):
+        issues.append(
+            "R code uses the magrittr %>% pipe without loading dplyr, magrittr, "
+            "or tidyverse; use base R/native |> syntax or load the required "
+            "package explicitly"
         )
     for arguments in _r_call_arguments(source, r"utils\s*::\s*zip"):
         unsupported = re.findall(

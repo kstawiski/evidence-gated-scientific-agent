@@ -865,6 +865,10 @@ def test_r_survival_code_preflight_requires_controller_grounded_time_origin():
             'plot_data <- tidyr::pivot_longer(data, cols=c(baseline_error_rate, optimized_error_rate), names_to=c("engine", "metric"), names_sep="_")',
             "multiple underscores",
         ),
+        (
+            'filtered <- data %>% subset(metric == "error_rate")',
+            "without loading dplyr",
+        ),
     ],
 )
 def test_r_code_preflight_rejects_known_generated_api_defects(code, expected):
@@ -899,6 +903,18 @@ utils::zip(zipfile="/output/deliverables/results.zip",
 
     denied = gate.before_tool(
         "run_r_analysis", ComputationEvidence(), arguments={"code": code}
+    )
+
+    assert denied is None
+
+
+def test_r_code_preflight_accepts_loaded_magrittr_pipe():
+    gate = ScientificToolOrderGate(frozenset())
+
+    denied = gate.before_tool(
+        "run_r_analysis",
+        ComputationEvidence(),
+        arguments={"code": "library(dplyr)\nfiltered <- data %>% filter(value > 0)"},
     )
 
     assert denied is None
@@ -4447,6 +4463,12 @@ def test_research_repair_instruction_disambiguates_significant_digits():
     assert "at most four significant digits, not four decimal places" in guidance
     assert "10.897 -> 10.9 or 10.90" in guidance
     assert "utils::zip(zipfile=target_zip, files=files)" in (
+        orchestrator_module.R_REPAIR_EXECUTION_GUIDANCE
+    )
+    assert "compare basename(zip_list$Name)" in (
+        orchestrator_module.R_REPAIR_EXECUTION_GUIDANCE
+    )
+    assert "scales::label_number_auto()" in (
         orchestrator_module.R_REPAIR_EXECUTION_GUIDANCE
     )
     assert "do not force a distant zero" in (

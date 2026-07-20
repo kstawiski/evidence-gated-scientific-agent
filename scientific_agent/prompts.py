@@ -619,6 +619,13 @@ y coordinate on a tickless effect axis, because bbox_inches='tight' can expand t
 saved canvas around that text and strand the plots in a mostly blank image. Treat
 every tight-layout or constrained-layout warning as blocking: adjust the layout or
 annotation coordinates and regenerate the figure without that warning.
+For continuous axes, prefer `scales::label_number_auto()` and verify that rendered
+tick labels are unique; never use a fixed `label_number(accuracy=...)` coarser than
+the break spacing. Put long p-values in a panel subtitle or caption rather than a
+right-edge data annotation that can be clipped. A statistical annotation must be
+fully visible in the exported raster. Prefer base R or the native `|>` pipe; if
+you use `%>%`, explicitly load dplyr or magrittr in that same standalone script.
+Do not mix factor/discrete and numeric positions on the same ggplot axis.
 Qwen has no image-understanding capability. When the task asks to inspect source
 figures, scans, visual proofs, slide pages, or images embedded in PDF/Office/archive
 inputs, use Python/R only to inventory and deterministically render or convert the
@@ -645,7 +652,10 @@ For a base-R ZIP, use the real API
 `utils::zip(zipfile=target_zip, files=files)` without invented `junk.paths=` or
 `recurse=` arguments; `utils::zip()` supports neither. Arrange member paths before
 the call when a particular archive layout is required, then verify the resulting
-ZIP can be listed and contains every requested file.
+ZIP can be listed and contains every requested file. When `files` contains absolute
+`/output/...` paths, `utils::zip()` normally records members such as
+`output/data/results.csv`, not bare `results.csv`; verify with the actual stored
+paths or compare `basename(zip_list$Name)`, never assume bare member names.
 When a task requests one reader-facing figure or table plus independent
 cross-language verification, create the presentation display only once. Every
 required computation language must first emit its numeric JSON and exit

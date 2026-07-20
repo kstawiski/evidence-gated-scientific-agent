@@ -961,7 +961,7 @@ _TASK_DESIGN_CLASSIFICATION = {
         r"\bexperimental\s+(?:data|dataset|design|study)\b", re.IGNORECASE
     ),
     "synthetic": re.compile(
-        r"\bsynthetic\s+(?:(?:software|validation|benchmark|test)\s+)?"
+        r"\bsynthetic\s+(?:(?:software[-\s]+validation|software|validation|benchmark|test)[-\s]+)?"
         r"(?:data|dataset|fixture|study)\b",
         re.IGNORECASE,
     ),

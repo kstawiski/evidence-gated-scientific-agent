@@ -77,9 +77,13 @@ def test_scientific_figure_policy_is_r_first_and_task_specific():
     assert "`agg_png()` uses `res`, not `dpi`" in normalized_researcher
     assert "must never\nuse Python expressions" in RESEARCHER
     assert "`utils::zip()` supports neither" in RESEARCHER
+    assert "compare `basename(zip_list$Name)`" in RESEARCHER
     assert "`2 * stats::pt(abs(t_statistic), df, lower.tail=FALSE)`" in RESEARCHER
     assert "force a far-away null value" in RESEARCHER
     assert "`scales::breaks_pretty(n=4)`" in RESEARCHER
+    assert "`scales::label_number_auto()`" in RESEARCHER
+    assert "right-edge data annotation" in RESEARCHER
+    assert "explicitly load dplyr or magrittr" in RESEARCHER
     assert "`ci[1] < estimate && estimate < ci[2]`" in RESEARCHER
     assert "never\ncall nonexistent `systemfonts::font_add_google()`" in RESEARCHER
     assert "`geom_point(aes(x=estimate, y=metric))`" in RESEARCHER

@@ -72,6 +72,16 @@ def test_scientific_figure_policy_is_r_first_and_task_specific():
     )
     assert "patchwork >= 1.2.0" in normalized_researcher
     assert "ragg for exact-size raster export" in normalized_researcher
+    assert "ragg::agg_png(filename" in normalized_researcher
+    assert "does not export `png()`" in normalized_researcher
+    assert "`agg_png()` uses `res`, not `dpi`" in normalized_researcher
+    assert "Never call `install.packages()`" in normalized_researcher
+    assert "Do not\nfit an equivalent blocked regression" in RESEARCHER
+    assert "`Results.xlsx` and `scientific_report.md` are always" in SIMPLE_PLANNER
+    assert (
+        "explicit two-level paired comparison adds an equivalent blocked regression solely"
+        in " ".join(PLAN_AUDITOR.split())
+    )
     assert "ComplexHeatmap/circlize for omics" in normalized_researcher
     assert "controller generates the standard workbook" in normalized_researcher
     assert "the plotting layer must not choose tests" in normalized_researcher

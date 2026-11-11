@@ -229,3 +229,52 @@ def test_cumulative_model_observation_budget_compacts_later_results(
     assert second["result_compacted"] is True
     assert "result_preview" not in second
     assert Path(second["full_result_artifact"]).is_file()
+
+def test_error_status_does_not_create_retrieval_evidence(tmp_path):
+    gate = policy(tmp_path, preserve_evidence=True)
+
+    class Tool:
+        name = "query-docs"
+
+    # Error status without a separate "error" property previously counted as
+    # a successful retrieval and donated the URL in the failure message.
+    result = gate.after_tool(
+        tool=Tool(),
+        args={"query": "citation"},
+        tool_context=None,
+        tool_response={
+            "status": "error",
+            "message": "Fetch failed: https://1.1.1.1/research-paper",
+        },
+    )
+    assert result is None
+    evidence = gate.retrieval_evidence()
+    assert evidence.successful_calls == 0
+    assert evidence.urls == []
+    assert evidence.tools == []
+    assert evidence.artifacts == []
+    ledger_events = [
+        json.loads(line)
+        for line in (tmp_path / "events.jsonl").read_text().splitlines()
+    ]
+    assert ledger_events[-1]["reported_error"] == "ERROR"
+
+
+def test_success_status_still_records_retrieval(tmp_path):
+    gate = policy(tmp_path, preserve_evidence=True)
+
+    class Tool:
+        name = "query-docs"
+
+    gate.after_tool(
+        tool=Tool(),
+        args={"query": "valid"},
+        tool_context=None,
+        tool_response={
+            "status": "success",
+            "content": "Supported: https://1.1.1.1/research-paper",
+        },
+    )
+    evidence = gate.retrieval_evidence()
+    assert evidence.successful_calls == 1
+    assert evidence.urls == ["https://1.1.1.1/research-paper"]

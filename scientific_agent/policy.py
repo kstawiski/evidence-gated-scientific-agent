@@ -373,13 +373,13 @@ class ToolPolicy:
             self.chrome_ready = True
         encoded = json.dumps(result, sort_keys=True, default=str).encode("utf-8")
         reported_error = result.get("error") if isinstance(result, dict) else None
-        if (
-            not reported_error
-            and isinstance(result, dict)
-            and result.get("status")
-            in {"failed", "timed_out", "cancelled", "policy_denied"}
-        ):
-            reported_error = str(result["status"]).upper()
+        if not reported_error and isinstance(result, dict):
+            status = result.get("status")
+            if isinstance(status, str) and status.strip().lower() in {
+                "error", "failed", "failure", "timed_out", "timeout",
+                "cancelled", "canceled", "policy_denied",
+            }:
+                reported_error = status.strip().upper()
         if not reported_error and len(encoded) > MAX_RESULT_ARTIFACT_BYTES:
             reported_error = "RESULT_TOO_LARGE"
         artifact_error: str | None = None
